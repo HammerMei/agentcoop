@@ -829,6 +829,7 @@ class WatcherManager:
         # against a settled record. Room lock outer, watcher lock inner —
         # nothing takes them reversed.
         async with self._lifecycle.watcher_lock(record.watcher_name):
+            self._park_if_reloading(record.room_id)
             if self._shutting_down:
                 # The inner half of the get_or_create re-check (TOCTOU sweep
                 # after Codex round 4): a wake parked on THIS lock while the

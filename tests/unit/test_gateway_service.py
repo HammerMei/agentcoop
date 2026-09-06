@@ -756,22 +756,13 @@ class TestStartupFdOnCancel(unittest.IsolatedAsyncioTestCase):
     async def test_startup_fd_written_on_cancelled_error(self):
         """_write_startup_signal must be called in finally even after CancelledError."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock
 
-        from gateway.service import GatewayService
 
-        svc = GatewayService.__new__(GatewayService)
-        svc._entries = []
-        svc._control = MagicMock()
+        # The cancellation arrives mid-startup — at the control socket's start.
+        # (The hand-built fixture this test used to carry crashed on a missing
+        # attribute first, so the CancelledError path was never actually taken.)
+        svc = make_bare_gateway_service()
         svc._control.start = AsyncMock(side_effect=asyncio.CancelledError())
-        svc._control.stop = AsyncMock()
-        svc._runtime_manager = MagicMock()
-        svc._runtime_manager.start_all = AsyncMock(return_value=[])
-        svc._runtime_manager.has_active_brokers = False
-        svc._registry = MagicMock()
-        svc._maps = MagicMock()
-        svc._maps.connector_view = MagicMock()
-        svc._expiry_task = None
 
         write_signal_calls: list = []
 
@@ -782,10 +773,8 @@ class TestStartupFdOnCancel(unittest.IsolatedAsyncioTestCase):
             patch("gateway.service._write_startup_signal", side_effect=fake_write_signal),
             patch("gateway.service.ConnectorPermissionNotifier"),
         ):
-            try:
+            with self.assertRaises(asyncio.CancelledError):
                 await svc.run(startup_fd=5)
-            except (asyncio.CancelledError, Exception):
-                pass
 
         fds_written = [fd for fd, _ in write_signal_calls]
         self.assertIn(5, fds_written, "startup_fd must be written/closed in finally on CancelledError")

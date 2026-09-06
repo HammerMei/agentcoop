@@ -228,6 +228,20 @@ class TestAnOfferDuringAReload(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reload is in progress", str(cm.exception))
         lifecycle.start_watcher_in_room.assert_not_called()
 
+    async def test_a_wake_parked_on_the_watcher_lock_parks_too(self):
+        """The inner re-check under the watcher lock: a wake that waited out an
+        idle-drop while a reload quiesced the manager must park like the outer
+        checks, not decline and have its frames remembered."""
+        from gateway.core.watcher_manager import ReloadInProgressError
+        manager, lifecycle, _ = _manager()
+        lifecycle.watcher_lock = lambda name: asyncio.Lock()
+        record = WatcherState(watcher_name="rc:eng-backend", session_id="s1", room_id="r1",
+                              rule_name="eng", config={"name": "rc:eng-backend"})
+        manager.disarm("a config reload is in progress — retry when it finishes")
+        with self.assertRaises(ReloadInProgressError):
+            await manager._recreate(record, _room(), None)
+        lifecycle.start_watcher_in_room.assert_not_called()
+
     async def test_a_shutdown_disarm_still_declines(self):
         manager, lifecycle, _ = _manager()
         manager.disarm()

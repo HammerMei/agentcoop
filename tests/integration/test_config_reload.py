@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from gateway.core.state import load_state
+from gateway.reload_plan import ReloadPlan as ReloadPlanFromDict_
 from tests.helpers import (
     boot_gateway_service,
     gateway_config_text,
@@ -488,6 +489,32 @@ class TestAgentRestartOrdering(_ReloadCase):
         self.assertEqual((await self._rows())["script:script"]["state"], "active",
                          "reported, and still brought back on the new backend")
 
+    async def test_a_kept_connector_whose_reconciliation_raised_still_gets_its_rooms_back(self):
+        await self._boot(self._text(
+            agents={"default": {"type": "claude", "working_directory": str(self.tmp)}}))
+        sm = self.service._session_managers["script"]
+        self._rewrite(self._text(
+            agents={"default": {"type": "claude", "working_directory": str(self.tmp),
+                                "timeout": 99}},
+            rules=[{"name": "w1", "agent": "default", "connector": "script",
+                    "rooms": {"include": ["script"]}, "session_idle_days": 3}]))
+        with patch.object(sm, "reconcile_live", side_effect=RuntimeError("engine broke")):
+            result = await self._reload()
+
+        self.assertEqual(result["exit_code"], 2, result)
+        self.assertIn("engine broke", self.service._entries[0].degraded)
+        self.assertEqual((await self._rows())["script:script"]["state"], "active",
+                         "degraded for the next reload to restart, but running — and its "
+                         "drained room came back")
+
+    async def test_a_dry_run_does_not_retry_leftovers(self):
+        await self._boot()
+        with patch.object(self.service, "_retry_leftovers", new_callable=AsyncMock) as retry:
+            await self._reload(dry_run=True)
+            retry.assert_not_awaited()
+            await self._reload()
+            retry.assert_awaited_once()
+
     async def test_a_kept_lifecycle_learns_which_agents_are_unavailable(self):
         await self._boot()
         sm = self.service._session_managers["script"]
@@ -573,12 +600,32 @@ class TestConnectorChanges(_ReloadCase):
         real_reclaim = sm._lifecycle.reclaim_room
         self._rewrite(self._text())
 
-        with patch.object(sm._lifecycle, "reclaim_room", wraps=real_reclaim) as reclaim:
+        deleted: list[str] = []
+        backend = self.service._agents["default"]
+
+        async def _delete(session_id):
+            deleted.append(session_id)
+            return True
+
+        backend.delete_session = _delete
+        quiesced_at_reclaim: list[bool] = []
+        real_reclaim_all = sm.reclaim_all
+
+        async def _reclaim_all(**kw):
+            quiesced_at_reclaim.append(sm._lifecycle.transitions_disarmed)
+            await real_reclaim_all(**kw)
+
+        with patch.object(sm._lifecycle, "reclaim_room", wraps=real_reclaim) as reclaim, \
+                patch.object(sm, "reclaim_all", side_effect=_reclaim_all):
             result = await self._reload()
 
         self.assertEqual(result["exit_code"], 0, result)
         self.assertEqual(reclaim.await_count, 1, "each record through reclaim_room")
         self.assertEqual(reclaim.await_args.kwargs["reason"], "connector-removed")
+        self.assertEqual(deleted, [], "the backend session is kept, as boot's sweep keeps it — "
+                                      "a state file copied under a new name may still name it")
+        self.assertEqual(quiesced_at_reclaim, [True],
+                         "the going manager is quiesced before its records are walked")
         jobs = await self._dispatch(cmd="schedule-list", include_completed=True)
         self.assertEqual([j["status"] for j in jobs["jobs"]], ["cancelled"], jobs)
         self.assertIn("removed from config.yaml", jobs["jobs"][0]["cancel_reason"])
@@ -832,6 +879,9 @@ class TestConnectorChanges(_ReloadCase):
 
         self.assertFalse(result["ok"])
         self.assertIn("kaboom", result["error"])
+        self.assertEqual(result["exit_code"], 2, "changed things — never the 1 of 'nothing changed'")
+        self.assertTrue(result["degraded"], "the settle's findings travel with the response")
+        self.assertIn("[ERROR] the apply failed part-way", ReloadPlanFromDict_.from_dict(result).render())
         self.assertEqual([e.name for e in self.service._entries], ["script", "second"],
                          "every connector the candidate names has an entry")
         self.assertTrue(self.service._entries[0].degraded,

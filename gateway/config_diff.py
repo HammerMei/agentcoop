@@ -268,9 +268,28 @@ def _redact(value: Any, key: str = "") -> Any:
     return value
 
 
+# The top-level blocks whose immediate keys are entity NAMES, not field names:
+# an agent called `secretary` or a connector called `token-bot` is not a secret.
+_NAMED_BLOCKS = ("agents", "connectors")
+
+
+def _redact_config(data: dict) -> dict:
+    """`_redact` over a canonical config, with entity names exempt from the
+    key test — the marker match applies to field names only."""
+    out = {}
+    for key, value in data.items():
+        if key in _NAMED_BLOCKS and isinstance(value, dict):
+            out[key] = {name: _redact(entity) for name, entity in value.items()}
+        elif key in _NAMED_BLOCKS and isinstance(value, list):
+            out[key] = [_redact(entity) for entity in value]
+        else:
+            out[key] = _redact(value, key)
+    return out
+
+
 def redacted_config(config: GatewayConfig) -> dict:
     """The canonical form with secrets redacted, for `--json` output."""
-    return _redact(canonical(config))
+    return _redact_config(canonical(config))
 
 
 def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:
@@ -299,5 +318,5 @@ def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:
             return
         out.append((prefix, value))
 
-    walk("", _redact(_identity_keyed(config)))
+    walk("", _redact_config(_identity_keyed(config)))
     return out

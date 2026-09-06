@@ -102,11 +102,13 @@ class ReloadPlan:
 
     @property
     def exit_code(self) -> int:
-        """0 applied cleanly or nothing to do; 1 refused or invalid; 2 degraded."""
-        if not self.ok:
-            return 1
+        """0 applied cleanly or nothing to do; 1 refused or invalid (nothing
+        changed); 2 degraded — including an apply that failed part-way, which
+        changed things and is therefore never a 1."""
         if self.degraded:
             return 2
+        if not self.ok:
+            return 1
         return 0
 
     def of(self, action: WatcherAction) -> list[WatcherChange]:
@@ -188,12 +190,15 @@ class ReloadPlan:
         # Severity tags lead every line an operator must not skim past (owner,
         # 2026-09-05): a degraded section is a failed reload, and an untagged
         # line in a block of otherwise routine output is easy to miss.
-        if not self.ok:
+        if not self.ok and not self.has_changes:
+            # A refusal: nothing was planned, nothing changed.
             lines.append(f"[ERROR] {self.error}")
             for f in self.findings:
                 tag = "[ERROR]" if f.get("level") == "error" else "[WARNING]"
                 lines.append(f"  {tag} {f.get('message', '')}")
             return "\n".join(lines)
+        # (`ok` False WITH changes is an apply that failed part-way: the blocks
+        # below show what was planned and what is degraded; the error closes.)
 
         warnings = [f for f in self.findings if f.get("level") == "warning"]
         if warnings:
@@ -243,7 +248,9 @@ class ReloadPlan:
             f"watchers: {len(self.of('restart'))} restart, "
             f"{len(self.of('rematerialize'))} re-materialize, "
             f"{len(self.of('expire'))} expire"])
-        if self.offline:
+        if self.error:
+            lines.append(f"[ERROR] {self.error}")
+        elif self.offline:
             lines.append(f"Record-level plan the next start executes ({counts}); nothing changed.")
         elif self.dry_run:
             lines.append(f"Dry run ({counts}); nothing changed.")

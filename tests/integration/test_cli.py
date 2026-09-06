@@ -1271,6 +1271,30 @@ class TestCLILargeResponses(_ConfigCLIBase):
         self.assertIn("rc:room-599", stdout)
 
 
+class TestCLIReadTimeout(_ConfigCLIBase):
+
+    def test_no_response_in_time_is_exit_two_not_unreachable(self):
+        """The daemon took the request and may still be applying it — neither
+        "nothing changed" (1) nor done (0)."""
+        def _slow(req):
+            time.sleep(1.0)
+            return {"ok": True}
+
+        self._start_daemon({"config-reload": _slow})
+        from gateway.cli import _send_command
+        stderr_buf = io.StringIO()
+        with (
+            patch("gateway.cli.CONTROL_SOCK", self.sock_path),
+            patch("gateway.daemon.is_running", return_value=(True, 99999)),
+            redirect_stderr(stderr_buf),
+        ):
+            with self.assertRaises(SystemExit) as cm:
+                _send_command({"cmd": "config-reload"}, timeout=0.2)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("No response from the daemon", stderr_buf.getvalue())
+        self.assertIn("may still be working", stderr_buf.getvalue())
+
+
 class TestCLIConfigReload(_ConfigCLIBase):
 
     _PLAN = {

@@ -611,6 +611,40 @@ class TestValidateAgreesWithBootOnOrphanedFiles(_ValidateConfigTestBase):
         self.assertIn("could not be parsed", kept[0])
 
 
+class TestOrphanDecisionIsGuardedPerFile(_ValidateConfigTestBase):
+
+    def test_a_second_orphan_in_a_legacy_format_is_a_finding_not_a_traceback(self):
+        cfg = self._write(f"""\
+            connectors:
+              - name: rc
+                type: rocketchat
+                server: {{url: http://localhost:3000, username: bot, password: pw}}
+            agents:
+              default:
+                type: claude
+                working_directory: {self.agent_dir}
+            watcher_rules:
+              - name: w1
+                connector: rc
+                agent: default
+                rooms:
+                  include: [general]
+        """)
+        self.runtime_dir.mkdir()
+        (self.runtime_dir / "state.a.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION,
+            "watchers": [{"watcher_name": "a:x", "session_id": "s", "room_id": "r",
+                          "rule_name": "w", "connector": "a"}]}))
+        (self.runtime_dir / "state.b.json").write_text(json.dumps({
+            "watchers": [{"watcher_name": "b:x", "session_id": "s2", "room_id": "r2"}]}))
+
+        result = self._validate(cfg)  # must not raise
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("state.b.json" in e for e in result.errors), result.errors)
+        self.assertTrue(any("state.a.json" in w for w in result.warnings), result.warnings)
+
+
 class TestValidateConfigLint(_ValidateConfigTestBase):
     def test_lint_survives_a_non_list_watcher_rules(self):
         """`watcher_rules: 5` is a structural error the collector reports while

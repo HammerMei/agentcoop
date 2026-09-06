@@ -73,7 +73,10 @@ Without `--dry-run` and with no daemon, the plan is still printed (it is what
 
 When the daemon **appears** to be running but its socket cannot be reached,
 the command errors out. It never falls back to the offline plan: a daemon in
-that state is the thing to fix first.
+that state is the thing to fix first. A request the daemon *took* but did not
+answer within the client's wait is neither: the CLI says so and exits 2 — the
+daemon may still be applying, and `status` and the log say where it got to.
+A dry run retries nothing — not even the leftovers of an earlier reload.
 
 ### 2.4 Validation first, active config, diff
 
@@ -161,7 +164,11 @@ never one pass per change:
    backends are still alive (backend session deleted where the backend can,
    prompt file and attachment workspace removed, jobs cancelled, one AUDIT
    line each — what boot's orphan sweep cannot do for a file whose connector
-   is gone). Then the going managers shut down; then the processors of every
+   is gone; the backend session itself is KEPT, as boot keeps it — a state
+   file copied under the connector's new name may still name it, see #146).
+   Every manager, the going ones too, is quiesced before that walk, so a wake
+   mid-reclaim cannot mint a watcher and a session the sweep can only unlink.
+   Then the going managers shut down; then the processors of every
    changed *or removed* agent are drained, concurrently, while their backends
    are still alive; then those backends and brokers stop. **Every stop is
    retried** a few times, a few seconds apart (`core.retry_stop`), and that
@@ -223,9 +230,12 @@ same rule holds for a section that fails to *start* at reload.
 If the apply itself raises part-way (a defect — nothing in it raises by
 design), the daemon is left consistent rather than half-swapped: the kept
 managers are re-armed, the scheduler restarted, every connector the candidate
-names — and every one the apply was tearing down — has an entry (the ones it
-lost, marked degraded with the error), and the **previous** config stays
-active. Kept managers may hold half-applied rules or a half-swapped core
+names has an entry (a placeholder for one that never came up is degraded the
+way a failed start is — shut down, disarmed; the scheduler leaves a degraded
+connector's jobs waiting rather than firing into it or cancelling them), and
+the **previous** config stays active. The response is the plan with `ok:
+false`, the error, and the degraded findings — exit 2, because things
+changed; never the 1 that means "nothing changed". Kept managers may hold half-applied rules or a half-swapped core
 config, and nothing short of a restart says which — so they are marked
 degraded too, and the next reload, even of the file put back, restarts them
 whole; `config show` says the file is not applied, and that reload re-diffs
@@ -307,8 +317,10 @@ unredacted values: a rotated secret changes it, which is the point of a
 fingerprint. `config show` prints it with a flattened dump (connectors keyed
 by name so two machines' dumps line up) in which values under a key naming a
 `password`, `token` or `secret` (case-insensitive substring, at any depth) are
-`***`. With the daemon running it also fetches the active digest and warns
-when the file differs — "I edited but forgot to reload" made visible.
+`***` — the whole subtree under such a key, and never an entity *name* that
+happens to contain one (an agent called `secretary` is not a secret). With
+the daemon running it also fetches the active digest and warns when the file
+differs — "I edited but forgot to reload" made visible.
 
 ## 3. What it does and does not guarantee
 

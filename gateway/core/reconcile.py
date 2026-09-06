@@ -204,22 +204,26 @@ def orphan_decisions(configured: Iterable[str]) -> list[OrphanDecision]:
     line saying so. Raises what `load_state` raises on a file this build
     cannot read — a format refusal, which boot's preflight makes first.
     """
-    out: list[OrphanDecision] = []
-    for path, name in orphaned_state_files(configured):
-        records = load_state(name)
-        try:
-            raw = json.loads(path.read_text()).get("watchers")
-        except (OSError, ValueError, AttributeError):
-            raw = None
-        if not isinstance(raw, list):
-            reason = "its records could not be read at all"
-        elif len(raw) != len(records):
-            reason = (f"{len(raw) - len(records)} of its {len(raw)} record(s) could not be "
-                      f"parsed and would be lost without a trace")
-        else:
-            reason = None
-        out.append(OrphanDecision(path, name, records, reason))
-    return out
+    return [orphan_decision_for(path, name) for path, name in orphaned_state_files(configured)]
+
+
+def orphan_decision_for(path: Path, name: str) -> OrphanDecision:
+    """The sweep's decision for ONE orphaned file — so a caller that already
+    walks the files one by one (`config validate`, guarding each load) does
+    not have to load every other orphan to learn about this one."""
+    records = load_state(name)
+    try:
+        raw = json.loads(path.read_text()).get("watchers")
+    except (OSError, ValueError, AttributeError):
+        raw = None
+    if not isinstance(raw, list):
+        reason = "its records could not be read at all"
+    elif len(raw) != len(records):
+        reason = (f"{len(raw) - len(records)} of its {len(raw)} record(s) could not be "
+                  f"parsed and would be lost without a trace")
+    else:
+        reason = None
+    return OrphanDecision(path, name, records, reason)
 
 
 def reconcile_records(

@@ -240,6 +240,19 @@ class TestDigest(unittest.TestCase):
         self.assertNotIn("s3cret", text)
         self.assertNotIn("t0k", text)
 
+    def test_an_entity_named_like_a_secret_is_not_redacted(self):
+        cfg = _config(connectors=[_connector(name="token-bot", token="t0k")],
+                      agents={"secretary": AgentConfig(name="secretary")},
+                      rules=[make_rule(room="eng", name="eng", connector="token-bot",
+                                       agent="secretary")])
+        flat = dict(flatten_config(cfg))
+        self.assertEqual(flat["agents.secretary.type"], "claude")
+        self.assertEqual(flat["connectors.token-bot.type"], "rocketchat")
+        self.assertEqual(flat["connectors.token-bot.raw.server.token"], "***")
+        doc = redacted_config(cfg)
+        self.assertEqual(doc["agents"]["secretary"]["type"], "claude")
+        self.assertEqual(doc["connectors"][0]["raw"]["server"]["token"], "***")
+
     def test_redacted_json_document_is_serializable_and_scrubbed(self):
         cfg = _config(connectors=[_connector(token="t0k")])
         doc = json.dumps(redacted_config(cfg))

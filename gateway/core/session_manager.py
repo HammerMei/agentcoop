@@ -754,16 +754,17 @@ class SessionManager:
     async def reclaim_all(self, *, reason: str, jobs: tuple[str, str]) -> None:
         """Reclaim every record — the removal path's shared tail, per room (#144).
 
-        For a connector `config reload` removes: with the manager and the
-        backends still alive, each record goes through `reclaim_room` (backend
-        session deleted where the backend can, prompt file and attachment
-        workspace removed, one AUDIT line) and its jobs are cancelled — what
-        boot's orphan sweep cannot do for a file whose connector is gone, and
-        what unlinking the file alone would leave behind.
+        For a connector `config reload` removes: with the manager quiesced and
+        the backends still alive, each record goes through `reclaim_room`
+        (prompt file and attachment workspace removed, one AUDIT line) and its
+        jobs are cancelled — what boot's orphan sweep cannot do for a file
+        whose connector is gone. The backend session is KEPT, as boot keeps it:
+        a state file copied under the connector's new name still names it.
         """
         for record in self.records():
             await self._reclaim_removed_room(
-                record.room_id, reason=reason, expected=record, jobs=jobs)
+                record.room_id, reason=reason, expected=record, jobs=jobs,
+                keep_backend_session=True)
 
     async def start_watchers_on_agents(
         self, agents: set[str], *, rooms: Collection[str] = (),
@@ -1129,7 +1130,7 @@ class SessionManager:
 
     async def _reclaim_removed_room(
         self, room_id: str, *, reason: str, jobs: tuple[str, str], expected=None,
-        require_dormant: bool = False,
+        require_dormant: bool = False, keep_backend_session: bool = False,
     ) -> None:
         """The removal path's shared tail: reclaim the record, cancel its jobs.
 
@@ -1140,7 +1141,7 @@ class SessionManager:
         try:
             name = await self._lifecycle.reclaim_room(
                 room_id, reason=reason, expected=expected,
-                require_dormant=require_dormant)
+                require_dormant=require_dormant, keep_backend_session=keep_backend_session)
         except Exception:
             logger.exception(
                 "Membership-removal reclaim failed for room %s — the "

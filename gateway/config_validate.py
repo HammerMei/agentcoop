@@ -52,7 +52,7 @@ from .core.bot_identity import (
     find_identity_conflicts,
 )
 from .core.connector import SUPPORTED_CONNECTOR_TYPES
-from .core.reconcile import orphan_decisions
+from .core.reconcile import orphan_decision_for, orphan_decisions
 from .core.state import (
     DuplicateSessionError,
     StateFormatError,
@@ -500,6 +500,11 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
         file_connector = connector_name_of(path)
         try:
             states = load_state(file_connector)
+            # The sweep's decision for THIS file, inside the same guard: it
+            # loads the file again, and a format refusal must become a finding
+            # here, not a traceback — another orphan's refusal least of all.
+            kept = (orphan_decision_for(path, file_connector).keep_reason
+                    if file_connector not in configured and states else None)
         except StateFormatError as exc:
             msg = str(exc)
             result.errors.append(msg)
@@ -518,8 +523,6 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
             # warning anywhere. Only files that actually carry records are
             # reported; an empty leftover file is noise. What the next start
             # does with the file is the sweep's decision, not restated here.
-            kept = next((d.keep_reason for d in orphan_decisions(configured)
-                         if d.connector == file_connector), None)
             if kept:
                 msg = (
                     f"State file '{path.name}' belongs to connector "

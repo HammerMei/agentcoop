@@ -26,7 +26,7 @@ import asyncio
 import copy
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 try:
     from croniter import croniter  # type: ignore[import-untyped]
@@ -149,10 +149,15 @@ class JobScheduler:
         store: JobStore,
         session_managers: "dict[str, SessionManager]",  # connector_name → SessionManager
         completed_job_ttl_days: int = 7,
+        degraded: "Callable[[str], bool] | None" = None,
     ) -> None:
         self._store = store
         self._session_managers = session_managers
         self._ttl_days = completed_job_ttl_days
+        # Whether a connector is in the mapping but DEGRADED (#144): a reload
+        # could not bring it back. Its jobs are neither cancelled (it is still
+        # configured) nor fired (its manager is not serving); they wait.
+        self._degraded = degraded or (lambda name: False)
 
     @property
     def completed_job_ttl_days(self) -> int:
@@ -382,6 +387,13 @@ class JobScheduler:
             str(job.times) if job.times > 0 else "∞",
         )
 
+        if job.connector and self._degraded(job.connector):
+            logger.warning(
+                "Job %s: connector '%s' is degraded (a config reload could not bring it "
+                "back) — not fired this slot; it fires once the connector is back. "
+                "'agent-chat-gateway status' says what is wrong.", job.id, job.connector,
+            )
+            return job
         if self._connector_is_gone(job):
             # Owner's rule (PR #140): a job whose connector has left the config
             # is not re-homed and not left to fail at every slot — it is

@@ -230,3 +230,31 @@ class TestRendering(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASchedulerLeavesADegradedConnectorsJobsAlone(unittest.IsolatedAsyncioTestCase):
+
+    async def test_a_job_on_a_degraded_connector_is_neither_fired_nor_cancelled(self):
+        from datetime import UTC, datetime
+        from unittest.mock import MagicMock
+
+        from gateway.core.scheduler import JobScheduler
+        from gateway.schedule_types import JobStatus, ScheduledJob
+
+        store = MagicMock()
+        manager = MagicMock()
+        scheduler = JobScheduler(store=store, session_managers={"mm": manager},
+                                 degraded=lambda name: name == "mm")
+        job = ScheduledJob(watcher="mm:general", connector="mm", room_id="r1", message="ping",
+                           cron="0 9 * * *", timezone="UTC", times=0, status=JobStatus.ACTIVE,
+                           created_at="2026-09-05T00:00:00+00:00",
+                           next_run="2026-09-05T09:00:00+00:00")
+        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+            out = await scheduler._fire_once(job, datetime.now(UTC))
+        # `_fire_once` works on a copy stamped with the attempt; what matters is
+        # that the slot was skipped: same next_run, still active, nothing cancelled.
+        self.assertEqual((out.status, out.next_run, out.run_count),
+                         (JobStatus.ACTIVE, job.next_run, 0))
+        store.cancel.assert_not_called()
+        manager.inject_message.assert_not_called()
+        self.assertTrue(any("is degraded" in line for line in logs.output))

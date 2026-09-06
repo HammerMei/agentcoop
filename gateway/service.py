@@ -454,6 +454,7 @@ class GatewayService:
             store=self._job_store,
             session_managers=self._session_managers,
             completed_job_ttl_days=config.scheduler.completed_job_ttl_days,
+            degraded=lambda name: any(e.name == name and e.degraded for e in self._entries),
         )
 
         self._control = ControlServer(
@@ -1052,7 +1053,8 @@ class GatewayService:
                     dry_run=dry_run, findings=findings).to_dict()
             candidate = result.config
             diff = diff_configs(self._config, candidate)
-            await self._retry_leftovers()
+            if not dry_run:
+                await self._retry_leftovers()  # a preview changes nothing, this included
             conflict = self._kept_identity_conflict(diff, candidate)
             if conflict:
                 return ReloadPlan.refused(conflict, dry_run=dry_run, findings=findings).to_dict()
@@ -1071,6 +1073,17 @@ class GatewayService:
                 await self._apply_reload(diff, candidate, plan)
             except _ReloadRefused as e:
                 return ReloadPlan.refused(str(e), dry_run=dry_run, findings=findings).to_dict()
+            except Exception as e:
+                # A defect part-way through. The settle path has already marked
+                # what it could not vouch for degraded; the plan carries that,
+                # says the previous configuration is still the active one, and
+                # exits 2 — not the 1 that means "nothing changed".
+                plan.ok = False
+                plan.error = (f"the apply failed part-way ({e}); the previous configuration "
+                              f"stays active, the sections below are degraded — check the "
+                              f"log and reload again")
+                logger.error("config reload: %s", plan.render().splitlines()[-1])
+                return plan.to_dict()
             plan.applied = True
             logger.info("config reload: %s", plan.render().splitlines()[-1])
             return plan.to_dict()
@@ -1260,7 +1273,11 @@ class GatewayService:
             removed |= live - {c.name for c in candidate.connectors} - removed
             replacing = removed | restarted | (added & live)
             kept = [e for e in self._entries if e.name not in replacing]
-            for e in kept:
+            # Every manager, the going ones too: a removed connector's records
+            # are reclaimed below while its connector is still connected, and a
+            # wake mid-walk would create a watcher and a session the sweep can
+            # only unlink. Its shutdown drains again; drain is idempotent.
+            for e in self._entries:
                 await e.session_manager.quiesce(RELOAD_IN_PROGRESS)
 
             # 3. Stop pass.
@@ -1386,8 +1403,9 @@ class GatewayService:
             # 6. Start what step 3 stopped — wherever its record now points —
             #    and every was-active room of an agent that changed.
             for e in kept:
-                if e.degraded:
-                    continue
+                # A kept manager whose reconciliation raised is degraded (the next
+                # reload restarts it whole) but it IS running, re-armed — its
+                # drained rooms come back like everyone else's.
                 self._report_room_failures(
                     plan, e.name,
                     await e.session_manager.start_watchers_on_agents(
@@ -1440,28 +1458,34 @@ class GatewayService:
     ) -> None:
         """Leave a consistent fleet behind an apply that RAISED (a defect).
 
-        Every existing entry stays tracked (the final shutdown must visit a
-        connector that was mid-teardown); every candidate connector without an
-        entry gets a degraded placeholder. Every entry except the ones known to
-        have started cleanly is degraded with the error — the KEPT ones too,
-        because the apply may have swapped their rules or the shared core
-        config before it raised, and nothing short of a restart says which:
-        `status` shows them, and the next reload — even of the file put back —
-        restarts them whole. The active config is NOT advanced.
+        Every entry still installed stays tracked; every candidate connector
+        without an entry gets a placeholder that is degraded the way a
+        connector that failed to start is — shut down, disarmed, so the
+        scheduler and the verbs leave it alone. Every entry except the ones
+        known to have started cleanly is degraded with the error — the KEPT
+        ones too, because the apply may have swapped their rules or the shared
+        core config before it raised, and nothing short of a restart says
+        which: `status` shows them, and the next reload — even of the file put
+        back — restarts them whole. The active config is NOT advanced.
         """
         by_name = {e.name: e for e in self._entries}
         untouched = set(started)
         fleet: list[ConnectorEntry] = []
+        placeholders: list[ConnectorEntry] = []
         for cc in candidate.connectors:
             entry = by_name.pop(cc.name, None)
             if entry is None:
                 connector = new_connectors.get(cc.name) or connector_factory(cc)
                 entry = self._build_entry(cc, connector, candidate)
+                placeholders.append(entry)
             fleet.append(entry)
         fleet.extend(by_name.values())  # tracked still — being removed, not yet gone
+        why = f"reload failed before this connector was settled: {exc}"
+        for entry in placeholders:
+            await self._degrade(entry, why, plan)
         for entry in fleet:
             if entry.name not in untouched and not entry.degraded:
-                entry.degraded = f"reload failed before this connector was settled: {exc}"
+                entry.degraded = why
                 plan.degraded.append(Degraded("connector", entry.name, entry.degraded))
         self._install_entries(fleet)
         for e in kept:

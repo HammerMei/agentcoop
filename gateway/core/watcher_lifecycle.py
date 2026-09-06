@@ -614,7 +614,9 @@ class WatcherLifecycle:
             )
             return True
 
-    async def _reclaim_record_locked(self, name: str, state: WatcherState) -> None:
+    async def _reclaim_record_locked(
+        self, name: str, state: WatcherState, *, keep_backend_session: bool = False,
+    ) -> None:
         """Reclaim everything a record points at, record popped last (§2.5).
 
         The shared destructive body: expiry calls it after its gates
@@ -709,8 +711,17 @@ class WatcherLifecycle:
         session_id = state.session_id
 
         # 2. The backend session. False means unsupported or unconfirmed —
-        # logged and accepted, per §2.5.
-        if session_id and agent is not None:
+        # logged and accepted, per §2.5. `keep_backend_session` is a connector
+        # REMOVAL at reload (#144): boot's orphan sweep for the same edit
+        # cannot delete sessions and does not, and a state file copied under
+        # the connector's new name still names these ids — deleting them here
+        # would make `reload` lose what `restart` keeps (see #146).
+        if session_id and agent is not None and keep_backend_session:
+            logger.info(
+                "Watcher '%s': backend session %s kept — its connector was removed from "
+                "the config; the id is on the AUDIT line", name, session_id,
+            )
+        elif session_id and agent is not None:
             try:
                 if not await agent.delete_session(session_id):
                     logger.info(
@@ -798,6 +809,7 @@ class WatcherLifecycle:
         self, room_id: str, *, reason: str,
         expected: "WatcherState | None" = None,
         require_dormant: bool = False,
+        keep_backend_session: bool = False,
     ) -> str | None:
         """Forced reclamation of a room's record — not a timer's (§2.7, §4.4).
 
@@ -907,7 +919,8 @@ class WatcherLifecycle:
                         "one (§4.4).",
                         name, room_id, reason,
                     )
-                await self._reclaim_record_locked(name, record)
+                await self._reclaim_record_locked(
+                    name, record, keep_backend_session=keep_backend_session)
                 self.release_session(record, reason)
                 logger.info(
                     "Watcher '%s' reclaimed — %s; re-adding the bot to room "

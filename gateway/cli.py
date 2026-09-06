@@ -394,14 +394,17 @@ def main():
                 if result["ok"]:
                     count = len(result.get("data", []))
                     print(f"Watchers: {count}")
-                # The active configuration (#144): what the daemon loaded and
-                # when, so an operator can tell whether a reload took effect —
-                # and any section a reload could not bring back.
+            except SystemExit:
+                print("Watchers: (unable to query)")
+            # The active configuration (#144): what the daemon loaded and
+            # when, so an operator can tell whether a reload took effect —
+            # and any section a reload could not bring back.
+            try:
                 shown = _send_command({"cmd": "config-show", "include_config": False})
                 if shown.get("ok"):
                     _print_active_config(shown)
             except SystemExit:
-                print("Watchers: (unable to query)")
+                print("Config:   (unable to query)")
         else:
             print("Gateway:  not running")
 
@@ -1687,7 +1690,15 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
 
     try:
         return asyncio.run(_send_command_async(request, timeout=timeout))
-    except (OSError, asyncio.TimeoutError) as exc:
+    except asyncio.TimeoutError:
+        # Before OSError — TimeoutError IS an OSError since 3.11. Not "unreachable":
+        # the daemon took the request and may well still be working on it
+        # (a long reload). Neither "nothing changed" nor "done": exit 2.
+        print(f"[ERROR] No response from the daemon within {timeout:.0f}s (pid={pid}). "
+              f"It may still be working on the request — check 'agent-chat-gateway "
+              f"status' and the log before running it again.", file=sys.stderr)
+        sys.exit(2)
+    except OSError as exc:
         # Deliberately an error and never a silent fallback (#144, story 19): a
         # daemon with a pid but no reachable socket is a state to fix, not to
         # route around.
