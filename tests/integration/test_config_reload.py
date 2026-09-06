@@ -12,6 +12,7 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -1170,6 +1171,41 @@ class TestLeftoversAndReclaimFailures(_ReloadCase):
                         "kept for the next start's sweep, not unlinked as if reclaimed")
         self.assertEqual([e.name for e in self.service._entries], ["script"])
 
+    async def test_an_orphan_file_that_cannot_be_removed_is_a_degraded_finding(self):
+        await self._boot(self._two())
+        self._rewrite(self._text())
+        real_unlink = pathlib.Path.unlink
+
+        def _unlink(self_path, *a, **kw):
+            if self_path.name == "state.second.json":
+                raise OSError("read-only")
+            return real_unlink(self_path, *a, **kw)
+
+        with patch("pathlib.Path.unlink", _unlink):
+            result = await self._reload()
+        self.assertEqual(result["exit_code"], 2, result)
+        self.assertTrue(any("could not be removed" in d["error"] for d in result["degraded"]))
+        self.assertTrue((self.runtime / "state.second.json").exists())
+
+    async def test_agents_rebuilt_by_a_failed_apply_are_restarted_by_the_next_reload(self):
+        await self._boot()
+        sm = self.service._session_managers["script"]
+        self._rewrite(self._text(agents={"default": {
+            "type": "claude", "working_directory": str(self.tmp), "timeout": 99}}))
+        with patch.object(sm, "replace_rules", side_effect=RuntimeError("kaboom")):
+            failed = await self._reload()
+        self.assertTrue(any(d["kind"] == "agent" and "failed part-way" in d["error"]
+                            for d in failed["degraded"]), failed["degraded"])
+        self.assertEqual(self.service._suspect_agents, {"default"})
+
+        self._rewrite(self._text())  # the file put back: no agent diff on its own
+        second = await self._reload()
+        self.assertEqual(second["exit_code"], 0, second)
+        self.assertEqual(second["changes"]["agents"]["changed"], ["default"],
+                         "restarted whatever the diff says")
+        self.assertEqual(self.service._suspect_agents, set())
+        self.assertEqual(self.service._core_config.agent_config("default").timeout, 360)
+
     async def test_a_removed_agents_stuck_backend_is_described_as_removed(self):
         await self._boot(self._text(
             agents={"default": {"type": "claude", "working_directory": str(self.tmp)},
@@ -1261,7 +1297,30 @@ class TestMembershipRemovalDuringReload(_ReloadCase):
             self.assertEqual(reclaimed, [], "deferred, not dropped, not acted on yet")
             await sm.rearm()
         self.assertEqual(reclaimed, ["script"])
-        self.assertEqual(sm._deferred_removals, [])
+        self.assertEqual(sm._deferred_membership, [])
+
+    async def test_a_room_left_and_rejoined_while_quiesced_is_not_reclaimed(self):
+        await self._boot()
+        sm = self.service._session_managers["script"]
+        reclaimed: list[str] = []
+        registered: list[str] = []
+
+        async def _reclaim(room_id, **kw):
+            reclaimed.append(room_id)
+
+        async def _register(room):
+            registered.append(room.id)
+
+        from gateway.core.watcher_manager import RoomRef
+        from gateway.core.watcher_rule import RoomKind
+        with patch.object(sm, "_reclaim_removed_room", side_effect=_reclaim), \
+                patch.object(sm._watcher_manager, "register_on_join", side_effect=_register):
+            await sm.quiesce("a config reload is in progress")
+            await sm._on_membership_removed("ops")
+            await sm._on_membership_added(RoomRef(id="ops", kind=RoomKind.CHANNEL, name="ops"))
+            await sm.rearm()
+        self.assertEqual(reclaimed, ["ops"], "the removal replays…")
+        self.assertEqual(registered, ["ops"], "…and so does the re-add, after it, in order")
 
 
 class TestApplyIsQuiescent(_ReloadCase):

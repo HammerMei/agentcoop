@@ -557,7 +557,7 @@ def make_bare_session_manager(**attrs):
     mgr._lifecycle = MagicMock()
     mgr._lifecycle.sync_watchers = AsyncMock(return_value=[])
     mgr._lifecycle.stop_all = AsyncMock()
-    mgr._deferred_removals = []
+    mgr._deferred_membership = []
     mgr._quiesced = False
     mgr._lifecycle.drain_verbs = AsyncMock()
     mgr._lifecycle.pause_watcher = AsyncMock()

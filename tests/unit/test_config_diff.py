@@ -212,6 +212,12 @@ class TestDigest(unittest.TestCase):
         self.assertNotEqual(config_digest(as_date), config_digest(forged),
                             "every leaf carries its type outside the value space")
 
+    def test_an_integer_key_and_its_quoted_spelling_digest_differently(self):
+        a = _config(connectors=[_connector(ports={1: "x"})])
+        b = _config(connectors=[_connector(ports={"1": "x"})])
+        self.assertTrue(diff_configs(a, b))
+        self.assertNotEqual(config_digest(a), config_digest(b))
+
     def test_the_dump_and_the_json_show_plain_values(self):
         cfg = _config()
         flat = dict(flatten_config(cfg))

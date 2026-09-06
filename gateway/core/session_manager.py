@@ -168,12 +168,12 @@ class SessionManager:
         # connect (`settle_records`); `sync_only` runs them itself when nothing
         # did — `run_once` and the tests boot a manager on its own.
         self._records_settled = False
-        # Bot-membership removals that arrived while a reload had this manager
-        # quiesced (#144): replayed on `rearm`, because the sweep's membership
-        # reconciliation covers paused and idle records only — an ACTIVE
-        # watcher removed from its room mid-reload would otherwise keep its
-        # session and its jobs indefinitely.
-        self._deferred_removals: list[str] = []
+        # Bot-membership events that arrived while a reload had this manager
+        # quiesced (#144): replayed on `rearm`, in order, because the sweep's
+        # membership reconciliation covers paused and idle records only — an
+        # ACTIVE watcher removed from its room mid-reload would otherwise keep
+        # its session and its jobs indefinitely.
+        self._deferred_membership: list[tuple[str, object]] = []  # ("added"|"removed", ref)
         self._quiesced = False
 
     # ── Main entry point ──────────────────────────────────────────────────────
@@ -530,7 +530,8 @@ class SessionManager:
         }
 
     async def settle_records(
-        self, unavailable_agents: set[str] | None = None
+        self, unavailable_agents: set[str] | None = None, *,
+        report_expiry_failures: bool = False,
     ) -> list[str]:
         """Hydrate and reconcile this connector's records — boot's "reload" (§2.4).
 
@@ -541,13 +542,18 @@ class SessionManager:
         needs the network: the plan is pure, re-materialization is an in-memory
         rewrite plus a save, and an expiry's connector step (unsubscribe) is a
         no-op for a room nothing has subscribed yet. Idempotent per boot.
+
+        Returns the hydration's startup errors — or, with
+        `report_expiry_failures` (a reload settling a new connector), the
+        watchers the reconciliation could not expire: boot logs those and
+        moves on, a reload must not report a clean apply over them.
         """
         if self._records_settled:
             return []
         errors = await self._lifecycle.sync_watchers(unavailable_agents=unavailable_agents)
-        await self._reconcile_records()
+        _rewritten, not_expired = await self._reconcile_records()
         self._records_settled = True
-        return errors
+        return not_expired if report_expiry_failures else errors
 
     async def _reconcile_records(self) -> tuple[list[str], list[str]]:
         """Run the current rules over every hydrated record (§2.4, #143).
@@ -662,9 +668,15 @@ class SessionManager:
         self._quiesced = False
         if self._sweep is not None:
             self._sweep.start()
-        deferred, self._deferred_removals = self._deferred_removals, []
-        for room_id in deferred:
-            await self._on_membership_removed(room_id)
+        # Both sides of a membership transition, in arrival order: a room the
+        # bot left and rejoined during the window ends up registered, not
+        # reclaimed — replaying removals alone would reclaim a valid room.
+        deferred, self._deferred_membership = self._deferred_membership, []
+        for kind, ref in deferred:
+            if kind == "added":
+                await self._on_membership_added(ref)
+            else:
+                await self._on_membership_removed(ref)
 
     async def reconcile_live(self) -> tuple[list[str], list[str]]:
         """Reconcile a RUNNING fleet against the rules just installed (#144).
@@ -1100,7 +1112,11 @@ class SessionManager:
         re-discovered by the room's first message, which is the safety net
         membership registration supplements and never replaces.
         """
-        if self._watcher_manager is None or self._watcher_manager.disarmed:
+        if self._watcher_manager is None:
+            return
+        if self._watcher_manager.disarmed:
+            if self._quiesced:
+                self._deferred_membership.append(("added", room))  # a reload; replayed on rearm
             return
         try:
             await self._watcher_manager.register_on_join(room)
@@ -1123,7 +1139,7 @@ class SessionManager:
             return
         if self._watcher_manager.disarmed:
             if self._quiesced:
-                self._deferred_removals.append(room_id)  # a reload; replayed on rearm
+                self._deferred_membership.append(("removed", room_id))  # replayed on rearm
             return
         # Counted in the shutdown barrier (Codex round 10): a removal past
         # the gate above but parked on the watcher lock or mid-reclaim was

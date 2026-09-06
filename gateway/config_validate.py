@@ -503,8 +503,9 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
             # The sweep's decision for THIS file, inside the same guard: it
             # loads the file again, and a format refusal must become a finding
             # here, not a traceback — another orphan's refusal least of all.
-            kept = (orphan_decision_for(path, file_connector).keep_reason
-                    if file_connector not in configured and states else None)
+            decision = (orphan_decision_for(path, file_connector)
+                        if file_connector not in configured else None)
+            kept = decision.keep_reason if decision else None
         except StateFormatError as exc:
             msg = str(exc)
             result.errors.append(msg)
@@ -515,7 +516,7 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
         except Exception:
             # Handled inside load_state by starting fresh; nothing to report.
             continue
-        if file_connector not in configured and states:
+        if decision and (states or kept):
             # A state file whose connector was renamed or removed (Codex round
             # 4): its records are valid but no SessionManager will ever
             # hydrate them — the loop below iterates configured connectors

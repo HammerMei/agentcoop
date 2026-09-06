@@ -211,7 +211,12 @@ def canonical(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: canonical(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, dict):
-        return {str(k): canonical(v) for k, v in value.items()}
+        # Keys typed too: YAML allows `1:` and `'1':` in an open `raw` block,
+        # and they are different dicts to the diff. A string key keeps its
+        # spelling; any other key is `<type>:<repr>`, which no string key can
+        # spell without the type prefix reading as part of the string.
+        return {(k if isinstance(k, str) else f"{type(k).__name__}:{k!r}"): canonical(v)
+                for k, v in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
         items = [canonical(v) for v in value]
         return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items

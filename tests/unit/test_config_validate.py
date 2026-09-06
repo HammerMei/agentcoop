@@ -645,6 +645,37 @@ class TestOrphanDecisionIsGuardedPerFile(_ValidateConfigTestBase):
         self.assertTrue(any("state.a.json" in w for w in result.warnings), result.warnings)
 
 
+class TestAnOrphanWithOnlyUnreadableRecordsStillWarns(_ValidateConfigTestBase):
+
+    def test_zero_readable_records_is_not_an_empty_file(self):
+        cfg = self._write(f"""\
+            connectors:
+              - name: rc
+                type: rocketchat
+                server: {{url: http://localhost:3000, username: bot, password: pw}}
+            agents:
+              default:
+                type: claude
+                working_directory: {self.agent_dir}
+            watcher_rules:
+              - name: w1
+                connector: rc
+                agent: default
+                rooms:
+                  include: [general]
+        """)
+        self.runtime_dir.mkdir()
+        (self.runtime_dir / "state.old.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION,
+            "watchers": [{"watcher_name": "old:x", "session_id": "s", "room_id": "r",
+                          "paused": "yes please"}]}))  # unparseable: paused is not a bool
+        result = self._validate(cfg)
+        self.assertTrue(result.ok)
+        kept = [w for w in result.warnings if "state.old.json" in w]
+        self.assertEqual(len(kept), 1, result.warnings)
+        self.assertIn("KEEP", kept[0])
+
+
 class TestValidateConfigLint(_ValidateConfigTestBase):
     def test_lint_survives_a_non_list_watcher_rules(self):
         """`watcher_rules: 5` is a structural error the collector reports while

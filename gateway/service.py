@@ -380,6 +380,10 @@ class GatewayService:
         # Why each unavailable agent is unavailable — the start error, kept so
         # `status` can say more than "failed to start".
         self._agent_errors: dict[str, str] = {}
+        # Agents a reload rebuilt before it failed part-way (#144): their runtime
+        # may not match the config `status` reports, so the next reload restarts
+        # them whole, whatever the diff says.
+        self._suspect_agents: set[str] = set()
         # Connector instances a reload replaced but could not shut down (#144):
         # `(entry, error)`. Only ever DISCONNECTED again — at the next reload
         # and at shutdown — never saved again: their records belong to the
@@ -691,7 +695,7 @@ class GatewayService:
             )
         return identities
 
-    def _reclaim_orphaned_state_files(self, configured: set[str]) -> None:
+    def _reclaim_orphaned_state_files(self, configured: set[str]) -> list[str]:
         """Remove state files of connectors that are no longer configured (#143).
 
         Nothing opens `state.<name>.json` for a connector `config.yaml` no longer
@@ -705,7 +709,9 @@ class GatewayService:
         """
         # The decision is `orphan_decisions`' (format already preflighted in
         # __init__); this method only carries it out, so `config validate` can
-        # predict the same outcome without a second copy of the rule.
+        # predict the same outcome without a second copy of the rule. Returns
+        # one message per file it could not remove — a reload reports them.
+        not_removed: list[str] = []
         for decision in orphan_decisions(configured):
             path, name, records = decision.path, decision.connector, decision.records
             if decision.keep_reason:
@@ -726,6 +732,9 @@ class GatewayService:
                     "connector '%s' remain until the next start): %s",
                     path, len(records), name, exc,
                 )
+                not_removed.append(
+                    f"state file {path.name} (connector '{name}', {len(records)} record(s)) "
+                    f"could not be removed: {exc}")
                 continue
             for record in records:
                 log_session_released(
@@ -742,6 +751,7 @@ class GatewayService:
                 "Removed state file %s — connector '%s' is no longer configured; "
                 "its %d record(s) are logged above", path.name, name, len(records),
             )
+        return not_removed
 
     async def run(self, startup_fd: int = -1) -> None:
         """Connect all connectors, start unified control socket, block until cancelled.
@@ -1005,6 +1015,10 @@ class GatewayService:
             ] + [
                 Degraded("agent", name, self._agent_errors.get(name, "failed to start")).to_dict()
                 for name in sorted(self._runtime_manager.unavailable_agents)
+            ] + [
+                Degraded("agent", name, "rebuilt by an apply that failed part-way; the next "
+                         "reload restarts it").to_dict()
+                for name in sorted(self._suspect_agents)
             ] + [d.to_dict() for d in self._leftover_findings()],
         }
         if include_config:
@@ -1164,7 +1178,7 @@ class GatewayService:
                     and e.name not in diff.connectors.changed
                     and e.name not in diff.connectors.added):
                 diff.connectors.changed.append(e.name)
-        for name in sorted(self._runtime_manager.unavailable_agents):
+        for name in sorted(self._runtime_manager.unavailable_agents | self._suspect_agents):
             if name in candidate.agents and name not in diff.agents.changed:
                 diff.agents.changed.append(name)
 
@@ -1326,7 +1340,9 @@ class GatewayService:
             #    the session, prompt-file and attachment cleanup.
             stopping_agents = changed_agents | removed_agents
             if stopping_agents:
-                for e in kept:
+                # Kept AND restarted connectors: a restarted one's replacement
+                # settles its records only after the old backend is gone.
+                for e in [e for e in self._entries if e.name not in removed]:
                     by_room = {r.room_id: r for r in e.session_manager.records()}
                     early = [w.room_id for w in plan.watchers
                              if w.connector == e.name and w.action == "expire"
@@ -1378,8 +1394,10 @@ class GatewayService:
                     f"{err}; {outcome}; the old one is stopped again at the next reload "
                     f"and at shutdown — check the process now"))
             self._install_entries(kept)
-            self._reclaim_orphaned_state_files(
-                {c.name for c in candidate.connectors} | unswept)
+            for msg in self._reclaim_orphaned_state_files(
+                    {c.name for c in candidate.connectors} | unswept):
+                plan.degraded.append(Degraded("connector", msg.split("'")[1],
+                                              f"{msg} — check the file and the log now"))
 
             # 4. Rebuild.
             for name in removed_agents:
@@ -1462,6 +1480,7 @@ class GatewayService:
             self._config = candidate
             self._config_digest = plan.digest
             self._config_loaded_at = now_iso()
+            self._suspect_agents.clear()
         except BaseException as exc:
             # A DEFECT in the apply (nothing above raises by design) must not
             # leave the daemon wedged or lying. What is running keeps running
@@ -1472,6 +1491,15 @@ class GatewayService:
             # file is not applied and the next reload re-diffs everything. The
             # error itself goes back to the operator.
             logger.exception("config reload: apply failed part-way — re-arming what is running")
+            # The agents this apply rebuilt may be running the candidate's
+            # definition while the previous config stays active; the next
+            # reload restarts them whatever the file says.
+            self._suspect_agents |= set(new_backends)
+            for name in sorted(new_backends):
+                plan.degraded.append(Degraded(
+                    "agent", name,
+                    f"rebuilt by an apply that then failed ({exc}); its runtime may not match "
+                    f"the active configuration — the next reload restarts it"))
             await self._settle_after_failed_apply(
                 candidate, kept, started, new_connectors, plan, exc)
             raise
@@ -1549,7 +1577,12 @@ class GatewayService:
         started: set[str] = set()
 
         async def _settle_and_connect(e: ConnectorEntry) -> None:
-            await e.session_manager.settle_records(unavailable_agents=unavailable)
+            not_expired = await e.session_manager.settle_records(
+                unavailable_agents=unavailable, report_expiry_failures=True)
+            self._report_room_failures(plan, e.name, [
+                f"Connector '{e.name}': watcher '{name}' could not be expired while settling "
+                f"— its record is still installed and no rule covers its room; "
+                f"'expire {name}' by hand" for name in not_expired])
             await e.session_manager.connect_only()
 
         # Concurrently, as boot's `_settle` phases are: several slow logins
