@@ -1135,11 +1135,13 @@ class GatewayService:
                 continue
             if e.name not in diff.connectors.changed and e.name not in diff.connectors.added:
                 diff.connectors.changed.append(e.name)
-            notes.append(f"connector '{e.name}' is degraded ({e.degraded}) — retried")
+            notes.append(f"connector '{e.name}' was degraded before this reload ({e.degraded}) "
+                         f"— retried by it (see the Degraded block if it is still failing)")
         for name in sorted(self._runtime_manager.unavailable_agents):
             if name in candidate.agents and name not in diff.agents.changed:
                 diff.agents.changed.append(name)
-                notes.append(f"agent '{name}' is unavailable — retried")
+                notes.append(f"agent '{name}' was unavailable before this reload — retried by it "
+                             f"(see the Degraded block if it is still failing)")
         return notes
 
     def _plan_reload(

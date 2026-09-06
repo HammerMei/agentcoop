@@ -208,6 +208,13 @@ class TestRendering(unittest.TestCase):
         self.assertIn("connector 'rc': refused", text)
         self.assertIn("1 degraded section", text)
 
+    def test_the_closing_line_counts_connectors_and_agents_not_only_watchers(self):
+        """A degraded connector that comes back has no resident watcher to list;
+        '0 restart' alone read as 'nothing happened'."""
+        plan = self._plan(dry_run=False, applied=True,
+                          connectors=EntityChanges(changed=["mm"]))
+        self.assertIn("Applied (1 connector(s) restarted; watchers: 0 restart", plan.render())
+
     def test_offline_render_marks_restarts_as_not_applicable(self):
         plan = self._plan(offline=True, connectors=EntityChanges(removed=["ghost"]))
         text = plan.render()

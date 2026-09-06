@@ -228,9 +228,18 @@ class ReloadPlan:
             for d in self.degraded:
                 lines.append(f"  {d.kind} '{d.name}': {d.error}")
 
-        counts = (f"{len(self.of('restart'))} restart, "
-                  f"{len(self.of('rematerialize'))} re-materialize, "
-                  f"{len(self.of('expire'))} expire")
+        # Two levels, both named: a degraded connector that comes back has no
+        # resident watcher to list, so "0 restart" alone read as "nothing
+        # happened" to an operator who had just watched it reconnect.
+        sections = []
+        if self.connectors.changed:
+            sections.append(f"{len(self.connectors.changed)} connector(s) restarted")
+        if self.agents.changed:
+            sections.append(f"{len(self.agents.changed)} agent(s) restarted")
+        counts = "; ".join(sections + [
+            f"watchers: {len(self.of('restart'))} restart, "
+            f"{len(self.of('rematerialize'))} re-materialize, "
+            f"{len(self.of('expire'))} expire"])
         if self.offline:
             lines.append(f"Record-level plan the next start executes ({counts}); nothing changed.")
         elif self.dry_run:
