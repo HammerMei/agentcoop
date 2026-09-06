@@ -196,6 +196,34 @@ class RoomPattern:
     def __eq__(self, other: object) -> bool:
         return isinstance(other, RoomPattern) and self._tokens == other._tokens
 
+    def canonical(self) -> str:
+        """The pattern re-spelled from its tokens — one spelling per language.
+
+        `==` compares tokens, so `*` and `**`, or a name and its NFC form, are
+        the same pattern; a fingerprint of a config must agree with that, or
+        a rewrite to an equivalent spelling reads as "no changes" to the diff
+        and "differs" to the digest, forever (#144). Deterministic across
+        processes, unlike `hash()`; `raw` stays what an operator sees.
+        """
+        out = []
+        for t in self._tokens:
+            if t.kind is _Kind.LITERAL:
+                out.append(t.char)
+            elif t.kind is _Kind.ANY_ONE:
+                out.append("?")
+            elif t.kind is _Kind.ANY_RUN:
+                out.append("*")
+            else:
+                # Members as comma-separated code points: the body holds only hex
+                # digits and commas, so the first `]` closes the class and a
+                # member `]`, `!` or `^` can never be misread (`[]=]` vs `[=]]`,
+                # `[a!]` vs `[!a]`). A literal `[` cannot occur (it always opens a
+                # class), so `[` unambiguously starts a class token. Not a valid
+                # glob — this is a fingerprint, `raw` is for reading.
+                body = ",".join(format(ord(c), "x") for c in sorted(t.members))
+                out.append("[" + ("!" if t.negated else "=") + body + "]")
+        return "".join(out)
+
     def __hash__(self) -> int:
         return hash(self._tokens)
 

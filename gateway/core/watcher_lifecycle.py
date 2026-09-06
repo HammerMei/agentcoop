@@ -45,6 +45,9 @@ from .watcher_manager import config_from_record
 
 logger = logging.getLogger("agent-chat-gateway.core.watcher_lifecycle")
 
+# The default reason a disarmed lifecycle gives a refused transition.
+_SHUTTING_DOWN = "the gateway is shutting down"
+
 
 def _should_restore_watermark(stored: str, live: str | None) -> bool:
     """Whether a watcher's persisted watermark may be written into the connector.
@@ -143,6 +146,9 @@ class WatcherLifecycle:
         # discipline: increment in the same synchronous segment as the entry
         # disarm check; drain waits the in-flight verbs out.
         self._disarmed = False
+        # Why transitions are refused while `_disarmed` — shutdown by default;
+        # `config reload` disarms for its apply window and says so instead.
+        self._disarm_reason = _SHUTTING_DOWN
         self._verb_inflight = 0
         self._verbs_drained = asyncio.Event()
         self._verbs_drained.set()
@@ -156,18 +162,59 @@ class WatcherLifecycle:
         verb — reads one flag set at one instant."""
         return self._disarmed
 
-    def disarm_transitions(self) -> None:
+    @property
+    def disarm_reason(self) -> str:
+        return self._disarm_reason
+
+    @property
+    def disarmed_for_reload(self) -> bool:
+        """Disarmed by a `config reload`, not by shutdown (#144). The manager
+        reads this to make a room offer PARK (retryable) rather than decline:
+        the daemon is coming back, and a declined offer remembers ids the
+        next wake's replay could never recover."""
+        return self._disarmed and self._disarm_reason != _SHUTTING_DOWN
+
+    @property
+    def blocked_agents(self) -> set[str]:
+        """The agents `_ensure_agent_available` refuses — unavailable since boot,
+        or since the last reload rewrote the set."""
+        return set(self._blocked_agents)
+
+    def set_blocked_agents(self, names: set[str]) -> None:
+        """Replace the unavailable-agent set after a reload changed it (#144).
+
+        Boot writes it once in `sync_watchers`; a reload that rebuilt an agent
+        — successfully or not — must push the new answer to every lifecycle it
+        kept, or `_ensure_agent_available` judges by a boot-time set in both
+        directions: starting on a backend that never came up, or refusing one
+        that is fine now."""
+        self._blocked_agents = set(names)
+
+    def disarm_transitions(self, reason: str = _SHUTTING_DOWN) -> None:
         """Set the single flag. Refuses NEW transitions everywhere at once;
         the two drains (the manager's episodes, this class's verbs) then wait
-        out what is already in flight."""
+        out what is already in flight. `reason` is what a refused caller is
+        told — shutdown, or a config reload's apply window (#144)."""
         self._disarmed = True
+        self._disarm_reason = reason
+
+    def rearm_transitions(self) -> None:
+        """Lift the disarm once a reload's apply window closes (#144).
+
+        Disarm was a one-way shutdown flag until reload needed to still a
+        LIVE manager — rule-only changes leave the manager in place, and its
+        processors must be restartable and its rooms wakeable afterwards.
+        Shutdown never calls this; nothing is re-armed after a drain that
+        precedes `stop_all`.
+        """
+        self._disarmed = False
+        self._disarm_reason = _SHUTTING_DOWN
 
     def _enter_verb(self, verb: str, name: str) -> None:
         """MUST run in the same synchronous segment as the disarm check."""
         if self._disarmed:
             raise RuntimeError(
-                f"Cannot {verb} watcher '{name}' — the gateway is shutting "
-                f"down."
+                f"Cannot {verb} watcher '{name}' — {self._disarm_reason}."
             )
         self._verb_inflight += 1
         self._verbs_drained.clear()
@@ -567,7 +614,9 @@ class WatcherLifecycle:
             )
             return True
 
-    async def _reclaim_record_locked(self, name: str, state: WatcherState) -> None:
+    async def _reclaim_record_locked(
+        self, name: str, state: WatcherState, *, keep_backend_session: bool = False,
+    ) -> None:
         """Reclaim everything a record points at, record popped last (§2.5).
 
         The shared destructive body: expiry calls it after its gates
@@ -662,8 +711,17 @@ class WatcherLifecycle:
         session_id = state.session_id
 
         # 2. The backend session. False means unsupported or unconfirmed —
-        # logged and accepted, per §2.5.
-        if session_id and agent is not None:
+        # logged and accepted, per §2.5. `keep_backend_session` is a connector
+        # REMOVAL at reload (#144): boot's orphan sweep for the same edit
+        # cannot delete sessions and does not, and a state file copied under
+        # the connector's new name still names these ids — deleting them here
+        # would make `reload` lose what `restart` keeps (see #146).
+        if session_id and agent is not None and keep_backend_session:
+            logger.info(
+                "Watcher '%s': backend session %s kept — its connector was removed from "
+                "the config; the id is on the AUDIT line", name, session_id,
+            )
+        elif session_id and agent is not None:
             try:
                 if not await agent.delete_session(session_id):
                     logger.info(
@@ -751,6 +809,7 @@ class WatcherLifecycle:
         self, room_id: str, *, reason: str,
         expected: "WatcherState | None" = None,
         require_dormant: bool = False,
+        keep_backend_session: bool = False,
     ) -> str | None:
         """Forced reclamation of a room's record — not a timer's (§2.7, §4.4).
 
@@ -860,7 +919,8 @@ class WatcherLifecycle:
                         "one (§4.4).",
                         name, room_id, reason,
                     )
-                await self._reclaim_record_locked(name, record)
+                await self._reclaim_record_locked(
+                    name, record, keep_backend_session=keep_backend_session)
                 self.release_session(record, reason)
                 logger.info(
                     "Watcher '%s' reclaimed — %s; re-adding the bot to room "
@@ -894,8 +954,7 @@ class WatcherLifecycle:
         # record the shutdown never persisted consistently.
         if self._disarmed:
             raise RuntimeError(
-                f"Cannot register watcher '{wc.name}' — the gateway is "
-                f"shutting down."
+                f"Cannot register watcher '{wc.name}' — {self._disarm_reason}."
             )
         # The same-name/different-room refusal, at the SECOND install site
         # (Codex round 7): the caller established no record exists for this
@@ -1039,6 +1098,78 @@ class WatcherLifecycle:
             type=record.room_kind or record.room_type,
         )
         await self.start_watcher_in_room(wc, record, room, provenance=carried)
+
+    # ── Reload's processor moves (#144) — by ROOM ID, like every runtime path ──
+
+    async def stop_resident(self, room_id: str) -> bool:
+        """Stop a room's running processor, record kept as it is (#144).
+
+        The first half of a reload's agent restart: the processor is drained
+        while its backend is still alive, THEN the backend stops. Returns
+        False, doing nothing, when the room has no record or no processor.
+        """
+        record = self._states.get(room_id)
+        if record is None or self._processors.get(room_id) is None:
+            return False
+        async with self._get_watcher_lock(record.watcher_name):
+            if self._states.get(room_id) is not record or self._processors.get(room_id) is None:
+                return False
+            await self._stop_processor(record.watcher_name)
+            self._state_store.save(self._by_name())
+            return True
+
+    async def start_from_record(self, room_id: str) -> bool:
+        """Start a room's watcher from its record, session kept (#144).
+
+        The second half of a reload's agent restart, and the whole of a
+        re-materialized record's restart once its processor is stopped.
+        Everything the record holds survives — session, watermark, `paused`,
+        both clocks (`carried_fields`) — and unlike `resume` nothing is
+        restamped: a restart is residency, not activity. Returns False for a
+        room with no record (expired meanwhile) or one already resident.
+        """
+        record = self._states.get(room_id)
+        if record is None:
+            return False
+        async with self._get_watcher_lock(record.watcher_name):
+            record = self._states.get(room_id)
+            if record is None or self._processors.get(room_id) is not None:
+                return False
+            return await self._start_record_locked(record)
+
+    async def restart_resident(self, room_id: str) -> bool:
+        """Stop and start a RUNNING watcher from its record, session kept (#144).
+
+        What `config reload` does to a resident processor whose record was
+        just re-materialized: the processor was built from the old
+        materialized config, and nothing short of a stop + start replaces it.
+        Returns False, doing nothing, for a room with no processor (an idle
+        room reads the new record on its next wake) or no record at all.
+        """
+        record = self._states.get(room_id)
+        if record is None or self._processors.get(room_id) is None:
+            return False
+        async with self._get_watcher_lock(record.watcher_name):
+            if self._states.get(room_id) is not record or self._processors.get(room_id) is None:
+                return False
+            await self._stop_processor(record.watcher_name)
+            return await self._start_record_locked(record)
+
+    async def _start_record_locked(self, record: WatcherState) -> bool:
+        """Caller holds the watcher lock and has established no processor."""
+        wc = config_from_record(record)
+        if wc is None:
+            return False
+        self._ensure_agent_available(wc)
+        room = Room(
+            id=record.room_id,
+            name=record.room_name or record.watcher_name,
+            type=record.room_kind or record.room_type,
+        )
+        await self.start_watcher_in_room(wc, record, room, provenance=carried_fields(record))
+        self._state_store.save(self._by_name())
+        logger.info("Watcher '%s' restarted", record.watcher_name)
+        return True
 
     async def reset_watcher(self, name: str) -> None:
         """Reset a watcher: clear session and restart with fresh state.

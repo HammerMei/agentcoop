@@ -857,7 +857,9 @@ rule edits, and it keeps this pass free of connector calls.
 
 Boot has no operator to ask, so it applies the plan and logs it — one summary
 line, plus one line per record that changed. The preview is `config reload
---dry-run` (next increment), which renders the same plan without acting.
+--dry-run`, which renders the same plan without acting (with the daemon
+stopped it is computed from the state files and IS the next boot's plan —
+`docs/design/config-reload-design.md`).
 This is affordable because a lost session is recoverable in practice: the
 platform keeps every message in the room, and history handoff re-feeds recent
 context on the next session. Whether the *backend* still has the session is
@@ -939,11 +941,12 @@ session at risk. Three reasons this is a decision and not a gap:
 * **It has an operator remedy that needs no code.** A deployment that expects
   long outages raises `session_expire_days`; the setting is per rule, so it can
   be raised only where the sessions are worth keeping. Note the prerequisite:
-  a watcher reads the **frozen** rule it was created against (below), so until
-  config reload exists the raised value applies to watchers created after the
-  change. That suits the case — an operator who knows their environment has
-  long outages sets it up front — but it is prophylactic, not a repair applied
-  after the fact.
+  a watcher reads the **frozen** rule it was created against (below), so the
+  raised value reaches existing watchers at the next reconciliation — a
+  `config reload` or the next start — and watchers created after the change
+  read it at once. That suits the case — an operator who knows their
+  environment has long outages sets it up front — but it is prophylactic, not
+  a repair applied after the fact.
 * **The automatic version is not cheap.** Crediting the outage back means
   persisting a heartbeat and subtracting the downtime when a TTL is evaluated —
   and a single global downtime figure does not compose across repeated
@@ -1900,9 +1903,11 @@ on-disk records persist, and boot then eagerly starts every room ever seen.
   cannot steal a running room or override a pause mid-flight. At boot (and at
   `config reload`) every record is reconciled against the current rules
   (§2.4): re-materialized where its rule changed or a different rule now wins
-  its room, expired where no rule covers it. An operator who wants a rebind
-  *now*, without a restart, still has `expire`, at the cost of that room's
-  conversational continuity — until `config reload` lands.
+  its room, expired where no rule covers it. `config reload` runs that
+  reconciliation on the live fleet and restarts only the connectors and
+  agents whose definition changed — `docs/design/config-reload-design.md`
+  records how, and what it does not guarantee. `expire` remains the blunt
+  per-room route, at the cost of that room's conversational continuity.
 - **`list` output becomes dynamic.** There is no longer a static set of
   watchers derivable from `config.yaml`; the answer to "what is being
   watched" is runtime state, so tooling must query the daemon. `agent-chat-gateway list`

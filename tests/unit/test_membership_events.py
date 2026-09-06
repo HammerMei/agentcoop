@@ -636,7 +636,7 @@ class TestTheMembershipReconciliation(unittest.IsolatedAsyncioTestCase):
         mgr._connector.membership_snapshot = AsyncMock(return_value=snapshot)
         reclaimed = []
 
-        async def reclaim(room_id, *, reason, expected=None, require_dormant=False):
+        async def reclaim(room_id, *, reason, expected=None, require_dormant=False, **kw):
             reclaimed.append((room_id, reason))
             return f"w-{room_id}"
 

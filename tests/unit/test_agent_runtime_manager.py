@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from types import MappingProxyType
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from gateway.agents import AgentBackend
 from gateway.agents.response import AgentResponse
@@ -219,7 +219,8 @@ class TestAgentRuntimeManager(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(mgr.has_active_brokers)
 
     async def test_stop_all_tolerates_broker_stop_error(self):
-        """Broker stop error is logged, not raised — backends still stopped."""
+        """Broker stop error is logged, not raised — backends still stopped.
+        The stop is retried (#144) and the broker kept as a leftover."""
         backend = _TestBackend(has_broker=True)
         mgr = AgentRuntimeManager({"default": backend})
 
@@ -231,10 +232,12 @@ class TestAgentRuntimeManager(unittest.IsolatedAsyncioTestCase):
         backend._mock_broker.stop.side_effect = RuntimeError("stop failed")
 
         # Must not raise
-        await mgr.stop_all()
+        with patch("gateway.core.retry_stop.STOP_RETRY_DELAY", 0.0):
+            await mgr.stop_all()
 
         # Backend still stopped despite broker error
         self.assertTrue(backend.stopped)
+        self.assertEqual([(n, k) for n, k, _ in mgr.leftovers], [("default", "permission broker")])
 
     async def test_backend_start_phase_runs_agents_in_parallel(self):
         """Independent backend startups should overlap instead of running serially."""
@@ -265,9 +268,12 @@ class TestAgentRuntimeManager(unittest.IsolatedAsyncioTestCase):
         backend.stop = AsyncMock(side_effect=RuntimeError("stop boom"))
         mgr = AgentRuntimeManager({"default": backend})
 
-        await mgr.stop_all()
+        with patch("gateway.core.retry_stop.STOP_RETRY_DELAY", 0.0):
+            await mgr.stop_all()
 
-        backend.stop.assert_awaited_once()
+        # Retried a few times (#144), then kept as a leftover — nothing raised.
+        self.assertEqual(backend.stop.await_count, 3 + 3, "stop_some's attempts, then retry_leftovers'")
+        self.assertEqual([(n, k) for n, k, _ in mgr.leftovers], [("default", "backend")])
 
 
 if __name__ == "__main__":

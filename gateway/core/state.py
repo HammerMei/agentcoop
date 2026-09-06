@@ -16,7 +16,7 @@ import os
 from dataclasses import MISSING, asdict, dataclass, field, fields
 from enum import Flag, auto
 from pathlib import Path
-from typing import get_origin
+from typing import Collection, get_origin
 
 logger = logging.getLogger("agent-chat-gateway.state")
 
@@ -573,8 +573,12 @@ class DuplicateSessionError(Exception):
     """Two persisted watchers claim one backend session for different rooms (§4.1)."""
 
 
-def check_session_uniqueness() -> None:
+def check_session_uniqueness(ignore: "Collection[str]" = ()) -> None:
     """Refuse to start when a state file binds one session to two rooms.
+
+    `ignore` names connectors whose files are left out — what `config validate`
+    passes for the orphaned files boot's sweep removes before it runs this
+    same check (#144): their duplicates are released, not booted.
 
     The runtime check in `SessionMaps.bind_session` catches this too, but only when the
     second watcher gets that far — after the first has started answering, and with which
@@ -601,8 +605,11 @@ def check_session_uniqueness() -> None:
     watcher running, the other reported as failed, differently on each boot.
     """
     seen: dict[str, tuple[str, str, str]] = {}
+    skipped = set(ignore)
     for path in state_files():
         connector_name = connector_name_of(path)
+        if connector_name in skipped:
+            continue
         for record in load_state(connector_name):
             if not record.session_id or not record.backend_identity:
                 continue

@@ -216,6 +216,43 @@ def main():
         help="Also flag values that just restate a built-in default or "
              "duplicate a value inherited from a *_templates entry",
     )
+    config_validate_p.add_argument(
+        "--json", action="store_true",
+        help="Emit the findings as a JSON document instead of text",
+    )
+
+    config_reload_p = config_sub.add_parser(
+        "reload",
+        help="Apply config.yaml changes to the running daemon (validate, diff, "
+             "restart only what changed, reconcile every record)",
+    )
+    config_reload_p.add_argument(
+        "--config", default=DEFAULT_CONFIG,
+        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+    )
+    config_reload_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Print the plan and change nothing; with the daemon stopped, print "
+             "the plan the next start will execute",
+    )
+    config_reload_p.add_argument(
+        "--json", action="store_true",
+        help="Emit the plan as a JSON document instead of text",
+    )
+
+    config_show_p = config_sub.add_parser(
+        "show",
+        help="Print the resolved configuration's digest and its flattened, "
+             "secret-redacted contents; warn if the running daemon differs",
+    )
+    config_show_p.add_argument(
+        "--config", default=DEFAULT_CONFIG,
+        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+    )
+    config_show_p.add_argument(
+        "--json", action="store_true",
+        help="Emit the digest and the redacted config as a JSON document",
+    )
 
     config_migrate_env_p = config_sub.add_parser(
         "migrate-env",
@@ -359,6 +396,15 @@ def main():
                     print(f"Watchers: {count}")
             except SystemExit:
                 print("Watchers: (unable to query)")
+            # The active configuration (#144): what the daemon loaded and
+            # when, so an operator can tell whether a reload took effect —
+            # and any section a reload could not bring back.
+            try:
+                shown = _send_command({"cmd": "config-show", "include_config": False})
+                if shown.get("ok"):
+                    _print_active_config(shown)
+            except SystemExit:
+                print("Config:   (unable to query)")
         else:
             print("Gateway:  not running")
 
@@ -562,6 +608,10 @@ def _run_config(args) -> None:
 
     if args.config_cmd == "validate":
         _run_config_validate(args)
+    elif args.config_cmd == "reload":
+        _run_config_reload(args)
+    elif args.config_cmd == "show":
+        _run_config_show(args)
     elif args.config_cmd == "migrate-env":
         _run_config_migrate_env(args)
     else:
@@ -574,6 +624,10 @@ def _run_config_validate(args) -> None:
     from .config_validate import validate_config
 
     result = validate_config(args.config, lint=args.lint)
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2))
+        sys.exit(0 if result.ok else 1)
 
     if result.errors:
         print(f"✗ {args.config}: {len(result.errors)} error(s)", file=sys.stderr)
@@ -598,6 +652,164 @@ def _run_config_validate(args) -> None:
 
     if not result.ok:
         sys.exit(1)
+
+
+def _print_active_config(shown: dict) -> None:
+    """The `status` lines for the active configuration (#144)."""
+    digest = shown.get("digest") or ""
+    print(f"Config:   {digest[:12]} (loaded {shown.get('loaded_at') or '?'})")
+    for d in shown.get("degraded") or []:
+        print(f"[ERROR] Degraded: {d.get('kind')} '{d.get('name')}' — {d.get('error')}")
+    if shown.get("reloading"):
+        print("Reload:   in progress")
+
+
+def _emit_plan(plan, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(plan.to_dict(), indent=2))
+    else:
+        print(plan.render())
+
+
+def _run_config_reload(args) -> None:
+    """Handle 'config reload [--dry-run] [--json]' (#144).
+
+    Three situations, told apart deliberately:
+
+    * the daemon is running — the request goes to it; the file is read THERE,
+      once, and the plan comes back as data;
+    * the daemon is not running — `--dry-run` computes the record-level plan
+      offline from the state files (it is the plan the next start executes);
+      without `--dry-run` the plan is printed and the command refuses, because
+      nothing is running to apply it to;
+    * the daemon appears to be running but its socket cannot be reached — an
+      error, never a silent fall-back to the offline plan: a daemon in that
+      state is the thing to fix first.
+    """
+    from .config_validate import finding_to_dict, validate_config
+    from .daemon import is_running
+    from .reload_plan import ReloadPlan, boot_plan
+
+    running, pid = is_running()
+    if running:
+        response = _send_command(
+            {"cmd": "config-reload", "dry_run": bool(args.dry_run),
+             "config_path": os.path.abspath(args.config)},
+            timeout=600.0,
+        )
+        if "exit_code" not in response:
+            # Not a plan: the control server itself refused the request. Still
+            # a document under --json — the failure path is where a script
+            # most needs `ok` and `error` as data.
+            error = response.get("error", "unknown error")
+            if args.json:
+                print(json.dumps(ReloadPlan.refused(error, dry_run=bool(args.dry_run)).to_dict(),
+                                 indent=2))
+            else:
+                print(f"Error: {error}", file=sys.stderr)
+            sys.exit(1)
+        plan = ReloadPlan.from_dict(response)
+        _emit_plan(plan, args.json)
+        sys.exit(plan.exit_code)
+
+    # Offline: validate, then the next start's plan from the state files.
+    result = validate_config(args.config)
+    if not result.ok or result.config is None:
+        plan = ReloadPlan.refused(
+            f"{args.config}: {len(result.errors)} error(s) — nothing changed",
+            dry_run=bool(args.dry_run),
+            findings=[finding_to_dict(f) for f in result.findings if f.severity != "lint"],
+        )
+        _emit_plan(plan, args.json)
+        sys.exit(1)
+    try:
+        plan = boot_plan(result.config)
+    except Exception as exc:
+        print(f"Error: could not read the persisted state: {exc}", file=sys.stderr)
+        sys.exit(1)
+    plan.findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
+    if not args.dry_run:
+        # The plan is still worth seeing — it is what `start` will do.
+        plan.dry_run = False
+        plan.error = ("the daemon is not running, so there is nothing to apply to — the plan "
+                      "above is what the next start executes. Start it with: "
+                      "agent-chat-gateway start")
+        if args.json:
+            # Refused, with the plan body kept: `ok: false` plus `changes` and
+            # `watchers` is what text mode shows too (plan, then the error).
+            plan.ok = False
+            _emit_plan(plan, True)
+        else:
+            print(plan.render())
+            print(f"Error: {plan.error}", file=sys.stderr)
+        sys.exit(1)
+    _emit_plan(plan, args.json)
+    sys.exit(0)
+
+
+def _run_config_show(args) -> None:
+    """Handle 'config show [--json]' (#144).
+
+    Prints the SHA-256 digest of the RESOLVED file and its flattened contents
+    with secrets redacted. When the daemon is running, its active digest is
+    fetched and a mismatch is reported — "I edited but forgot to reload" made
+    visible. Never contacts the daemon when it is not running.
+    """
+    from .config_diff import config_digest, flatten_config, redacted_config
+    from .config_validate import validate_config
+    from .daemon import is_running
+
+    result = validate_config(args.config)
+    if not result.ok or result.config is None:
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            print(f"[ERROR] {args.config}: {len(result.errors)} error(s)", file=sys.stderr)
+            for err in result.errors:
+                print(f"  [ERROR] {err}", file=sys.stderr)
+        sys.exit(1)
+    config = result.config
+    digest = config_digest(config)
+
+    active: dict | None = None
+    running, _pid = is_running()
+    if running:
+        shown = _send_command({"cmd": "config-show", "include_config": False})
+        if not shown.get("ok"):
+            # A running daemon that will not answer is an error, not "no daemon":
+            # text mode would otherwise look exactly like an offline show.
+            error = f"the daemon refused config-show: {shown.get('error', 'unknown error')}"
+            if args.json:
+                print(json.dumps({"ok": False, "error": error, "digest": digest,
+                                  "config_path": os.path.abspath(args.config)}, indent=2))
+            else:
+                print(f"[ERROR] {error}", file=sys.stderr)
+            sys.exit(1)
+        active = {"digest": shown.get("digest"), "loaded_at": shown.get("loaded_at"),
+                  "config_path": shown.get("config_path")}
+    in_sync = None if active is None else (active["digest"] == digest)
+
+    if args.json:
+        print(json.dumps({
+            "ok": True,
+            "config_path": os.path.abspath(args.config),
+            "digest": digest,
+            "active": active,
+            "in_sync": in_sync,
+            "config": redacted_config(config),
+        }, indent=2))
+    else:
+        print(f"Config:  {args.config}")
+        print(f"Digest:  {digest}")
+        if active is not None:
+            print(f"Active:  {active['digest']} (loaded {active['loaded_at']})")
+            if not in_sync:
+                print("⚠ The running daemon's configuration differs from the file — "
+                      "run 'agent-chat-gateway config reload' to apply it.")
+        print()
+        for path, value in flatten_config(config):
+            print(f"{path}: {value}")
+    sys.exit(0)
 
 
 def _run_config_migrate_env(args) -> None:
@@ -1484,15 +1696,41 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
         sys.exit(1)
 
     if not CONTROL_SOCK.exists():
-        print("Error: Control socket not found. The daemon may still be starting.", file=sys.stderr)
+        print(f"Error: Control socket not found although the daemon appears to be running "
+              f"(pid={pid}). The daemon may still be starting, or it is in a broken state — "
+              f"check the log and restart it.", file=sys.stderr)
         sys.exit(1)
 
-    return asyncio.run(_send_command_async(request, timeout=timeout))
+    try:
+        return asyncio.run(_send_command_async(request, timeout=timeout))
+    except asyncio.TimeoutError:
+        # Before OSError — TimeoutError IS an OSError since 3.11. Not "unreachable":
+        # the daemon took the request and may well still be working on it
+        # (a long reload). Neither "nothing changed" nor "done": exit 2.
+        print(f"[ERROR] No response from the daemon within {timeout:.0f}s (pid={pid}). "
+              f"It may still be working on the request — check 'agent-chat-gateway "
+              f"status' and the log before running it again.", file=sys.stderr)
+        sys.exit(2)
+    except OSError as exc:
+        # Deliberately an error and never a silent fallback (#144, story 19): a
+        # daemon with a pid but no reachable socket is a state to fix, not to
+        # route around.
+        print(f"Error: could not reach the daemon's control socket (pid={pid}): {exc}",
+              file=sys.stderr)
+        sys.exit(1)
+
+
+# The largest one-line response the CLI will read. asyncio's default
+# StreamReader limit is 64 KiB, and `readline()` RAISES past it rather than
+# returning a partial line — a reload plan for a few hundred rooms, or a
+# `list` of as many, would fail on the client after the daemon had already
+# acted (#144). 16 MiB is far beyond any fleet the state files could hold.
+_RESPONSE_LIMIT = 16 * 1024 * 1024
 
 
 async def _send_command_async(request: dict, timeout: float = 60.0) -> dict:
     """Async helper to send command over Unix socket."""
-    reader, writer = await asyncio.open_unix_connection(str(CONTROL_SOCK))
+    reader, writer = await asyncio.open_unix_connection(str(CONTROL_SOCK), limit=_RESPONSE_LIMIT)
     try:
         writer.write(json.dumps(request).encode() + b"\n")
         await writer.drain()

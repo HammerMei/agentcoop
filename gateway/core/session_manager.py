@@ -14,6 +14,7 @@ import asyncio
 import logging
 import secrets
 from datetime import UTC, datetime
+from typing import Collection
 
 from ..agents import AgentBackend
 from .config import CoreConfig
@@ -31,6 +32,7 @@ from .injected_context_builder import InjectedContextBuilder
 from .lifecycle_sweep import LifecycleSweep
 from .permission import PermissionRegistry
 from .reconcile import RecordAction, reconcile_records, rematerialized_fields
+from .retry_stop import stop_with_retries
 from .session_maps import SessionMaps
 from .state import (
     StateFilter,
@@ -62,6 +64,10 @@ JOBS_CANCELLED_BOT_REMOVED = (
 JOBS_CANCELLED_ROOM_UNSERVED = (
     "the room is no longer available to this connector",
     "recreate the job if the room becomes available to this connector again.",
+)
+JOBS_CANCELLED_CONNECTOR_REMOVED = (
+    "its connector was removed from config.yaml",
+    "recreate the job against a current watcher if the connector returns.",
 )
 JOBS_CANCELLED_BY_RECONCILIATION = (
     "its watcher was expired by reconciliation — no rule in config.yaml covers the room any more",
@@ -162,6 +168,13 @@ class SessionManager:
         # connect (`settle_records`); `sync_only` runs them itself when nothing
         # did — `run_once` and the tests boot a manager on its own.
         self._records_settled = False
+        # Bot-membership events that arrived while a reload had this manager
+        # quiesced (#144): replayed on `rearm`, in order, because the sweep's
+        # membership reconciliation covers paused and idle records only — an
+        # ACTIVE watcher removed from its room mid-reload would otherwise keep
+        # its session and its jobs indefinitely.
+        self._deferred_membership: list[tuple[str, object]] = []  # ("added"|"removed", ref)
+        self._quiesced = False
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
@@ -517,7 +530,8 @@ class SessionManager:
         }
 
     async def settle_records(
-        self, unavailable_agents: set[str] | None = None
+        self, unavailable_agents: set[str] | None = None, *,
+        report_expiry_failures: bool = False,
     ) -> list[str]:
         """Hydrate and reconcile this connector's records — boot's "reload" (§2.4).
 
@@ -528,24 +542,36 @@ class SessionManager:
         needs the network: the plan is pure, re-materialization is an in-memory
         rewrite plus a save, and an expiry's connector step (unsubscribe) is a
         no-op for a room nothing has subscribed yet. Idempotent per boot.
+
+        Returns the hydration's startup errors — or, with
+        `report_expiry_failures` (a reload settling a new connector), the
+        watchers the reconciliation could not expire: boot logs those and
+        moves on, a reload must not report a clean apply over them.
         """
         if self._records_settled:
             return []
         errors = await self._lifecycle.sync_watchers(unavailable_agents=unavailable_agents)
-        await self._reconcile_records_at_boot()
+        _rewritten, not_expired = await self._reconcile_records()
         self._records_settled = True
-        return errors
+        return not_expired if report_expiry_failures else errors
 
-    async def _reconcile_records_at_boot(self) -> None:
+    async def _reconcile_records(self) -> tuple[list[str], list[str]]:
         """Run the current rules over every hydrated record (§2.4, #143).
 
-        Applies the plan `reconcile_records` returns against a still fleet:
-        re-materialized records keep their object, session and clocks; expired
-        ones go through the removal path's shared tail, jobs included, with the
-        session id on the AUDIT line. A record the engine could not re-match
-        honestly is kept and said so. The plan is logged either way, as what
-        was actually applied, so a restart's effect on the fleet can be read
-        back.
+        Applies the plan `reconcile_records` returns: re-materialized records
+        keep their object, session and clocks; expired ones go through the
+        removal path's shared tail, jobs included, with the session id on the
+        AUDIT line. A record the engine could not re-match honestly is kept
+        and said so. The plan is logged either way, as what was actually
+        applied, so a restart's effect on the fleet can be read back.
+
+        Boot-independent: boot runs it over a still fleet from `settle_records`;
+        `config reload` runs it on a live manager through `reconcile_live`,
+        which then restarts the resident processors of the records this
+        rewrote — returned here by room id for exactly that, together with the
+        watchers an expiry could NOT remove (their records are still
+        installed; the log says why), so a reload does not report a clean
+        apply over a record its rules no longer cover.
         """
         plan = reconcile_records(
             self._lifecycle.states().values(),
@@ -562,29 +588,256 @@ class SessionManager:
         if not plan.changes:
             logger.info("Reconciliation (%s): %s — nothing to change",
                         self._connector_name, plan.summary())
-            return
+            return [], []
         rules_by_name = {r.name: r for r in self._watcher_rules}
-        rewritten = expired = 0
+        rewritten: list[str] = []
+        not_expired: list[str] = []
+        expired = 0
         for action in plan.changes:
             record = self._lifecycle.record_for_room(action.room_id)
             if record is None:
                 continue
             if action.action == "rematerialize":
                 self._apply_rematerialize(record, action, rules_by_name[action.to_rule])
-                rewritten += 1
+                rewritten.append(record.room_id)
                 continue
             try:
                 self._lifecycle._enter_verb("reclaim", action.room_id)
             except RuntimeError:
                 break  # shutting down — leave the rest as it is, save what was done
             try:
-                expired += await self._apply_expire(record, action)
+                went = await self._apply_expire(record, action)
             finally:
                 self._lifecycle._exit_verb()
+            expired += went
+            if not went:
+                not_expired.append(action.watcher_name)
         if rewritten:
             self._lifecycle.save_state()
         logger.info("Reconciliation (%s): %s", self._connector_name,
-                    plan.format_counts(len(plan.of("keep")), rewritten, expired))
+                    plan.format_counts(len(plan.of("keep")), len(rewritten), expired))
+        return rewritten, not_expired
+
+    # ── Config reload (#144) ─────────────────────────────────────────────────
+
+    def records(self) -> list[WatcherState]:
+        """This connector's in-memory records — what a reload plans over."""
+        return list(self._lifecycle.states().values())
+
+    def resident_rooms(self) -> set[str]:
+        """The rooms with a running processor — the ones a restart reaches."""
+        return {ws.room_id for ws in self._lifecycle.states().values()
+                if self._lifecycle.processor_for_room(ws.room_id) is not None}
+
+    def set_unavailable_agents(self, names: set[str]) -> None:
+        """Push the agents a reload could not start (or brought back) to the
+        lifecycle's fail-closed gate — boot wrote it once; a reload rewrites it."""
+        self._lifecycle.set_blocked_agents(names)
+
+    def replace_rules(self, rules: list[WatcherRule]) -> None:
+        """Take the candidate config's rules for this connector.
+
+        On a quiesced manager: both the router's list and the eager loop's
+        are replaced, so the next offered room and the next reconciliation
+        both read the new list.
+        """
+        self._watcher_rules = list(rules)
+        self._watcher_manager.replace_rules(self._watcher_rules)
+
+    async def quiesce(self, reason: str) -> None:
+        """Still this manager for a reload's apply window.
+
+        Refuses new transitions everywhere with `reason` — operator verbs are
+        refused outright, a room offer parks (retryable, see
+        `WatcherManager._park_if_reloading`) — waits out the ones in flight,
+        and stops the sweep so no pass overlaps the apply. Processors keep
+        running: a room whose agent is not being rebuilt keeps answering, and
+        the processors of an agent that IS are drained by `stop_watchers_on_agents`
+        before that backend stops. `rearm` is the inverse.
+        """
+        self._quiesced = True
+        await self._watcher_manager.drain(reason)
+        await self._lifecycle.drain_verbs()
+        if self._sweep is not None:
+            await self._sweep.stop()
+
+    async def rearm(self) -> None:
+        """Open the manager again after a reload's apply window, then handle
+        the membership removals that arrived while it was quiesced."""
+        self._lifecycle.rearm_transitions()
+        self._quiesced = False
+        if self._sweep is not None:
+            self._sweep.start()
+        # Both sides of a membership transition, in arrival order: a room the
+        # bot left and rejoined during the window ends up registered, not
+        # reclaimed — replaying removals alone would reclaim a valid room.
+        deferred, self._deferred_membership = self._deferred_membership, []
+        for kind, ref in deferred:
+            if kind == "added":
+                await self._on_membership_added(ref)
+            else:
+                await self._on_membership_removed(ref)
+
+    async def reconcile_live(self) -> tuple[list[str], list[str]]:
+        """Reconcile a RUNNING fleet against the rules just installed (#144).
+
+        Boot's reconciliation plus what a live fleet adds: a re-materialized
+        record with a resident processor is restarted, because that processor
+        was built from the config the record no longer carries; and on an
+        eager connector the new rules' literal rooms are started, since no
+        message will ever offer them. Called re-armed: the expiries go
+        through the verb barrier like every other reclamation, and a wake
+        racing a restart is serialized by the watcher lock. Returns the rooms
+        it restarted — so a caller restarting processors for another reason
+        (an agent change) does not restart them twice — and the rooms that
+        did NOT come up, one message each: a re-materialized record whose
+        processor would not restart (already stopped by then), and an eager
+        room a new rule names that would not start. Either reads as failed in
+        `list` until `resume` or its next message, and the caller must not
+        report a clean apply over it.
+        """
+        rewritten, not_expired = await self._reconcile_records()
+        restarted: list[str] = []
+        failures: list[str] = [
+            f"Connector '{self._connector_name}': watcher '{name}' could not be expired — its "
+            f"record is still installed and no rule covers its room; 'expire {name}' by hand"
+            for name in not_expired
+        ]
+        for room_id in rewritten:
+            try:
+                if await self._lifecycle.restart_resident(room_id):
+                    restarted.append(room_id)
+            except Exception as e:
+                failures.append(
+                    f"Connector '{self._connector_name}': the re-materialized watcher for "
+                    f"room {room_id} could not be restarted: {e}")
+        eager: list[str] = []
+        await self._eager_start_rule_rooms(eager)
+        failures.extend(eager)
+        return restarted, failures
+
+    async def stop_watchers_on_agents(self, agents: set[str]) -> tuple[list[str], list[str]]:
+        """Drain and stop every resident processor bound to one of `agents` (#144).
+
+        The first half of a reload's agent restart, run BEFORE the backend
+        stops: a processor's stop drains its queue by processing it, so the
+        backend must still be alive for the drain to be a drain and not a
+        string of failures posted to the room. The drains run concurrently,
+        as `stop_all`'s do — each may take the full queue timeout, and one
+        busy agent can have many rooms — and a stop that raises is retried
+        (`stop_with_retries`). Returns the room ids stopped, so the reload can
+        start them again wherever their records point afterwards, and one
+        message per room that would not stop.
+        """
+        targets = [r for r in self.records() if r.agent in agents]
+
+        def gone(record) -> bool:
+            return self._lifecycle.processor_for_room(record.room_id) is None
+
+        async def _stop(record) -> tuple[bool, BaseException | None]:
+            """(stopped, error). A stop that raised AFTER removing the processor
+            — at the unsubscribe — is a stop, noisily: not retried (a retry would
+            find nothing resident and "succeed", hiding the error), but reported,
+            and the room is started again like the others."""
+            try:
+                return await self._lifecycle.stop_resident(record.room_id), None
+            except Exception as first:
+                if gone(record):
+                    return True, first
+                err = await stop_with_retries(
+                    f"connector '{self._connector_name}' watcher '{record.watcher_name}'",
+                    lambda: self._lifecycle.stop_resident(record.room_id))
+                return gone(record), err
+
+        results = await asyncio.gather(*[_stop(r) for r in targets])
+        rooms: list[str] = []
+        failures: list[str] = []
+        for record, (stopped, err) in zip(targets, results, strict=True):
+            if err is not None:
+                failures.append(
+                    f"Connector '{self._connector_name}': watcher '{record.watcher_name}' "
+                    f"{'stopped with errors' if stopped else 'could not be stopped'} before "
+                    f"agent '{record.agent}' restarts ({err})"
+                    + ("" if stopped else "; its processor may still hold the old backend"))
+            if stopped:
+                rooms.append(record.room_id)
+        return rooms, failures
+
+    async def reclaim_all(self, *, reason: str, jobs: tuple[str, str]) -> list[str]:
+        """Reclaim every record — the removal path's shared tail, per room (#144).
+
+        For a connector `config reload` removes: with the manager quiesced and
+        the backends still alive, each record goes through `reclaim_room`
+        (prompt file and attachment workspace removed, one AUDIT line) and its
+        jobs are cancelled — what boot's orphan sweep cannot do for a file
+        whose connector is gone. The backend session is KEPT, as boot keeps it:
+        a state file copied under the connector's new name still names it.
+        Returns the watchers whose record is STILL installed afterwards — a
+        reclaim that failed (the shared tail swallows and logs it): their file
+        must not be swept as if every record had gone.
+        """
+        records = self.records()
+        for record in records:
+            await self._reclaim_removed_room(
+                record.room_id, reason=reason, expected=record, jobs=jobs,
+                keep_backend_session=True)
+        return [r.watcher_name for r in records
+                if self._lifecycle.record_for_room(r.room_id) is r]
+
+    async def reclaim_rooms(self, room_ids: list[str], *, reason: str,
+                            jobs: tuple[str, str]) -> None:
+        """Reclaim these records now, through the shared tail — for a reload
+        whose new rules expire them while their agent is about to stop: the
+        reconciliation would run after the backend is gone and have to skip
+        the session, prompt-file and attachment cleanup (#144)."""
+        for room_id in room_ids:
+            record = self._lifecycle.record_for_room(room_id)
+            if record is not None:
+                await self._reclaim_removed_room(
+                    room_id, reason=reason, expected=record, jobs=jobs)
+
+    async def start_watchers_on_agents(
+        self, agents: set[str], *, rooms: Collection[str] = (),
+        exclude: set[str] = frozenset(),
+    ) -> list[str]:
+        """Start every WAS-ACTIVE record on one of `agents` once its backend is
+        back (#144) — the second half of the agent restart.
+
+        Was-active is boot's own criterion (`_evaluate_lifecycle_at_boot`):
+        rule-derived, not paused, no `dropped_at`. That covers the rooms an
+        earlier reload left down because the agent did not come up then — a
+        fixed agent brings its rooms back without a restart. `rooms` are the
+        ones `stop_watchers_on_agents` stopped this reload, started whatever
+        agent their record names NOW: a reconciliation in between may have
+        moved one to an agent that did not change. An idle room stays idle:
+        its next message wakes it. `exclude` names rooms the reconciliation
+        already restarted. Sessions are kept; a changed backend identity is
+        settled by the start's own provisioning check, which logs the
+        abandoned id. Returns error strings, one per room that could not
+        come back.
+        """
+        errors: list[str] = []
+        rooms = set(rooms)
+        blocked = self._lifecycle.blocked_agents
+        for record in self.records():
+            if ((record.agent not in agents and record.room_id not in rooms)
+                    or record.room_id in exclude
+                    or not (record.rule_name or record.config)
+                    or record.paused or record.dropped_at or not record.room_id):
+                continue
+            if record.agent in blocked:
+                # Would be refused by `_ensure_agent_available`; the agent's own
+                # degraded finding already says why every room on it is down.
+                continue
+            try:
+                await self._lifecycle.start_from_record(record.room_id)
+            except Exception as e:
+                msg = (f"Connector '{self._connector_name}': watcher "
+                       f"'{record.watcher_name}' could not be started after agent "
+                       f"'{record.agent}' changed: {e}")
+                logger.error(msg)
+                errors.append(msg)
+        return errors
 
     def _apply_rematerialize(
         self, record: WatcherState, action: RecordAction, rule: WatcherRule
@@ -859,7 +1112,11 @@ class SessionManager:
         re-discovered by the room's first message, which is the safety net
         membership registration supplements and never replaces.
         """
-        if self._watcher_manager is None or self._watcher_manager.disarmed:
+        if self._watcher_manager is None:
+            return
+        if self._watcher_manager.disarmed:
+            if self._quiesced:
+                self._deferred_membership.append(("added", room))  # a reload; replayed on rearm
             return
         try:
             await self._watcher_manager.register_on_join(room)
@@ -878,7 +1135,11 @@ class SessionManager:
         end state. Gated on disarm like the add: a reclaim racing stop_all
         would dismantle state the shutdown is flushing.
         """
-        if self._watcher_manager is None or self._watcher_manager.disarmed:
+        if self._watcher_manager is None:
+            return
+        if self._watcher_manager.disarmed:
+            if self._quiesced:
+                self._deferred_membership.append(("removed", room_id))  # replayed on rearm
             return
         # Counted in the shutdown barrier (Codex round 10): a removal past
         # the gate above but parked on the watcher lock or mid-reclaim was
@@ -903,7 +1164,7 @@ class SessionManager:
 
     async def _reclaim_removed_room(
         self, room_id: str, *, reason: str, jobs: tuple[str, str], expected=None,
-        require_dormant: bool = False,
+        require_dormant: bool = False, keep_backend_session: bool = False,
     ) -> None:
         """The removal path's shared tail: reclaim the record, cancel its jobs.
 
@@ -914,7 +1175,7 @@ class SessionManager:
         try:
             name = await self._lifecycle.reclaim_room(
                 room_id, reason=reason, expected=expected,
-                require_dormant=require_dormant)
+                require_dormant=require_dormant, keep_backend_session=keep_backend_session)
         except Exception:
             logger.exception(
                 "Membership-removal reclaim failed for room %s — the "

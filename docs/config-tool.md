@@ -213,6 +213,13 @@ Named, reusable rule lists (`tool_presets:`) that an agent's
 repeating the same rules on every agent. Deleting a preset still referenced
 by an agent is blocked.
 
+## Saving Does Not Reload
+
+Saving writes `config.yaml` and validates it; the running daemon keeps the
+configuration it loaded. Apply the change with `agent-chat-gateway config
+reload` (`--dry-run` first to see what it will do), or `restart`. `status`
+and `config show` tell you whether the file and the daemon agree.
+
 ## Escape Hatch
 
 `ctrl+e` (from the list screen) opens `$EDITOR` on the raw `config.yaml`

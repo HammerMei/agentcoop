@@ -454,6 +454,10 @@ def config_from_record(record: WatcherState) -> WatcherConfig | None:
     )
 
 
+class ReloadInProgressError(RuntimeError):
+    """A room offer arrived while `config reload` applies — retryable (#144)."""
+
+
 class WatcherManager:
     """The runtime half of §2.8: rule-derived creation on the message path.
 
@@ -539,16 +543,46 @@ class WatcherManager:
         if self._inflight == 0:
             self._drained.set()
 
-    def disarm(self) -> None:
+    def _park_if_reloading(self, room_id: str) -> None:
+        """Make an offer PARK, not decline, while a reload applies (#144).
+
+        A disarmed manager answers `None` — a completed decline — and the
+        connectors then remember every buffered id, which is right for
+        shutdown (the next boot replays from the watermark) and wrong for a
+        reload: the kept connector's dedup set survives, so an idle room's
+        wake would have its id remembered and the next wake's replay die on
+        it. Raising instead makes the offer an abort: the connector retries
+        for a few seconds (the apply window is usually shorter) and, if the
+        reload is still running, parks the room with its ids unknown so the
+        next wake's replay brings the frames back.
+        """
+        if self._lifecycle.disarmed_for_reload:
+            raise ReloadInProgressError(
+                f"Not creating a watcher for room {room_id} yet — "
+                f"{self._lifecycle.disarm_reason}")
+
+    def replace_rules(self, rules: list[WatcherRule]) -> None:
+        """Swap the ordered rule list a `config reload` changed (#144).
+
+        Called on a stilled manager (disarmed and drained): the next room
+        offered is matched against the new list, and nothing is mid-match.
+        """
+        self._rules = list(rules)
+
+    def disarm(self, reason: str | None = None) -> None:
         """Refuse every offer from now on — called by shutdown, before any stop.
 
         The wake arms stay reachable until the connector disconnects, so
         without this a message landing mid-teardown recreates a watcher the
-        teardown will never stop (§2.5).
+        teardown will never stop (§2.5). `reason` is what a refused caller
+        is told; the default is the lifecycle's shutdown wording.
         """
-        self._lifecycle.disarm_transitions()
+        if reason is None:
+            self._lifecycle.disarm_transitions()
+        else:
+            self._lifecycle.disarm_transitions(reason)
 
-    async def drain(self) -> None:
+    async def drain(self, reason: str | None = None) -> None:
         """Disarm, then wait for every in-flight episode to finish (Codex
         round 5). Composes with the under-lock disarm re-checks (round 4):
         an episode parked on a lock wakes, sees the flag, and exits via its
@@ -557,7 +591,7 @@ class WatcherManager:
         already inside `start_watcher_in_room`. That wait is the decision:
         the alternative is a processor `stop_all` never saw. A hung backend
         is the daemon-level grace window's problem, not this method's."""
-        self.disarm()
+        self.disarm(reason)
         await self._drained.wait()
 
     @property
@@ -607,6 +641,7 @@ class WatcherManager:
                 connector, self._connector_name,
             )
             return None
+        self._park_if_reloading(room.id)
         if self._shutting_down:
             # Disarmed (see __init__): a creation mid-teardown outlives every
             # stop that already ran. Final, not retryable — the daemon is
@@ -624,6 +659,7 @@ class WatcherManager:
         try:
             lock = self._locks.setdefault(room.id, asyncio.Lock())
             async with lock:
+                self._park_if_reloading(room.id)
                 if self._shutting_down:
                     # Re-checked UNDER the lock (TOCTOU sweep after Codex round
                     # 4): an episode that passed the check above and then parked
@@ -793,6 +829,7 @@ class WatcherManager:
         # against a settled record. Room lock outer, watcher lock inner —
         # nothing takes them reversed.
         async with self._lifecycle.watcher_lock(record.watcher_name):
+            self._park_if_reloading(record.room_id)
             if self._shutting_down:
                 # The inner half of the get_or_create re-check (TOCTOU sweep
                 # after Codex round 4): a wake parked on THIS lock while the

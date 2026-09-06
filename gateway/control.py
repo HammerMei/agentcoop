@@ -24,7 +24,7 @@ from .runtime_lock import RUNTIME_DIR
 
 if TYPE_CHECKING:
     from .core.job_store import JobStore
-    from .service import ConnectorEntry
+    from .service import ConnectorEntry, GatewayService
 
 logger = logging.getLogger("agent-chat-gateway.control")
 
@@ -44,6 +44,25 @@ def _to_epoch_ms(dt) -> str | None:
 
 CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 
+# The operator verbs that change a watcher's lifecycle — refused while a
+# reload applies, and against a degraded connector (#144).
+LIFECYCLE_VERBS = ("pause", "resume", "reset", "expire")
+
+
+def _degraded_error(entry: "ConnectorEntry") -> dict | None:
+    """The refusal for a command aimed at a connector a reload left degraded (#144).
+
+    Its manager is shut down, its connector never (re)connected; a verb would
+    be told "the gateway is shutting down" and a send would hit an
+    unauthenticated client. `list` is not refused — the records are real.
+    """
+    degraded = getattr(entry, "degraded", "")
+    if not (isinstance(degraded, str) and degraded):
+        return None
+    return {"ok": False, "error": (
+        f"Connector '{entry.name}' is degraded: {degraded}. Fix the cause and run "
+        f"'agent-chat-gateway config reload' to bring it back.")}
+
 
 class ControlServer:
     """Unix socket server for CLI command routing.
@@ -62,9 +81,14 @@ class ControlServer:
         self,
         entries: "list[ConnectorEntry]",
         job_store: "JobStore | None" = None,
+        service: "GatewayService | None" = None,
     ) -> None:
         self._entries = entries
         self._job_store = job_store
+        # The service, for the commands that are about the daemon rather than
+        # one connector: `config-reload`, `config-show` (#144). None
+        # for a server built without one (tests); those commands then refuse.
+        self._service = service
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
@@ -196,6 +220,19 @@ class ControlServer:
         cmd = request.get("cmd")
         connector_name = request.get("connector")
 
+        # The daemon-level commands (#144): about the active configuration,
+        # not any one connector.
+        if cmd in ("config-reload", "config-show"):
+            return await self._handle_service_command(cmd, request)
+
+        # A lifecycle verb cannot race a reload's teardown: refused for the
+        # whole apply window, with the reason, rather than reaching a manager
+        # that is being shut down or has not started yet (#144, story 15).
+        if (cmd in LIFECYCLE_VERBS
+                and self._service is not None and self._service.reloading):
+            from .service import RELOAD_IN_PROGRESS
+            return {"ok": False, "error": f"Cannot {cmd}: {RELOAD_IN_PROGRESS}"}
+
         # list without a specific connector → aggregate across all entries
         if cmd == "list" and not connector_name:
             all_watchers: list = []
@@ -252,19 +289,48 @@ class ControlServer:
 
         # pause/resume/reset/expire: auto-resolve connector from watcher name (watcher
         # names are globally unique across all connectors, so no --connector is needed).
-        if cmd in ("pause", "resume", "reset", "expire") and not connector_name:
+        if cmd in LIFECYCLE_VERBS and not connector_name:
             watcher_name = request.get("watcher_name", "")
             entry = self._find_entry_for_watcher(watcher_name)
             if isinstance(entry, dict):
                 return entry  # error response (unknown watcher)
-            return await entry.session_manager.dispatch_command(request)
+            return _degraded_error(entry) or await entry.session_manager.dispatch_command(request)
 
         # All other commands: route to a specific entry
         entry = self._resolve_entry(connector_name)
         if isinstance(entry, dict):
             return entry  # error response
+        if cmd != "list":
+            refused = _degraded_error(entry)
+            if refused:
+                return refused
 
         return await entry.session_manager.dispatch_command(request)
+
+    async def _handle_service_command(self, cmd: str, request: dict) -> dict:
+        """`config-reload` and `config-show` — routed to the service.
+
+        `config-show` answers `status` too: with `include_config: false` it
+        returns the digest, load time and degraded sections without the dump.
+        """
+        if self._service is None:
+            return {"ok": False, "error": f"'{cmd}' is not available on this control server"}
+        if cmd == "config-reload":
+            dry_run = request.get("dry_run", False)
+            if not isinstance(dry_run, bool):
+                return {"ok": False, "error": "'dry_run' must be a boolean"}
+            config_path = request.get("config_path")
+            if config_path is not None and not isinstance(config_path, str):
+                return {"ok": False, "error": "'config_path' must be a string"}
+            try:
+                return await self._service.reload_config(dry_run=dry_run, config_path=config_path)
+            except Exception as exc:
+                logger.exception("config reload failed")
+                return {"ok": False, "error": f"config reload failed: {exc}"}
+        include = request.get("include_config", True)
+        if not isinstance(include, bool):
+            return {"ok": False, "error": "'include_config' must be a boolean"}
+        return self._service.describe_config(include_config=include)
 
     def _handle_instructions(self, request: dict) -> dict:
         """Return a bundled instruction document by name."""
@@ -649,6 +715,9 @@ class ControlServer:
         entry = self._resolve_entry(connector_name)
         if isinstance(entry, dict):
             return entry  # error response
+        refused = _degraded_error(entry)
+        if refused:
+            return refused
 
         text = request.get("text", "")
         attachment_path = request.get("attachment_path")
@@ -687,6 +756,9 @@ class ControlServer:
         entry = self._find_entry_for_watcher(watcher_name)
         if isinstance(entry, dict):
             return entry  # error: unknown watcher
+        refused = _degraded_error(entry)
+        if refused:
+            return refused
 
         if not entry.connector.supports_history():
             return {

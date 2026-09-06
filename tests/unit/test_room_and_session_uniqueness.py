@@ -150,6 +150,16 @@ class TestLoadTimeSessionUniqueness(unittest.TestCase):
         with self.assertRaises(DuplicateSessionError):
             check_session_uniqueness()
 
+    def test_a_file_the_orphan_sweep_removes_can_be_left_out(self):
+        """`config validate` predicts boot's sweep and passes the files it removes as
+        `ignore` (#144): boot itself checks AFTER sweeping, so a duplicate that lives
+        only in a swept file is released, not refused."""
+        self._write("rc", [self._record("w1", "room-a", "ses-1")])
+        self._write("rc-old", [self._record("w1", "room-a", "ses-1")])
+        with self.assertRaises(DuplicateSessionError):
+            check_session_uniqueness()
+        check_session_uniqueness(ignore={"rc-old"})
+
     def test_the_same_room_twice_is_not_this_check_s_business(self):
         """That is a duplicate watcher, refused when the second claims the room. Raising
         here would report one fault as another."""

@@ -17,18 +17,11 @@ from gateway.core.bot_identity import (
 )
 from gateway.core.session_manager import JOBS_CANCELLED_BOT_REMOVED as REMOVED
 from gateway.service import GatewayService
+from tests.helpers import make_bare_gateway_service
 
 
 def _make_service() -> GatewayService:
-    service = GatewayService.__new__(GatewayService)
-    service._registry = MagicMock()
-    service._maps = SimpleNamespace(connector_view={})
-    service._expiry_task = None
-    service._runtime_manager = MagicMock()
-    service._control = MagicMock()
-    service._entries = []
-    service._dm_owner_connectors = set()
-    return service
+    return make_bare_gateway_service()
 
 
 def _accountless():
@@ -671,19 +664,7 @@ class TestServiceRunFatalHandshake(unittest.IsolatedAsyncioTestCase):
     """GatewayService.run() fatal paths must not emit 'ok' to the handshake pipe."""
 
     def _make_svc(self):
-        svc = GatewayService.__new__(GatewayService)
-        svc._registry = MagicMock()
-        svc._maps = SimpleNamespace(connector_view={})
-        svc._expiry_task = None
-        svc._runtime_manager = MagicMock()
-        svc._runtime_manager.start_all = AsyncMock(return_value=[])
-        svc._runtime_manager.has_active_brokers = False
-        svc._runtime_manager.unavailable_agents = set()
-        svc._runtime_manager.stop_all = AsyncMock()
-        svc._control = MagicMock()
-        svc._control.stop = AsyncMock()
-        svc._entries = []
-        return svc
+        return make_bare_gateway_service()
 
     async def test_exception_during_startup_no_ok_in_pipe(self):
         """RuntimeError during startup must not produce 'ok' in the pipe."""
@@ -775,22 +756,13 @@ class TestStartupFdOnCancel(unittest.IsolatedAsyncioTestCase):
     async def test_startup_fd_written_on_cancelled_error(self):
         """_write_startup_signal must be called in finally even after CancelledError."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock
 
-        from gateway.service import GatewayService
 
-        svc = GatewayService.__new__(GatewayService)
-        svc._entries = []
-        svc._control = MagicMock()
+        # The cancellation arrives mid-startup — at the control socket's start.
+        # (The hand-built fixture this test used to carry crashed on a missing
+        # attribute first, so the CancelledError path was never actually taken.)
+        svc = make_bare_gateway_service()
         svc._control.start = AsyncMock(side_effect=asyncio.CancelledError())
-        svc._control.stop = AsyncMock()
-        svc._runtime_manager = MagicMock()
-        svc._runtime_manager.start_all = AsyncMock(return_value=[])
-        svc._runtime_manager.has_active_brokers = False
-        svc._registry = MagicMock()
-        svc._maps = MagicMock()
-        svc._maps.connector_view = MagicMock()
-        svc._expiry_task = None
 
         write_signal_calls: list = []
 
@@ -801,10 +773,8 @@ class TestStartupFdOnCancel(unittest.IsolatedAsyncioTestCase):
             patch("gateway.service._write_startup_signal", side_effect=fake_write_signal),
             patch("gateway.service.ConnectorPermissionNotifier"),
         ):
-            try:
+            with self.assertRaises(asyncio.CancelledError):
                 await svc.run(startup_fd=5)
-            except (asyncio.CancelledError, Exception):
-                pass
 
         fds_written = [fd for fd, _ in write_signal_calls]
         self.assertIn(5, fds_written, "startup_fd must be written/closed in finally on CancelledError")

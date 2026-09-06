@@ -26,7 +26,7 @@ import asyncio
 import copy
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 try:
     from croniter import croniter  # type: ignore[import-untyped]
@@ -149,19 +149,45 @@ class JobScheduler:
         store: JobStore,
         session_managers: "dict[str, SessionManager]",  # connector_name → SessionManager
         completed_job_ttl_days: int = 7,
+        degraded: "Callable[[str], bool] | None" = None,
     ) -> None:
         self._store = store
         self._session_managers = session_managers
         self._ttl_days = completed_job_ttl_days
+        # Whether a connector is in the mapping but DEGRADED (#144): a reload
+        # could not bring it back. Its jobs are neither cancelled (it is still
+        # configured) nor fired (its manager is not serving); they wait.
+        self._degraded = degraded or (lambda name: False)
+        # Held around every fire pass (#144). A reload pauses the scheduler by
+        # cancelling its task; taking this lock first means the cancel lands in
+        # the sleep between passes, never between an injection and the write
+        # that records it — which would fire the same slot again on restart.
+        self._fire_lock = asyncio.Lock()
+
+    @property
+    def fire_lock(self) -> asyncio.Lock:
+        """Hold it while cancelling `run()` so no fire is cut in half."""
+        return self._fire_lock
+
+    @property
+    def completed_job_ttl_days(self) -> int:
+        return self._ttl_days
+
+    @completed_job_ttl_days.setter
+    def completed_job_ttl_days(self, days: int) -> None:
+        """Swapped in place by `config reload` (#144) — read at the next purge."""
+        self._ttl_days = days
 
     async def run(self) -> None:
         """Main scheduler loop.  Runs until cancelled."""
         logger.info("JobScheduler started (tick_interval=%ds, ttl_days=%d)", _TICK_INTERVAL, self._ttl_days)
         try:
-            await self._catch_up_missed()
+            async with self._fire_lock:
+                await self._catch_up_missed()
             while True:
                 await asyncio.sleep(_TICK_INTERVAL)
-                await self._tick()
+                async with self._fire_lock:
+                    await self._tick()
         except asyncio.CancelledError:
             logger.info("JobScheduler cancelled")
             raise
@@ -373,6 +399,13 @@ class JobScheduler:
             str(job.times) if job.times > 0 else "∞",
         )
 
+        if job.connector and self._degraded(job.connector):
+            logger.warning(
+                "Job %s: connector '%s' is degraded (a config reload could not bring it "
+                "back) — not fired this slot; it fires once the connector is back. "
+                "'agent-chat-gateway status' says what is wrong.", job.id, job.connector,
+            )
+            return job
         if self._connector_is_gone(job):
             # Owner's rule (PR #140): a job whose connector has left the config
             # is not re-homed and not left to fail at every slot — it is

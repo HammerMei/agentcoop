@@ -499,3 +499,27 @@ class TestSubsumptionAgainstBruteForce(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCanonicalSpelling(unittest.TestCase):
+    """`canonical()` is the spelling `==` compares by, deterministic across
+    processes — what a config fingerprint must hash (#144)."""
+
+    def test_equal_patterns_spell_the_same(self):
+        self.assertEqual(RoomPattern("eng-**").canonical(), RoomPattern("eng-*").canonical())
+        self.assertEqual(RoomPattern("eng-*"), RoomPattern("eng-**"))
+
+    def test_class_members_are_ordered(self):
+        self.assertEqual(RoomPattern("x[cba]").canonical(), RoomPattern("x[abc]").canonical())
+        self.assertEqual(RoomPattern("x[!ba]").canonical(), "x[!61,62]")
+
+    def test_a_member_bang_is_not_read_as_negation(self):
+        self.assertNotEqual(RoomPattern("[a!]"), RoomPattern("[!a]"))
+        self.assertNotEqual(RoomPattern("[a!]").canonical(), RoomPattern("[!a]").canonical())
+
+    def test_a_member_bracket_does_not_collide_with_a_literal_one(self):
+        self.assertNotEqual(RoomPattern("[]=]"), RoomPattern("[=]]"))
+        self.assertNotEqual(RoomPattern("[]=]").canonical(), RoomPattern("[=]]").canonical())
+
+    def test_raw_is_kept_for_display(self):
+        self.assertEqual(RoomPattern("eng-**").raw, "eng-**")

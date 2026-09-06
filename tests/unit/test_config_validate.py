@@ -549,6 +549,133 @@ class TestValidateConfigStateOrphans(_ValidateConfigTestBase):
         self.assertEqual(result.warnings, [])
 
 
+class TestValidateAgreesWithBootOnOrphanedFiles(_ValidateConfigTestBase):
+    """#144: boot sweeps orphaned state files BEFORE its session-uniqueness check, so
+    a renamed connector whose state was copied to the new name boots fine. Validate
+    must judge the same layout the same way — and keep refusing the layout boot
+    refuses (an orphan the sweep keeps because a record in it did not parse)."""
+
+    _CFG = """\
+        connectors:
+          - name: rc2
+            type: rocketchat
+            server: {{url: http://localhost:3000, username: bot, password: pw}}
+        agents:
+          default:
+            type: claude
+            working_directory: {agent_dir}
+        watcher_rules:
+          - name: w1
+            connector: rc2
+            agent: default
+            rooms:
+              include: [general]
+    """
+
+    def _record(self, connector: str, **overrides) -> dict:
+        return {"watcher_name": f"{connector}:general", "session_id": "ses-shared",
+                "room_id": "r1", "rule_name": "w1", "connector": connector,
+                "backend_identity": "claude:/x", **overrides}
+
+    def _state(self, connector: str, records: list) -> None:
+        self.runtime_dir.mkdir(exist_ok=True)
+        (self.runtime_dir / f"state.{connector}.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION, "watchers": records}))
+
+    def test_a_renamed_connector_with_copied_state_validates_like_it_boots(self):
+        cfg = self._write(self._CFG.format(agent_dir=self.agent_dir))
+        self._state("rc", [self._record("rc")])       # the old file, no longer configured
+        self._state("rc2", [self._record("rc2")])     # the copy, same session id
+
+        result = self._validate(cfg)
+
+        self.assertTrue(result.ok, result.errors)
+        orphan = [w for w in result.warnings if "state.rc.json" in w]
+        self.assertEqual(len(orphan), 1, result.warnings)
+        self.assertIn("released at the next start", orphan[0])
+        self.assertIn("config reload", orphan[0])
+
+    def test_an_orphan_the_sweep_keeps_still_makes_the_duplicate_an_error(self):
+        cfg = self._write(self._CFG.format(agent_dir=self.agent_dir))
+        self._state("rc", [self._record("rc"),
+                           {**self._record("rc", room_id="r2"), "paused": "yes please"}])
+        self._state("rc2", [self._record("rc2")])
+
+        result = self._validate(cfg)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("ses-shar" in e for e in result.errors), result.errors)
+        kept = [w for w in result.warnings if "state.rc.json" in w]
+        self.assertEqual(len(kept), 1, result.warnings)
+        self.assertIn("KEEP", kept[0])
+        self.assertIn("could not be parsed", kept[0])
+
+
+class TestOrphanDecisionIsGuardedPerFile(_ValidateConfigTestBase):
+
+    def test_a_second_orphan_in_a_legacy_format_is_a_finding_not_a_traceback(self):
+        cfg = self._write(f"""\
+            connectors:
+              - name: rc
+                type: rocketchat
+                server: {{url: http://localhost:3000, username: bot, password: pw}}
+            agents:
+              default:
+                type: claude
+                working_directory: {self.agent_dir}
+            watcher_rules:
+              - name: w1
+                connector: rc
+                agent: default
+                rooms:
+                  include: [general]
+        """)
+        self.runtime_dir.mkdir()
+        (self.runtime_dir / "state.a.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION,
+            "watchers": [{"watcher_name": "a:x", "session_id": "s", "room_id": "r",
+                          "rule_name": "w", "connector": "a"}]}))
+        (self.runtime_dir / "state.b.json").write_text(json.dumps({
+            "watchers": [{"watcher_name": "b:x", "session_id": "s2", "room_id": "r2"}]}))
+
+        result = self._validate(cfg)  # must not raise
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("state.b.json" in e for e in result.errors), result.errors)
+        self.assertTrue(any("state.a.json" in w for w in result.warnings), result.warnings)
+
+
+class TestAnOrphanWithOnlyUnreadableRecordsStillWarns(_ValidateConfigTestBase):
+
+    def test_zero_readable_records_is_not_an_empty_file(self):
+        cfg = self._write(f"""\
+            connectors:
+              - name: rc
+                type: rocketchat
+                server: {{url: http://localhost:3000, username: bot, password: pw}}
+            agents:
+              default:
+                type: claude
+                working_directory: {self.agent_dir}
+            watcher_rules:
+              - name: w1
+                connector: rc
+                agent: default
+                rooms:
+                  include: [general]
+        """)
+        self.runtime_dir.mkdir()
+        (self.runtime_dir / "state.old.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION,
+            "watchers": [{"watcher_name": "old:x", "session_id": "s", "room_id": "r",
+                          "paused": "yes please"}]}))  # unparseable: paused is not a bool
+        result = self._validate(cfg)
+        self.assertTrue(result.ok)
+        kept = [w for w in result.warnings if "state.old.json" in w]
+        self.assertEqual(len(kept), 1, result.warnings)
+        self.assertIn("KEEP", kept[0])
+
+
 class TestValidateConfigLint(_ValidateConfigTestBase):
     def test_lint_survives_a_non_list_watcher_rules(self):
         """`watcher_rules: 5` is a structural error the collector reports while

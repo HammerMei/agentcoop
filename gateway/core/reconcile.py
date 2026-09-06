@@ -23,6 +23,7 @@ rewriting fields, reclaiming records, saving — is the session manager's, so
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Literal
@@ -31,6 +32,7 @@ from .state import (
     CONFIG_SCHEMA_VERSION,
     WatcherState,
     connector_name_of,
+    load_state,
     room_kind_or_channel,
     state_files,
 )
@@ -166,6 +168,62 @@ def orphaned_state_files(configured: Iterable[str]) -> list[tuple[Path, str]]:
     known = set(configured)
     return [(path, connector_name_of(path)) for path in state_files()
             if connector_name_of(path) not in known]
+
+
+@dataclass(frozen=True)
+class OrphanDecision:
+    """What the orphan sweep does with one state file no connector owns.
+
+    `keep_reason` is None when the sweep removes the file (releasing every
+    record with an AUDIT line); otherwise the file stays for repair by hand
+    and the reason says why. `records` are the ones `load_state` could read.
+    """
+
+    path: Path
+    connector: str
+    records: list[WatcherState]
+    keep_reason: str | None = None
+
+    @property
+    def swept(self) -> bool:
+        return self.keep_reason is None
+
+
+def orphan_decisions(configured: Iterable[str]) -> list[OrphanDecision]:
+    """Decide, for every orphaned state file, whether the sweep removes it.
+
+    THE decision — boot executes it (`GatewayService._reclaim_orphaned_state_files`),
+    `config reload` executes it again, and `config validate` predicts it: the
+    session-uniqueness check ignores the files this says will go, because
+    their duplicate ids are released before boot's own uniqueness check runs
+    (#143 ordered the sweep first). Validate deciding on its own would drift
+    from boot exactly where the rename-and-copy layout is concerned.
+
+    A file is kept, not swept, when its records could not all be read:
+    deleting it would delete a record's only session reference without a
+    line saying so. Raises what `load_state` raises on a file this build
+    cannot read — a format refusal, which boot's preflight makes first.
+    """
+    return [orphan_decision_for(path, name) for path, name in orphaned_state_files(configured)]
+
+
+def orphan_decision_for(path: Path, name: str) -> OrphanDecision:
+    """The sweep's decision for ONE orphaned file — so a caller that already
+    walks the files one by one (`config validate`, guarding each load) does
+    not have to load every other orphan to learn about this one."""
+    records = load_state(name)
+    try:
+        raw = json.loads(path.read_text()).get("watchers")
+    except (OSError, ValueError, AttributeError):
+        raw = None
+    if not isinstance(raw, list):
+        reason = "its records could not be read at all"
+    elif len(raw) != len(records):
+        reason = (f"{len(raw) - len(records)} of its {len(raw)} record(s) could not be "
+                  f"parsed and would be lost without a trace")
+    else:
+        reason = None
+    return OrphanDecision(path, name, records, reason)
 
 
 def reconcile_records(

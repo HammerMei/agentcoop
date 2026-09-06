@@ -52,6 +52,7 @@ from .core.bot_identity import (
     find_identity_conflicts,
 )
 from .core.connector import SUPPORTED_CONNECTOR_TYPES
+from .core.reconcile import orphan_decision_for, orphan_decisions
 from .core.state import (
     DuplicateSessionError,
     StateFormatError,
@@ -114,6 +115,18 @@ class Finding:
     message: str
 
 
+def finding_to_dict(finding: Finding) -> dict:
+    """The one JSON shape for a finding — `config validate --json` and the
+    reload plan's validation block both use it (#144)."""
+    return {
+        "level": finding.severity,
+        "entity_kind": finding.entity_kind,
+        "entity_name": finding.entity_name,
+        "field": finding.field,
+        "message": finding.message,
+    }
+
+
 @dataclass
 class ValidationResult:
     config_path: str
@@ -123,10 +136,22 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
     lint_findings: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    # The parsed config when there were no load errors — so a caller that
+    # validates and then acts on the file (`config reload`) reads it once.
+    config: GatewayConfig | None = None
 
     @property
     def ok(self) -> bool:
         return not self.errors
+
+    def to_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "config_path": self.config_path,
+            "watcher_count": self.watcher_count,
+            "entry_count": self.entry_count,
+            "findings": [finding_to_dict(f) for f in self.findings],
+        }
 
 
 def validate_config(config_path: str, lint: bool = False) -> ValidationResult:
@@ -187,12 +212,16 @@ def validate_config(config_path: str, lint: bool = False) -> ValidationResult:
 
     _check_connectors(config, result)
     _check_state_orphans(config, result)
-    _check_session_uniqueness(result)
+    _check_session_uniqueness(config, result)
     _check_shadowed_rules(config, result)
     _check_declared_bot_accounts(config, result)
     if lint:
         _lint_config(raw, result)
 
+    if result.ok:
+        # Only once every check has run: an error a later check adds must not
+        # leave a config attached to a result that says the file is invalid.
+        result.config = config
     return result
 
 
@@ -391,7 +420,7 @@ def _check_connectors(config: GatewayConfig, result: ValidationResult) -> None:
                 _empty_field("server.team")
 
 
-def _check_session_uniqueness(result: ValidationResult) -> None:
+def _check_session_uniqueness(config: GatewayConfig, result: ValidationResult) -> None:
     """Report the state-file condition that now refuses to boot the daemon.
 
     `GatewayService` runs `check_session_uniqueness()` before anything is built, so a
@@ -400,12 +429,22 @@ def _check_session_uniqueness(result: ValidationResult) -> None:
     reporting success on exactly the fault it exists to find first — the operator's only
     way to learn about it would be a failed start.
 
+    Boot's check runs AFTER its orphan sweep (#143), so the files the sweep removes
+    — a renamed connector's old file, copied to the new name — never reach it.
+    This check leaves those files out too (`orphan_decisions` is the sweep's own
+    decision, predicted here and executed there), or `config validate` and
+    `config reload` would refuse a layout the next start accepts (#144). A file
+    the sweep KEEPS — one with a record it could not parse — stays in, because
+    boot's check sees it and refuses; nothing is written here either way.
+
     Attributed globally: the fault is a pair of records in a state file, not a config
     entry, so there is no row to mark. The check reads the same files
     `_check_state_orphans` already looks at.
     """
     try:
-        check_session_uniqueness()
+        swept = [d.connector for d in orphan_decisions({c.name for c in config.connectors})
+                 if d.swept]
+        check_session_uniqueness(ignore=swept)
     except DuplicateSessionError as exc:
         result.errors.append(str(exc))
         result.findings.append(Finding("error", "global", None, None, str(exc)))
@@ -461,6 +500,12 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
         file_connector = connector_name_of(path)
         try:
             states = load_state(file_connector)
+            # The sweep's decision for THIS file, inside the same guard: it
+            # loads the file again, and a format refusal must become a finding
+            # here, not a traceback — another orphan's refusal least of all.
+            decision = (orphan_decision_for(path, file_connector)
+                        if file_connector not in configured else None)
+            kept = decision.keep_reason if decision else None
         except StateFormatError as exc:
             msg = str(exc)
             result.errors.append(msg)
@@ -471,21 +516,31 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
         except Exception:
             # Handled inside load_state by starting fresh; nothing to report.
             continue
-        if file_connector not in configured and states:
+        if decision and (states or kept):
             # A state file whose connector was renamed or removed (Codex round
             # 4): its records are valid but no SessionManager will ever
             # hydrate them — the loop below iterates configured connectors
             # only, so without this the file's sessions are abandoned with no
             # warning anywhere. Only files that actually carry records are
-            # reported; an empty leftover file is noise.
-            msg = (
-                f"State file '{path.name}' belongs to connector "
-                f"'{file_connector}', which is not in config.yaml. Its "
-                f"{len(states)} saved watcher(s) will be released at the next "
-                "start: each session id is written to the log and the file is "
-                f"removed. Add '{file_connector}' back to config.yaml first if "
-                "you want to keep them."
-            )
+            # reported; an empty leftover file is noise. What the next start
+            # does with the file is the sweep's decision, not restated here.
+            if kept:
+                msg = (
+                    f"State file '{path.name}' belongs to connector "
+                    f"'{file_connector}', which is not in config.yaml, and the next "
+                    f"start will KEEP it because {kept}. Fix or delete the file by "
+                    f"hand; its {len(states)} readable watcher(s) are not released "
+                    f"until then."
+                )
+            else:
+                msg = (
+                    f"State file '{path.name}' belongs to connector "
+                    f"'{file_connector}', which is not in config.yaml. Its "
+                    f"{len(states)} saved watcher(s) will be released at the next "
+                    "start (or 'config reload'): each session id is written to the "
+                    f"log and the file is removed. Add '{file_connector}' back to "
+                    "config.yaml first if you want to keep them."
+                )
             result.warnings.append(msg)
             result.findings.append(
                 Finding("warning", "global", None, None, msg)

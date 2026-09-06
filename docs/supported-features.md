@@ -268,7 +268,16 @@ watcher_rules:
 - ✅ `start` — Start daemon in background
 - ✅ `stop` — Graceful shutdown
 - ✅ `restart` — Restart daemon
-- ✅ `status` — Check if daemon is running
+- ✅ `status` — Check if daemon is running; shows the active config digest,
+  when it was loaded, and any section a `config reload` left degraded
+- ✅ `config reload [--dry-run] [--json]` — apply `config.yaml` changes to the
+  running daemon: validate the whole file, diff against the active config,
+  restart only the affected connectors and agents, reconcile every record
+  (sessions kept where the rule changed, expired with the id logged where no
+  rule covers them). Exit 0/1/2 = applied or no-op / refused / degraded.
+  With the daemon stopped, `--dry-run` prints the next start's plan
+- ✅ `config show [--json]` — SHA-256 digest of the resolved config plus its
+  flattened, secret-redacted contents; warns when the running daemon differs
 
 #### Watcher Control
 - ✅ `list` — List watcher records and their state; everything but `idle` by
@@ -332,7 +341,7 @@ watcher_rules:
   set per-entry, not inherited — and the removed `session_id`, reported as removed
   rather than as "set it per-entry"
 - ✅ `tool_presets` are regex-validated eagerly at load, even if unused
-- ✅ `agent-chat-gateway config validate [--lint]` — checks config.yaml
+- ✅ `agent-chat-gateway config validate [--lint] [--json]` — checks config.yaml
   without starting the daemon: structural validation, per-connector-type
   credential checks (e.g. empty Rocket.Chat/Mattermost `server:` fields, or
   a `server.url` that doesn't look like a URL — a lenient scheme+netloc
@@ -469,8 +478,12 @@ watcher_rules:
 
 ### Configuration & Operations
 
-- ❌ **Hot-reload**: Configuration changes require daemon restart
-  - No zero-downtime config updates
+- ✅ **Config reload** (`config reload`): applies `config.yaml` to the running
+  daemon, restarting only what changed — see `docs/design/config-reload-design.md`
+  - Operator-triggered only: no file watcher, no SIGHUP, no TUI-save trigger
+  - Messages arriving on a connector while it restarts may be lost, as for any
+    connector restart; a degraded section is retried by the next reload, not on
+    its own
 
 - ❌ **Web UI**: No monitoring or configuration dashboard
   - CLI-only operations
@@ -499,7 +512,6 @@ watcher_rules:
 - 🔄 **Generic webhook connector** — Support push-based events from any platform
 
 #### Operational Features
-- 🔄 **Config hot-reload** — Update configuration without restart
 - 🔄 **Structured logging** — JSON-formatted logs with machine parsing
 - 🔄 **Metrics endpoint** — Prometheus-compatible metrics (message count, latency, errors)
 

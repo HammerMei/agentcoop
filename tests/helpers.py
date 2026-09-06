@@ -52,9 +52,16 @@ class MockAgentBackend(AgentBackend):
         agent.created_sessions[0]["working_directory"]
     """
 
-    def __init__(self, responses=None, default_response: str = "mock reply") -> None:
+    def __init__(
+        self, responses=None, default_response: str = "mock reply",
+        id_prefix: str = "mock-session",
+    ) -> None:
         self._responses = list(responses or [])
         self._default_response = default_response
+        # Session ids are `<id_prefix>-NNNN`. Two backends built in one test
+        # (a reload rebuilds an agent) would otherwise mint the same ids and
+        # read as "the same session" to code comparing them.
+        self._id_prefix = id_prefix
         self.side_effect: type[Exception] | None = None
 
         # Captured call records for assertions.
@@ -68,7 +75,7 @@ class MockAgentBackend(AgentBackend):
         self, working_directory, extra_args=None, session_title=None
     ) -> str:
         self._session_counter += 1
-        session_id = f"mock-session-{self._session_counter:04d}"
+        session_id = f"{self._id_prefix}-{self._session_counter:04d}"
         self.created_sessions.append(
             {
                 "session_id": session_id,
@@ -252,32 +259,96 @@ def isolate_runtime_dir(testcase):
     return tmp, runtime
 
 
-def write_gateway_config(tmp, connector_name="script", *, working_directory=None):
+def gateway_config_text(
+    *, connectors=("script",), agents=None, rules=None, working_directory=".", extra="",
+) -> str:
+    """The YAML of a minimal `config.yaml`, parameterized — the one hand-built shape.
+
+    Script connectors only (constructible with no network or subprocess). `agents`
+    is `{name: {field: value}}` (default: one claude agent named `default`);
+    `rules` is a list of `{name, agent, connector, rooms, ...}` dicts (default:
+    rule `w1` on room `script` of the first connector). `extra` is appended
+    verbatim, for top-level keys such as `max_queue_depth`.
+    """
+    import yaml
+
+    agents = agents if agents is not None else {
+        "default": {"type": "claude", "working_directory": str(working_directory)}}
+    rules = rules if rules is not None else [{
+        "name": "w1", "agent": "default", "connector": connectors[0],
+        "rooms": {"include": ["script"]}}]
+    doc = {
+        "connectors": [{"name": name, "type": "script"} for name in connectors],
+        "agents": agents,
+        "watcher_rules": rules,
+    }
+    return yaml.safe_dump(doc, sort_keys=False) + extra
+
+
+def write_gateway_config(tmp, connector_name="script", *, working_directory=None, text=None):
     """Write and load a minimal `config.yaml` under `tmp` — the one hand-built config.
 
-    One script connector (constructible with no network or subprocess), one
-    claude agent, one rule."""
-    import textwrap
-
+    One script connector, one claude agent, one rule (`gateway_config_text`), or
+    `text` verbatim when a test needs another shape."""
     from gateway.config import GatewayConfig
 
     path = tmp / "config.yaml"
-    path.write_text(textwrap.dedent(f"""\
-        connectors:
-          - name: {connector_name}
-            type: script
-        agents:
-          default:
-            type: claude
-            working_directory: {working_directory or tmp}
-        watcher_rules:
-          - name: w1
-            agent: default
-            connector: {connector_name}
-            rooms:
-              include: [script]
-    """))
+    path.write_text(text if text is not None else gateway_config_text(
+        connectors=(connector_name,), working_directory=working_directory or tmp))
     return GatewayConfig.from_file(str(path))
+
+
+async def boot_gateway_service(testcase, tmp, runtime, config, *, config_path=None):
+    """Boot a real `GatewayService` on `config` and return it once its control
+    socket is up; torn down with the test.
+
+    Every agent backend is a `MockAgentBackend` (`_build_agent_backend` is
+    patched for the test's whole life, so a reload rebuilding an agent gets a
+    mock too); the control socket and `jobs.json` live under `runtime`. The
+    caller has already isolated `RUNTIME_DIR` (`isolate_runtime_dir`). This is
+    the seam the reload tests drive: `service._control.dispatch_command`.
+    """
+    import asyncio
+
+    from gateway.core.job_store import JobStore
+    from gateway.service import GatewayService
+
+    built: list[int] = []
+
+    def _backend(cfg):
+        # Distinct ids per backend generation (see `MockAgentBackend.id_prefix`).
+        built.append(len(built))
+        return MockAgentBackend(id_prefix=f"mock-{len(built)}")
+
+    patches = [
+        patch("gateway.service._build_agent_backend", side_effect=_backend),
+        # A stop that fails is retried a few seconds apart; tests need not wait.
+        patch("gateway.core.retry_stop.STOP_RETRY_DELAY", 0.0),
+        patch("gateway.control.CONTROL_SOCK", runtime / "control.sock"),
+        patch("gateway.service.JobStore", side_effect=lambda: JobStore(runtime / "jobs.json")),
+    ]
+    for p in patches:
+        p.start()
+        testcase.addCleanup(p.stop)
+
+    service = GatewayService(config, config_path=str(config_path or tmp / "config.yaml"))
+    task = asyncio.create_task(service.run())
+
+    async def _teardown():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    testcase.addAsyncCleanup(_teardown)
+    for _ in range(200):
+        if service._control._server is not None:
+            return service
+        if task.done():
+            task.result()  # raises the boot failure
+        await asyncio.sleep(0.02)
+    raise AssertionError("gateway service did not come up")
 
 
 def make_record_from_rule(rule, room, *, session_id="sess-1", connector=None,
@@ -379,6 +450,82 @@ async def settle_routing_tasks(connector):
         await asyncio.sleep(0)
 
 
+def make_bare_gateway_service(**attrs):
+    """A `GatewayService` built without `__init__`, every collaborator a double.
+
+    For tests that drive `run()`/`shutdown()` against mocked phases (the
+    handshake pipe, the identity barrier's ordering). Sets every attribute
+    `__init__` sets — a hand-built subset describes an object no code path
+    produces, and the first method to read an unset field fails several layers
+    from the cause; two copies of this fixture once broke together when
+    `_agent_errors` arrived. `attrs` override any of them.
+    """
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from gateway.service import GatewayService
+
+    svc = GatewayService.__new__(GatewayService)
+    svc._config = None
+    svc._config_path = None
+    svc._config_digest = ""
+    svc._config_loaded_at = ""
+    svc._reload_lock = asyncio.Lock()
+    svc._reloading = False
+    svc._shutdown_holds_reload_lock = False
+    svc._notifier = None
+    svc._agent_errors = {}
+    svc._core_config = MagicMock()
+    svc._registry = MagicMock()
+    svc._maps = SimpleNamespace(connector_view={})
+    svc._expiry_task = None
+    svc._scheduler_task = None
+    svc._agents = {}
+    svc._runtime_manager = MagicMock()
+    svc._runtime_manager.start_all = AsyncMock(return_value=[])
+    svc._runtime_manager.has_active_brokers = False
+    svc._runtime_manager.unavailable_agents = set()
+    svc._runtime_manager.stop_all = AsyncMock()
+    svc._runtime_manager.retry_leftovers = AsyncMock()
+    svc._runtime_manager.leftovers = []
+    svc._leftover_entries = []
+    svc._dm_claims = {}
+    svc._entries = []
+    svc._job_store = None
+    svc._session_managers = {}
+    svc._job_scheduler = MagicMock()
+    svc._job_scheduler.fire_lock = asyncio.Lock()
+    svc._control = MagicMock()
+    svc._control.start = AsyncMock()
+    svc._control.stop = AsyncMock()
+    for name, value in attrs.items():
+        setattr(svc, name, value)
+    return svc
+
+
+def make_connector_config(name="rc", type="rocketchat", **server):
+    """A `ConnectorConfig` with a `server:` block — `server` keys land in `raw`."""
+    from gateway.config import ConnectorConfig
+
+    return ConnectorConfig(name=name, type=type,
+                           raw={"server": {"url": "https://rc.example", **server}})
+
+
+def make_gateway_config(connectors=None, agents=None, rules=None, **kw):
+    """A `GatewayConfig` through the real constructor: one rocketchat connector
+    `rc`, one agent `a`, one rule `eng` on room `eng` unless overridden."""
+    from gateway.config import GatewayConfig
+
+    return GatewayConfig(
+        connectors=connectors if connectors is not None else [make_connector_config()],
+        agents=agents if agents is not None else {"a": AgentConfig(name="a")},
+        watcher_rules=rules if rules is not None else [
+            make_rule(room="eng", name="eng", connector="rc", agent="a")],
+        **kw,
+    )
+
+
 def make_bare_session_manager(**attrs):
     """A `SessionManager` built without `__init__`, every collaborator a double.
 
@@ -410,6 +557,8 @@ def make_bare_session_manager(**attrs):
     mgr._lifecycle = MagicMock()
     mgr._lifecycle.sync_watchers = AsyncMock(return_value=[])
     mgr._lifecycle.stop_all = AsyncMock()
+    mgr._deferred_membership = []
+    mgr._quiesced = False
     mgr._lifecycle.drain_verbs = AsyncMock()
     mgr._lifecycle.pause_watcher = AsyncMock()
     mgr._lifecycle.resume_watcher = AsyncMock()

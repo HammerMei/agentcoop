@@ -1171,3 +1171,331 @@ class TestCLIDaemonNotRunning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Tests: config reload / config show / config validate --json / status digest (#144)
+# ---------------------------------------------------------------------------
+
+class _ConfigCLIBase(_CLITestBase):
+    """The reload-family commands need a real config file and an isolated state
+    dir, and — unlike the rest of this module — a way to say the daemon is NOT
+    running, because the offline plan is a distinct code path."""
+
+    def setUp(self):
+        super().setUp()
+        self.agent_dir = Path(self.tmp) / "work"
+        self.agent_dir.mkdir()
+        self.runtime_dir = Path(self.tmp) / "runtime"
+        self.runtime_dir.mkdir()
+        self.cfg_path = str(Path(self.tmp) / "config.yaml")
+        self._write_config()
+
+    def _write_config(self, rules: str = "") -> None:
+        # Local on purpose: `tests.helpers.gateway_config_text` writes script
+        # connectors only, and these tests need a rocketchat one — its `server`
+        # block carries the password `config show` must redact and the URL the
+        # validator checks.
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: rc
+                type: rocketchat
+                server: {{url: http://localhost:3000, username: bot, password: hunter2}}
+            agents:
+              default:
+                type: claude
+                working_directory: {self.agent_dir}
+            watcher_rules:
+              - name: w1
+                connector: rc
+                agent: default
+                rooms:
+                  include: [general]
+        """) + rules)
+
+    def _run_with(self, args: list[str], *, running: bool) -> tuple[str, str, int]:
+        main = _import_main()
+        stdout_buf, stderr_buf, exit_code = io.StringIO(), io.StringIO(), 0
+        with (
+            patch("sys.argv", ["acg"] + args),
+            patch("gateway.cli.CONTROL_SOCK", self.sock_path),
+            patch("gateway.daemon.is_running", return_value=(running, 99999 if running else None)),
+            patch("gateway.daemon.PID_FILE", self.pid_file),
+            patch("gateway.daemon.LOG_FILE", self.log_file),
+            patch("gateway.core.state.RUNTIME_DIR", self.runtime_dir),
+        ):
+            try:
+                with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+                    main()
+            except SystemExit as exc:
+                exit_code = exc.code if isinstance(exc.code, int) else 1
+        return stdout_buf.getvalue(), stderr_buf.getvalue(), exit_code
+
+
+class TestCLIConfigValidateJson(_ConfigCLIBase):
+
+    def test_json_document_carries_ok_and_findings(self):
+        stdout, _, code = self._run_with(
+            ["config", "validate", "--config", self.cfg_path, "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["watcher_count"], 1)
+        self.assertEqual(doc["findings"], [])
+
+    def test_json_findings_map_the_finding_fields_and_exit_one(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "validate", "--config", self.cfg_path, "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertEqual(set(doc["findings"][0]),
+                         {"level", "entity_kind", "entity_name", "field", "message"})
+        self.assertEqual(doc["findings"][0]["level"], "error")
+
+
+class TestCLILargeResponses(_ConfigCLIBase):
+
+    def test_a_response_beyond_64_kib_is_read_whole(self):
+        """asyncio's default StreamReader limit is 64 KiB and `readline` raises
+        past it; a reload plan or a `list` for a few hundred rooms is bigger."""
+        rows = [{"watcher_name": f"rc:room-{i}", "room_name": f"room-{i}", "room_id": f"r{i}",
+                 "connector": "rc", "agent_name": "a", "session_id": "s" * 40,
+                 "participants": [], "state": "active"} for i in range(600)]
+        self.assertGreater(len(json.dumps({"ok": True, "data": rows})), 64 * 1024)
+        self._start_daemon({"list": {"ok": True, "data": rows, "errors": []}})
+        stdout, stderr, code = self._run_with(["list"], running=True)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("rc:room-599", stdout)
+
+
+class TestCLIReadTimeout(_ConfigCLIBase):
+
+    def test_no_response_in_time_is_exit_two_not_unreachable(self):
+        """The daemon took the request and may still be applying it — neither
+        "nothing changed" (1) nor done (0)."""
+        def _slow(req):
+            time.sleep(1.0)
+            return {"ok": True}
+
+        self._start_daemon({"config-reload": _slow})
+        from gateway.cli import _send_command
+        stderr_buf = io.StringIO()
+        with (
+            patch("gateway.cli.CONTROL_SOCK", self.sock_path),
+            patch("gateway.daemon.is_running", return_value=(True, 99999)),
+            redirect_stderr(stderr_buf),
+        ):
+            with self.assertRaises(SystemExit) as cm:
+                _send_command({"cmd": "config-reload"}, timeout=0.2)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("No response from the daemon", stderr_buf.getvalue())
+        self.assertIn("may still be working", stderr_buf.getvalue())
+
+
+class TestCLIConfigReload(_ConfigCLIBase):
+
+    _PLAN = {
+        "ok": True, "dry_run": True, "offline": False, "applied": False, "exit_code": 0,
+        "error": "", "digest": "d" * 64, "validation": {"findings": []},
+        "changes": {"connectors": {"added": [], "changed": [], "removed": []},
+                    "agents": {"added": [], "changed": [], "removed": []},
+                    "rules": {"added": [], "changed": ["w1"], "removed": [], "reordered": False},
+                    "values": []},
+        "watchers": [{"connector": "rc", "room_id": "r1", "handle": "rc:general",
+                      "agent": "default", "action": "rematerialize", "from_rule": "w1",
+                      "to_rule": "w1", "session_id": "", "reason": ""}],
+        "notes": [], "degraded": [],
+    }
+
+    def test_running_daemon_receives_dry_run_and_the_absolute_path(self):
+        received: list[dict] = []
+
+        def _capture(req):
+            received.append(req)
+            return dict(self._PLAN)
+
+        self._start_daemon({"config-reload": _capture})
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run"], running=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(received[0]["dry_run"], True)
+        import os
+        self.assertEqual(received[0]["config_path"], os.path.abspath(self.cfg_path),
+                         "absolute, not resolved — the daemon compares it the same way")
+        self.assertIn("rules: ~ w1 (changed)", stdout)
+        self.assertIn("rematerialize w1 → w1", stdout)
+        self.assertIn("Dry run", stdout)
+
+    def test_exit_code_comes_from_the_plan(self):
+        degraded = dict(self._PLAN, dry_run=False, applied=True, exit_code=2,
+                        degraded=[{"kind": "connector", "name": "rc", "error": "refused"}])
+        self._start_daemon({"config-reload": degraded})
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path], running=True)
+        self.assertEqual(code, 2)
+        self.assertIn("[ERROR] connector 'rc': refused", stdout)
+
+    def test_json_output_is_the_daemons_document(self):
+        self._start_daemon({"config-reload": dict(self._PLAN)})
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run", "--json"], running=True)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["watchers"][0]["action"], "rematerialize")
+        self.assertEqual(doc["exit_code"], 0)
+
+    def test_a_control_server_refusal_is_an_error(self):
+        self._start_daemon({"config-reload": {"ok": False, "error": "nope"}})
+        _, stderr, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path], running=True)
+        self.assertEqual(code, 1)
+        self.assertIn("nope", stderr)
+
+    def test_a_control_server_refusal_is_still_a_document_under_json(self):
+        self._start_daemon({"config-reload": {"ok": False, "error": "nope"}})
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--json"], running=True)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertEqual((doc["ok"], doc["error"], doc["exit_code"]), (False, "nope", 1))
+
+    def test_offline_dry_run_is_the_next_starts_plan(self):
+        from gateway.core.state import save_state
+        from gateway.core.watcher_manager import RoomRef
+        from gateway.core.watcher_rule import RoomKind
+        from tests.helpers import make_record_from_rule, make_rule
+
+        gone = make_record_from_rule(
+            make_rule(room="old", name="old-rule", connector="rc", agent="default"),
+            RoomRef(id="r-old", kind=RoomKind.CHANNEL, name="old"), session_id="sess-old-1")
+        with patch("gateway.core.state.RUNTIME_DIR", self.runtime_dir):
+            save_state("rc", [gone])
+
+        stdout, stderr, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run"], running=False)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("expire no-rule-matches", stdout)
+        self.assertIn("sess-old-1", stdout)
+        self.assertIn("next start", stdout)
+
+    def test_offline_execute_prints_the_plan_and_refuses(self):
+        stdout, stderr, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path], running=False)
+        self.assertEqual(code, 1)
+        self.assertIn("not running", stderr)
+        self.assertIn("agent-chat-gateway start", stderr)
+
+    def test_offline_dry_run_keeps_the_validation_warnings(self):
+        self._write_config(rules=(  # w2 is shadowed by w1 — a warning, not an error
+            "  - name: w2\n    connector: rc\n    agent: default\n"
+            "    rooms:\n      include: [general]\n"))
+        stdout, stderr, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run", "--json"], running=False)
+        self.assertEqual(code, 0, stderr)
+        doc = json.loads(stdout)
+        levels = [f["level"] for f in doc["validation"]["findings"]]
+        self.assertIn("warning", levels, doc["validation"])
+
+    def test_offline_execute_in_json_is_a_refusal_carrying_the_plan(self):
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertFalse(doc["dry_run"], "no --dry-run was asked for")
+        self.assertTrue(doc["offline"])
+        self.assertIn("not running", doc["error"])
+
+    def test_running_daemon_with_no_socket_is_an_error_not_an_offline_plan(self):
+        # No mock daemon started: the socket path does not exist.
+        stdout, stderr, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run"], running=True)
+        self.assertEqual(code, 1)
+        self.assertIn("Control socket not found", stderr)
+        self.assertNotIn("next start", stdout)
+
+    def test_an_invalid_file_is_refused_offline_too(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "reload", "--config", self.cfg_path, "--dry-run"], running=False)
+        self.assertEqual(code, 1)
+        self.assertIn("nobody", stdout)
+
+
+class TestCLIConfigShow(_ConfigCLIBase):
+
+    def test_prints_digest_and_redacted_flattened_config(self):
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path], running=False)
+        self.assertEqual(code, 0)
+        self.assertRegex(stdout, r"Digest:  [0-9a-f]{64}")
+        self.assertIn("connectors.rc.raw.server.password: ***", stdout)
+        self.assertNotIn("hunter2", stdout)
+        self.assertNotIn("Active:", stdout, "no daemon, no active digest")
+
+    def test_warns_when_the_running_daemon_differs(self):
+        self._start_daemon({"config-show": {
+            "ok": True, "digest": "0" * 64, "loaded_at": "2026-09-04T00:00:00-07:00",
+            "config_path": self.cfg_path, "degraded": [], "reloading": False}})
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path], running=True)
+        self.assertEqual(code, 0)
+        self.assertIn("Active:  " + "0" * 64, stdout)
+        self.assertIn("differs from the file", stdout)
+
+    def test_a_daemon_that_refuses_config_show_is_an_error_not_an_offline_show(self):
+        self._start_daemon({"config-show": {"ok": False, "error": "Unknown command: config-show"}})
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path], running=True)
+        self.assertEqual(code, 1)
+        self.assertIn("[ERROR] the daemon refused config-show", stderr)
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--json"], running=True)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIn("refused", doc["error"])
+
+    def test_config_show_json_reports_an_invalid_file_as_a_document(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
+
+    def test_json_carries_digest_in_sync_and_redacted_config(self):
+        self._start_daemon({"config-show": {
+            "ok": True, "digest": "0" * 64, "loaded_at": "t", "config_path": self.cfg_path,
+            "degraded": [], "reloading": False}})
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--json"], running=True)
+        doc = json.loads(stdout)
+        self.assertEqual(len(doc["digest"]), 64)
+        self.assertFalse(doc["in_sync"])
+        self.assertEqual(doc["config"]["connectors"][0]["raw"]["server"]["password"], "***")
+
+
+class TestCLIStatusConfigLine(_ConfigCLIBase):
+
+    def test_status_shows_the_active_digest_and_degraded_sections(self):
+        self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self.pid_file.write_text("99999")
+        self._start_daemon({
+            "list": {"ok": True, "data": [], "errors": []},
+            "config-show": {"ok": True, "digest": "abcdef0123456789" + "0" * 48,
+                            "loaded_at": "2026-09-04T10:00:00-07:00", "config_path": self.cfg_path,
+                            "degraded": [{"kind": "connector", "name": "mm", "error": "refused"}],
+                            "reloading": False},
+        })
+        stdout, _, code = self._run_with(["status"], running=True)
+        self.assertEqual(code, 0)
+        self.assertIn("Config:   abcdef012345 (loaded 2026-09-04T10:00:00-07:00)", stdout)
+        self.assertIn("[ERROR] Degraded: connector 'mm' — refused", stdout)

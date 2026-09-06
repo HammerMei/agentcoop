@@ -237,6 +237,10 @@ class GatewayConfig:
     max_queue_depth: int = 100  # max pending messages per room queue; 0 = unbounded
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
+    def rules_for(self, connector: str) -> list[WatcherRule]:
+        """This connector's rules, in file order — the list its session manager runs."""
+        return [r for r in self.watcher_rules if r.connector == connector]
+
     @staticmethod
     def from_file(path: str | Path) -> "GatewayConfig":
         """The real, production config loader — deliberately fail-fast: stops

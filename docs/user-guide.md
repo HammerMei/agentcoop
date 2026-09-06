@@ -733,9 +733,75 @@ agent-chat-gateway stop
 # Restart (picks up config and code changes)
 agent-chat-gateway restart [--config path/to/config.yaml]
 
-# Check status
+# Check status — pid, uptime, watcher count, the active config digest and load
+# time, and any section a reload could not bring back
 agent-chat-gateway status
 ```
+
+### Reloading Configuration
+
+`config reload` applies changes in `config.yaml` to the running daemon without
+restarting the parts the edit did not touch:
+
+```bash
+# Preview: what a reload would do, changing nothing
+agent-chat-gateway config reload --dry-run
+
+# Apply: prints the plan it is about to execute, then executes it
+agent-chat-gateway config reload
+
+# Machine-readable, for scripts and agents
+agent-chat-gateway config reload --dry-run --json
+```
+
+What it does, in order: validates the whole file (an invalid file is rejected
+in full and the daemon is left exactly as it was); diffs it against the
+configuration the daemon is running; restarts only the connectors and agents
+whose definition changed; and reconciles every watcher record against the
+current rules exactly as a start does — a record whose rule changed is
+re-materialized **with its session kept**, a record no rule covers any more is
+expired with its full session id logged (`AUDIT: session released`).
+
+| You changed… | What restarts |
+|---|---|
+| A connector's fields (token, server, team…) | That connector only; its records are re-validated against its scope after reconnect |
+| A connector's `name` | Treated as remove + add: every record under the old name expires, its state file is deleted — the dry run shows this |
+| An agent's fields | That agent's backend (an OpenCode sidecar restarts) and the watchers on it, sessions kept |
+| An agent's `type` or `working_directory` | As above, but those watchers start fresh sessions; the old ids are logged |
+| A rule (edit, add, remove, reorder) | Nothing restarts; every record is re-matched — re-materialized or expired as the plan shows |
+| `max_queue_depth`, `scheduler.*` | Nothing; the value is swapped in place |
+| `description` on anything | Nothing at all — a free edit |
+
+**Exit codes:** `0` applied cleanly, or no changes; `1` the file is invalid or
+the command was refused (nothing changed); `2` applied, but a section is
+**degraded** — a connector that failed to reconnect, an agent whose backend
+or permission broker failed to start or to stop, a watcher that did not come
+back. Treat `2` as a failed reload and act on it now: the output names the
+section and what to do; `status` keeps showing it. Nothing is rolled back and
+nothing is force-killed — a stop is retried a few times, and what still will
+not stop is left for you to look at (it is stopped again at the next reload
+and at shutdown). Fix what was wrong and reload again: every reload retries
+the degraded sections, even when the file did not change.
+
+**What it does not guarantee.** Messages arriving on a connector while it
+restarts may be lost, the same as for any connector restart. A reload cannot
+be interrupted once sent — the plan printed before the apply is your last
+look, and a dry run is not binding on a later apply (the file is read again).
+Lifecycle verbs (`pause`/`resume`/`reset`/`expire`) and a second `reload` are
+refused while one applies. Saving in the config TUI does **not** reload.
+
+With the daemon stopped, `--dry-run` prints the plan the next `start` will
+execute (the same reconciliation), and a reload without `--dry-run` refuses.
+If the daemon appears to be running but cannot be reached, the command fails
+rather than guessing.
+
+`config show` prints a SHA-256 digest of the *resolved* configuration
+(templates expanded; comments and key order do not matter) and its flattened
+contents with passwords, tokens and secrets redacted — safe to paste into a
+bug report or compare between machines. With the daemon running it also shows
+the active digest and warns when the file differs, so "I edited but forgot to
+reload" is visible. `config validate --json` and `config reload --json` emit
+structured output.
 
 ### Watcher Control
 
