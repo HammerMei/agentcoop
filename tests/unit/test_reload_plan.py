@@ -195,9 +195,9 @@ class TestRendering(unittest.TestCase):
                                   findings=[{"level": "error", "message": "bad thing"},
                                             {"level": "warning", "message": "shadowed rule"}])
         text = plan.render()
-        self.assertIn("✗ config.yaml: 1 error(s)", text)
-        self.assertIn("  ✗ bad thing", text)
-        self.assertIn("  ⚠ shadowed rule", text)
+        self.assertIn("[ERROR] config.yaml: 1 error(s)", text)
+        self.assertIn("  [ERROR] bad thing", text)
+        self.assertIn("  [WARNING] shadowed rule", text)
 
     def test_render_of_an_apply_with_degraded_says_so(self):
         plan = self._plan(dry_run=False, applied=True,
@@ -205,8 +205,8 @@ class TestRendering(unittest.TestCase):
                           degraded=[Degraded("connector", "rc", "refused")])
         text = plan.render()
         self.assertIn("connectors: ~ rc (restart)", text)
-        self.assertIn("connector 'rc': refused", text)
-        self.assertIn("1 degraded section", text)
+        self.assertIn("  [ERROR] connector 'rc': refused", text)
+        self.assertIn("[ERROR] Applied with 1 degraded section", text)
 
     def test_the_closing_line_counts_connectors_and_agents_not_only_watchers(self):
         """A degraded connector that comes back has no resident watcher to list;

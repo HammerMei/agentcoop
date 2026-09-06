@@ -266,12 +266,17 @@ changed, because the fix is often not in the file (a server reachable again,
 a sidecar binary put back); the plan notes the retry. Degraded is a
 reload-only state; boot remains fail-fast for connectors.
 
-Human output has four blocks: validation warnings; entity-level
-added/changed/removed per connector, agent and rule (plus "reordered" and
-value swaps); one line per affected watcher — `restart (why)`,
+Human output has four blocks: validation warnings (`[WARNING] …`);
+entity-level added/changed/removed per connector, agent and rule (plus
+"reordered" and value swaps); one line per affected watcher — `restart (why)`,
 `rematerialize <from> → <to>`, `expire <reason>  session=<full id>`; degraded
-sections. The final line says what the plan is: a dry run, the next start's
-plan, applied, applied with N degraded sections, or refused.
+sections, each line `[ERROR] <kind> '<name>': <what and what to do>`. The
+final line says what the plan is: a dry run, the next start's plan, applied,
+`[ERROR] Applied with N degraded section(s)`, or `[ERROR] <refusal>`. Two
+rules of voice (owner, 2026-09-05): a line an operator must not skim past
+starts with its severity tag; and the output describes the current state
+only — a degraded section that this reload brought back is not mentioned,
+because there is nothing left to act on.
 
 Exit codes: **0** applied cleanly or nothing to do, **1** validation failure
 or refusal, **2** any section degraded.

@@ -1312,7 +1312,7 @@ class TestCLIConfigReload(_ConfigCLIBase):
         stdout, _, code = self._run_with(
             ["config", "reload", "--config", self.cfg_path], running=True)
         self.assertEqual(code, 2)
-        self.assertIn("connector 'rc': refused", stdout)
+        self.assertIn("[ERROR] connector 'rc': refused", stdout)
 
     def test_json_output_is_the_daemons_document(self):
         self._start_daemon({"config-reload": dict(self._PLAN)})
@@ -1451,4 +1451,4 @@ class TestCLIStatusConfigLine(_ConfigCLIBase):
         stdout, _, code = self._run_with(["status"], running=True)
         self.assertEqual(code, 0)
         self.assertIn("Config:   abcdef012345 (loaded 2026-09-04T10:00:00-07:00)", stdout)
-        self.assertIn("Degraded: connector 'mm' — refused", stdout)
+        self.assertIn("[ERROR] Degraded: connector 'mm' — refused", stdout)

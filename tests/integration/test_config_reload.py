@@ -788,7 +788,8 @@ class TestConnectorChanges(_ReloadCase):
 
         self.assertEqual(second["exit_code"], 0, second)
         self.assertEqual(second["changes"]["connectors"]["changed"], ["second"])
-        self.assertTrue(any("retried" in n for n in second["notes"]))
+        self.assertFalse(any("degraded" in n for n in second["notes"]),
+                         "a section that came back needs no history in the output")
         self.assertEqual((await self._rows())["second:script"]["state"], "active")
         self.assertEqual(self.service.describe_config()["degraded"], [])
 

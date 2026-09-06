@@ -1056,10 +1056,9 @@ class GatewayService:
             conflict = self._kept_identity_conflict(diff, candidate)
             if conflict:
                 return ReloadPlan.refused(conflict, dry_run=dry_run, findings=findings).to_dict()
-            retried = self._retry_degraded(diff, candidate)
+            self._retry_degraded(diff, candidate)
             try:
                 plan = self._plan_reload(diff, candidate, findings, dry_run=dry_run)
-                plan.notes.extend(retried)
             except Exception as e:
                 logger.exception("config reload: could not plan")
                 return ReloadPlan.refused(
@@ -1119,30 +1118,26 @@ class GatewayService:
                     "messages — nothing changed:\n" + "\n".join(conflicts))
         return None
 
-    def _retry_degraded(self, diff: ConfigDiff, candidate: GatewayConfig) -> list[str]:
+    def _retry_degraded(self, diff: ConfigDiff, candidate: GatewayConfig) -> None:
         """Fold the degraded sections into the diff as changed, so a reload
         retries them even when their own entry did not change.
 
         "Fix the file and reload again" must also cover a fix that is not in
         the file — a server that is reachable again, a sidecar binary put
         back. Without this an unchanged degraded connector would stay down
-        until a full restart. Returns the plan notes that say so.
+        until a full restart. Silent on purpose (owner, 2026-09-05): the plan
+        shows the restart like any other, and if the section is STILL failing
+        the Degraded block says so — a section that came back needs no history.
         """
-        notes = []
         names = {c.name for c in candidate.connectors}
         for e in self._entries:
-            if not e.degraded or e.name not in names:
-                continue
-            if e.name not in diff.connectors.changed and e.name not in diff.connectors.added:
+            if (e.degraded and e.name in names
+                    and e.name not in diff.connectors.changed
+                    and e.name not in diff.connectors.added):
                 diff.connectors.changed.append(e.name)
-            notes.append(f"connector '{e.name}' was degraded before this reload ({e.degraded}) "
-                         f"— retried by it (see the Degraded block if it is still failing)")
         for name in sorted(self._runtime_manager.unavailable_agents):
             if name in candidate.agents and name not in diff.agents.changed:
                 diff.agents.changed.append(name)
-                notes.append(f"agent '{name}' was unavailable before this reload — retried by it "
-                             f"(see the Degraded block if it is still failing)")
-        return notes
 
     def _plan_reload(
         self, diff: ConfigDiff, candidate: GatewayConfig, findings: list[dict], *, dry_run: bool

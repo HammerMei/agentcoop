@@ -185,18 +185,21 @@ class ReloadPlan:
         watcher actions, degraded sections — then one line saying what this
         plan is (a dry run, the next boot's plan, applied, refused)."""
         lines: list[str] = []
+        # Severity tags lead every line an operator must not skim past (owner,
+        # 2026-09-05): a degraded section is a failed reload, and an untagged
+        # line in a block of otherwise routine output is easy to miss.
         if not self.ok:
-            lines.append(f"✗ {self.error}")
+            lines.append(f"[ERROR] {self.error}")
             for f in self.findings:
-                mark = "✗" if f.get("level") == "error" else "⚠"
-                lines.append(f"  {mark} {f.get('message', '')}")
+                tag = "[ERROR]" if f.get("level") == "error" else "[WARNING]"
+                lines.append(f"  {tag} {f.get('message', '')}")
             return "\n".join(lines)
 
         warnings = [f for f in self.findings if f.get("level") == "warning"]
         if warnings:
             lines.append(f"Validation: {len(warnings)} warning(s)")
             for f in warnings:
-                lines.append(f"  ⚠ {f.get('message', '')}")
+                lines.append(f"  [WARNING] {f.get('message', '')}")
 
         if not self.has_changes:
             lines.append("No changes — the running configuration already matches the file."
@@ -226,7 +229,7 @@ class ReloadPlan:
         if self.degraded:
             lines.append("Degraded:")
             for d in self.degraded:
-                lines.append(f"  {d.kind} '{d.name}': {d.error}")
+                lines.append(f"  [ERROR] {d.kind} '{d.name}': {d.error}")
 
         # Two levels, both named: a degraded connector that comes back has no
         # resident watcher to list, so "0 restart" alone read as "nothing
@@ -245,7 +248,7 @@ class ReloadPlan:
         elif self.dry_run:
             lines.append(f"Dry run ({counts}); nothing changed.")
         elif self.applied and self.degraded:
-            lines.append(f"Applied with {len(self.degraded)} degraded section(s) ({counts}) — "
+            lines.append(f"[ERROR] Applied with {len(self.degraded)} degraded section(s) ({counts}) — "
                          f"fix the file and reload again.")
         elif self.applied:
             lines.append(f"Applied ({counts}).")

@@ -656,7 +656,7 @@ def _print_active_config(shown: dict) -> None:
     digest = shown.get("digest") or ""
     print(f"Config:   {digest[:12]} (loaded {shown.get('loaded_at') or '?'})")
     for d in shown.get("degraded") or []:
-        print(f"Degraded: {d.get('kind')} '{d.get('name')}' — {d.get('error')}")
+        print(f"[ERROR] Degraded: {d.get('kind')} '{d.get('name')}' — {d.get('error')}")
     if shown.get("reloading"):
         print("Reload:   in progress")
 
