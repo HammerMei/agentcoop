@@ -150,6 +150,23 @@ class TestBootPlan(unittest.TestCase):
         self.assertEqual([(w.action, w.reason, w.session_id) for w in plan.watchers],
                          [("expire", "static-era record pruned at boot", "s-legacy")])
 
+    def test_a_kept_orphan_note_is_rendered_even_with_no_changes(self):
+        import dataclasses
+        import json
+
+        from gateway.core.state import STATE_FORMAT_VERSION
+        config = write_gateway_config(self.tmp)
+        good = make_record_from_rule(
+            make_rule(room="x", name="g", connector="ghost", agent="default"),
+            RoomRef(id="r3", kind=RoomKind.CHANNEL, name="x"), session_id="s-ghost")
+        bad = dict(dataclasses.asdict(good), room_id="r4", paused="yes please")
+        (self.runtime / "state.ghost.json").write_text(json.dumps({
+            "version": STATE_FORMAT_VERSION,
+            "watchers": [dataclasses.asdict(good), bad]}))
+        text = boot_plan(config).render()
+        self.assertIn("No changes", text)
+        self.assertIn("KEPT", text, "the repair instruction is not dropped with the changes")
+
     def test_no_state_files_is_no_changes(self):
         plan = boot_plan(write_gateway_config(self.tmp))
         self.assertFalse(plan.has_changes)

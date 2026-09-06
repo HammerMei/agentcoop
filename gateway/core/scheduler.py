@@ -158,6 +158,16 @@ class JobScheduler:
         # could not bring it back. Its jobs are neither cancelled (it is still
         # configured) nor fired (its manager is not serving); they wait.
         self._degraded = degraded or (lambda name: False)
+        # Held around every fire pass (#144). A reload pauses the scheduler by
+        # cancelling its task; taking this lock first means the cancel lands in
+        # the sleep between passes, never between an injection and the write
+        # that records it — which would fire the same slot again on restart.
+        self._fire_lock = asyncio.Lock()
+
+    @property
+    def fire_lock(self) -> asyncio.Lock:
+        """Hold it while cancelling `run()` so no fire is cut in half."""
+        return self._fire_lock
 
     @property
     def completed_job_ttl_days(self) -> int:
@@ -172,10 +182,12 @@ class JobScheduler:
         """Main scheduler loop.  Runs until cancelled."""
         logger.info("JobScheduler started (tick_interval=%ds, ttl_days=%d)", _TICK_INTERVAL, self._ttl_days)
         try:
-            await self._catch_up_missed()
+            async with self._fire_lock:
+                await self._catch_up_missed()
             while True:
                 await asyncio.sleep(_TICK_INTERVAL)
-                await self._tick()
+                async with self._fire_lock:
+                    await self._tick()
         except asyncio.CancelledError:
             logger.info("JobScheduler cancelled")
             raise

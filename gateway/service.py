@@ -50,7 +50,11 @@ from .core.permission import (
 from .core.reconcile import orphan_decisions
 from .core.retry_stop import STOP_ATTEMPTS, stop_with_retries
 from .core.scheduler import JobScheduler
-from .core.session_manager import JOBS_CANCELLED_CONNECTOR_REMOVED, SessionManager
+from .core.session_manager import (
+    JOBS_CANCELLED_BY_RECONCILIATION,
+    JOBS_CANCELLED_CONNECTOR_REMOVED,
+    SessionManager,
+)
 from .core.session_maps import SessionMaps
 from .core.session_release import log_session_released
 from .core.state import (
@@ -969,16 +973,21 @@ class GatewayService:
             )
 
     async def _stop_scheduler(self) -> None:
+        """Cancel the scheduler task between fires, never mid-fire: the fire
+        lock is taken first, so a job that has injected its message also
+        records the slot before the cancel lands — otherwise the restart's
+        catch-up fires the same slot again (#144)."""
         if getattr(self, "_scheduler_task", None):
-            self._scheduler_task.cancel()
-            try:
-                await self._scheduler_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error("Error stopping job scheduler task: %s", e)
-            finally:
-                self._scheduler_task = None  # type: ignore[assignment]
+            async with self._job_scheduler.fire_lock:
+                self._scheduler_task.cancel()
+                try:
+                    await self._scheduler_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error("Error stopping job scheduler task: %s", e)
+                finally:
+                    self._scheduler_task = None  # type: ignore[assignment]
 
     # ── Config reload (#144) ─────────────────────────────────────────────────
 
@@ -994,20 +1003,9 @@ class GatewayService:
                 Degraded("connector", e.name, e.degraded).to_dict()
                 for e in self._entries if e.degraded
             ] + [
-                Degraded("connector", e.name,
-                         f"a previous instance did not shut down ({err}); it is disconnected "
-                         f"again at the next reload and at shutdown — check the process now"
-                         ).to_dict()
-                for e, err in self._leftover_entries
-            ] + [
                 Degraded("agent", name, self._agent_errors.get(name, "failed to start")).to_dict()
                 for name in sorted(self._runtime_manager.unavailable_agents)
-            ] + [
-                Degraded("agent", name,
-                         f"a previous {kind} did not stop ({err}); it is stopped again at the "
-                         f"next reload and at shutdown — check the process now").to_dict()
-                for name, kind, err in self._runtime_manager.leftovers
-            ],
+            ] + [d.to_dict() for d in self._leftover_findings()],
         }
         if include_config:
             out["config"] = redacted_config(self._config)
@@ -1066,6 +1064,10 @@ class GatewayService:
                 return ReloadPlan.refused(
                     f"could not plan the reload — nothing changed: {e}",
                     dry_run=dry_run, findings=findings).to_dict()
+            # What is still not stopped from earlier reloads is CURRENT state:
+            # it goes on every plan, so a no-change reload cannot exit 0 while
+            # `status` says a process needs attention now.
+            plan.degraded.extend(self._leftover_findings())
             if dry_run or not plan.has_changes:
                 return plan.to_dict()
             logger.info("config reload: applying\n%s", plan.render())
@@ -1087,6 +1089,20 @@ class GatewayService:
             plan.applied = True
             logger.info("config reload: %s", plan.render().splitlines()[-1])
             return plan.to_dict()
+
+    def _leftover_findings(self) -> list[Degraded]:
+        """The leftovers as degraded findings — the same lines `status` shows."""
+        return [
+            Degraded("connector", e.name,
+                     f"a previous instance did not shut down ({err}); it is disconnected "
+                     f"again at the next reload and at shutdown — check the process now")
+            for e, err in self._leftover_entries
+        ] + [
+            Degraded("agent", name,
+                     f"a previous {kind} did not stop ({err}); it is stopped again at the "
+                     f"next reload and at shutdown — check the process now")
+            for name, kind, err in self._runtime_manager.leftovers
+        ]
 
     async def _retry_leftovers(self) -> None:
         """Once more, at every reload: disconnect the connector instances and
@@ -1288,11 +1304,38 @@ class GatewayService:
             #    one AUDIT line each — while its manager and the backends are
             #    still alive. Boot's orphan sweep cannot do this for a file
             #    whose connector is gone; here nothing is gone yet.
+            unswept: set[str] = set()
             for e in going:
                 if e.name in removed:
-                    await e.session_manager.reclaim_all(
+                    left = await e.session_manager.reclaim_all(
                         reason="connector-removed",  # boot's sweep spells it so; one grep
                         jobs=JOBS_CANCELLED_CONNECTOR_REMOVED)
+                    if left:
+                        # Their records are still installed (the tail logged why);
+                        # the file is kept for the next start's sweep, not unlinked
+                        # as if every record had gone, and the removal is degraded.
+                        unswept.add(e.name)
+                        plan.degraded.append(Degraded(
+                            "connector", e.name,
+                            f"{len(left)} record(s) could not be reclaimed on removal "
+                            f"({', '.join(left)}); its state file is kept for the next "
+                            f"start to sweep — check the log now"))
+            #    Records the new rules EXPIRE on an agent that is about to stop
+            #    are reclaimed now, while that backend is alive: the
+            #    reconciliation runs after the stop pass and would have to skip
+            #    the session, prompt-file and attachment cleanup.
+            stopping_agents = changed_agents | removed_agents
+            if stopping_agents:
+                for e in kept:
+                    by_room = {r.room_id: r for r in e.session_manager.records()}
+                    early = [w.room_id for w in plan.watchers
+                             if w.connector == e.name and w.action == "expire"
+                             and w.room_id in by_room
+                             and by_room[w.room_id].agent in stopping_agents]
+                    if early:
+                        await e.session_manager.reclaim_rooms(
+                            early, reason="reconciliation: no-rule-matches",
+                            jobs=JOBS_CANCELLED_BY_RECONCILIATION)
             #    Then the going managers shut down. One that will not — after
             #    the retries — is a leftover: still tracked, disconnected again
             #    later, never saved again; its replacement goes ahead.
@@ -1315,7 +1358,6 @@ class GatewayService:
             #    processors are here too — the reconciliation below stops them
             #    (their records expire or move) and would otherwise drain them
             #    against a backend already gone.
-            stopping_agents = changed_agents | removed_agents
             stopped_rooms: dict[str, list[str]] = {}
             if stopping_agents:
                 drained = await asyncio.gather(
@@ -1327,13 +1369,17 @@ class GatewayService:
             #    is a leftover — the agent is replaced regardless and reported.
             not_stopped = await self._runtime_manager.stop_some(stopping_agents)
             for name, err in sorted(not_stopped.items()):
+                outcome = (
+                    "the agent was removed from the config, so nothing replaces it"
+                    if name in removed_agents else
+                    "the new backend was started beside the old one")
                 plan.degraded.append(Degraded(
                     "agent", name,
-                    f"{err}; the new backend was started beside the old one, which is "
-                    f"stopped again at the next reload and at shutdown — check the "
-                    f"process now"))
+                    f"{err}; {outcome}; the old one is stopped again at the next reload "
+                    f"and at shutdown — check the process now"))
             self._install_entries(kept)
-            self._reclaim_orphaned_state_files({c.name for c in candidate.connectors})
+            self._reclaim_orphaned_state_files(
+                {c.name for c in candidate.connectors} | unswept)
 
             # 4. Rebuild.
             for name in removed_agents:

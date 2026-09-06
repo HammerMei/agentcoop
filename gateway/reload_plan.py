@@ -210,6 +210,12 @@ class ReloadPlan:
             lines.append("No changes — the running configuration already matches the file."
                          if not self.offline else
                          "No changes — the next start will keep every record as it is.")
+            for note in self.notes:  # a kept orphan file's repair note, for one
+                lines.append(f"Note: {note}")
+            if self.degraded:  # leftovers still stuck: current state, exit 2
+                lines.append("Degraded:")
+                for d in self.degraded:
+                    lines.append(f"  [ERROR] {d.kind} '{d.name}': {d.error}")
             return "\n".join(lines)
 
         lines.append("Changes:")

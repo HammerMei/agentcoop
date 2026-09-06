@@ -203,6 +203,23 @@ class TestDigest(unittest.TestCase):
         self.assertEqual(dict(flatten_config(cfg))["connectors.rc.raw.server.build_date"],
                          "2026-09-05")
 
+    def test_a_mapping_spelled_like_a_tag_cannot_forge_a_date(self):
+        import datetime
+        as_date = _config(connectors=[_connector(build_date=datetime.date(2026, 9, 5))])
+        forged = _config(connectors=[_connector(
+            build_date={"$type": "date", "$value": "2026-09-05"})])
+        self.assertTrue(diff_configs(as_date, forged))
+        self.assertNotEqual(config_digest(as_date), config_digest(forged),
+                            "every leaf carries its type outside the value space")
+
+    def test_the_dump_and_the_json_show_plain_values(self):
+        cfg = _config()
+        flat = dict(flatten_config(cfg))
+        self.assertEqual(flat["max_queue_depth"], 100)
+        self.assertEqual(flat["connectors.rc.type"], "rocketchat")
+        self.assertEqual(redacted_config(cfg)["max_queue_depth"], 100)
+        self.assertEqual(redacted_config(cfg)["watcher_rules"][0]["rooms"]["include"], ["eng"])
+
     def test_a_date_and_its_quoted_spelling_digest_differently_as_they_diff_differently(self):
         import datetime
         as_date = _config(connectors=[_connector(build_date=datetime.date(2026, 9, 5))])

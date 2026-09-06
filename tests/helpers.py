@@ -495,6 +495,7 @@ def make_bare_gateway_service(**attrs):
     svc._job_store = None
     svc._session_managers = {}
     svc._job_scheduler = MagicMock()
+    svc._job_scheduler.fire_lock = asyncio.Lock()
     svc._control = MagicMock()
     svc._control.start = AsyncMock()
     svc._control.stop = AsyncMock()

@@ -182,29 +182,32 @@ def diff_configs(active: GatewayConfig, candidate: GatewayConfig) -> ConfigDiff:
 
 
 def canonical(value: Any) -> Any:
-    """A resolved config as JSON-safe data, walking dataclass fields.
+    """A resolved config as JSON-safe data, walking dataclass fields — the form
+    the digest hashes.
 
-    `RoomPattern` becomes its canonical spelling (`RoomPattern.canonical` — the
-    form `==` compares, so two equivalent spellings digest alike); an enum its
-    value; a path, a date or a time its ISO string — a connector's `raw` block
-    is open-ended, and an unquoted `2026-09-05` in it is a `datetime.date` out
-    of the YAML loader, which `json.dumps` would refuse. Anything else the
-    loader could produce falls back to `str`, so a fingerprint is always
-    computable for a config that loaded. Dicts keep their keys —
-    `json.dumps(sort_keys=True)` orders them.
+    **Every leaf is typed**: `[type name, value]`. That makes the form
+    injective over what the YAML loader can produce, which a bare-value form
+    is not: `build_date: 2026-09-05` (a `date`) and `build_date: "2026-09-05"`
+    (a `str`) are different `raw` dicts to the diff — which restarts the
+    connector — and any tag spelled INSIDE the value space (a mapping such as
+    `{$type: date, ...}`) is itself a legal `raw` value an operator could
+    write. With the type outside the value, at every leaf, two configs
+    canonicalize alike only if they compare alike. Containers stay containers;
+    `untagged` strips the tags for anything a human or a script reads.
+
+    `RoomPattern` contributes its canonical spelling (`RoomPattern.canonical` —
+    the form `==` compares, so equivalent spellings digest alike); an enum its
+    value; a path, date or time its ISO string; anything else the loader could
+    produce falls back to `str`, so a config that loaded always digests.
     """
     if isinstance(value, RoomPattern):
-        return value.canonical()
+        return ["pattern", value.canonical()]
     if isinstance(value, Enum):
-        return value.value
+        return ["enum", value.value]
     if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (datetime.date, datetime.time)):
-        # Tagged, not a bare string: `build_date: 2026-09-05` and
-        # `build_date: "2026-09-05"` are different `raw` dicts to the diff
-        # (which restarts the connector), so they must be different to the
-        # digest too, or `config show` calls them in sync until the reload.
-        return {"$type": type(value).__name__, "$value": value.isoformat()}
+        return ["path", str(value)]
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return [type(value).__name__, value.isoformat()]
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: canonical(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, dict):
@@ -213,8 +216,27 @@ def canonical(value: Any) -> Any:
         items = [canonical(v) for v in value]
         return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items
     if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    return {"$type": type(value).__name__, "$value": str(value)}
+        return [type(value).__name__, value]
+    return [type(value).__name__, str(value)]
+
+
+def _is_leaf(value: Any) -> bool:
+    """A typed leaf: a two-list whose first element is a bare string. No real
+    list canonicalizes to that shape — a real list's elements are themselves
+    lists or dicts, never bare strings."""
+    return isinstance(value, list) and len(value) == 2 and isinstance(value[0], str)
+
+
+def untagged(value: Any) -> Any:
+    """The canonical form with the leaf tags stripped — plain values, for the
+    dump and the JSON document."""
+    if _is_leaf(value):
+        return value[1]
+    if isinstance(value, dict):
+        return {k: untagged(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [untagged(v) for v in value]
+    return value
 
 
 def _identity_keyed(config: GatewayConfig) -> dict:
@@ -227,7 +249,7 @@ def _identity_keyed(config: GatewayConfig) -> dict:
     significant — first match wins — and is not touched.
     """
     data = canonical(config)
-    data["connectors"] = {c["name"]: c for c in data["connectors"]}
+    data["connectors"] = {untagged(c["name"]): c for c in data["connectors"]}
     return data
 
 
@@ -288,8 +310,8 @@ def _redact_config(data: dict) -> dict:
 
 
 def redacted_config(config: GatewayConfig) -> dict:
-    """The canonical form with secrets redacted, for `--json` output."""
-    return _redact_config(canonical(config))
+    """The resolved config as plain values with secrets redacted, for `--json`."""
+    return _redact_config(untagged(canonical(config)))
 
 
 def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:
@@ -302,9 +324,6 @@ def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:
 
     def walk(prefix: str, value: Any) -> None:
         if isinstance(value, dict):
-            if set(value) == {"$type", "$value"}:
-                out.append((prefix, value["$value"]))  # a tagged scalar reads as its value
-                return
             if not value:
                 out.append((prefix, {}))
             for k in sorted(value):
@@ -318,5 +337,5 @@ def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:
             return
         out.append((prefix, value))
 
-    walk("", _redact_config(_identity_keyed(config)))
+    walk("", _redact_config(untagged(_identity_keyed(config))))
     return out

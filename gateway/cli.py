@@ -761,9 +761,12 @@ def _run_config_show(args) -> None:
 
     result = validate_config(args.config)
     if not result.ok or result.config is None:
-        print(f"✗ {args.config}: {len(result.errors)} error(s)", file=sys.stderr)
-        for err in result.errors:
-            print(f"  - {err}", file=sys.stderr)
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            print(f"[ERROR] {args.config}: {len(result.errors)} error(s)", file=sys.stderr)
+            for err in result.errors:
+                print(f"  [ERROR] {err}", file=sys.stderr)
         sys.exit(1)
     config = result.config
     digest = config_digest(config)
@@ -772,13 +775,23 @@ def _run_config_show(args) -> None:
     running, _pid = is_running()
     if running:
         shown = _send_command({"cmd": "config-show", "include_config": False})
-        if shown.get("ok"):
-            active = {"digest": shown.get("digest"), "loaded_at": shown.get("loaded_at"),
-                      "config_path": shown.get("config_path")}
+        if not shown.get("ok"):
+            # A running daemon that will not answer is an error, not "no daemon":
+            # text mode would otherwise look exactly like an offline show.
+            error = f"the daemon refused config-show: {shown.get('error', 'unknown error')}"
+            if args.json:
+                print(json.dumps({"ok": False, "error": error, "digest": digest,
+                                  "config_path": os.path.abspath(args.config)}, indent=2))
+            else:
+                print(f"[ERROR] {error}", file=sys.stderr)
+            sys.exit(1)
+        active = {"digest": shown.get("digest"), "loaded_at": shown.get("loaded_at"),
+                  "config_path": shown.get("config_path")}
     in_sync = None if active is None else (active["digest"] == digest)
 
     if args.json:
         print(json.dumps({
+            "ok": True,
             "config_path": os.path.abspath(args.config),
             "digest": digest,
             "active": active,

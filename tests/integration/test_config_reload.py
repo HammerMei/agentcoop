@@ -56,6 +56,14 @@ class _ReloadCase(unittest.IsolatedAsyncioTestCase):
         return await self._dispatch(cmd="config-reload", dry_run=dry_run,
                                     config_path=str(self.config_path))
 
+    def _two(self, **kw) -> str:
+        return self._text(connectors=("script", "second"), rules=[
+            {"name": "w1", "agent": "default", "connector": "script",
+             "rooms": {"include": ["script"]}},
+            {"name": "w2", "agent": "default", "connector": "second",
+             "rooms": {"include": ["script"]}},
+        ], **kw)
+
     async def _rows(self) -> dict[str, dict]:
         result = await self._dispatch(cmd="list", states=ALL)
         self.assertTrue(result["ok"], result)
@@ -553,13 +561,6 @@ class TestAgentRestartOrdering(_ReloadCase):
 
 class TestConnectorChanges(_ReloadCase):
 
-    def _two(self, **kw) -> str:
-        return self._text(connectors=("script", "second"), rules=[
-            {"name": "w1", "agent": "default", "connector": "script",
-             "rooms": {"include": ["script"]}},
-            {"name": "w2", "agent": "default", "connector": "second",
-             "rooms": {"include": ["script"]}},
-        ], **kw)
 
     async def test_an_added_connector_is_built_connected_and_synced(self):
         await self._boot()
@@ -1126,7 +1127,111 @@ class TestValuesAndRefusals(_ReloadCase):
         self.assertTrue(result["loaded_at"])
 
 
+class TestLeftoversAndReclaimFailures(_ReloadCase):
+
+    async def test_a_leftover_still_stuck_makes_even_a_no_change_reload_exit_two(self):
+        await self._boot()
+        sm = self.service._session_managers["script"]
+        self._rewrite(self._text().replace("- name: script\n  type: script",
+                                           "- name: script\n  type: script\n  timezone: UTC"))
+
+        async def _stuck():
+            raise OSError("transport will not close")
+
+        sm._connector.disconnect = _stuck
+        first = await self._reload()
+        self.assertEqual(first["exit_code"], 2)
+
+        second = await self._reload()  # file unchanged; the retry fails again
+        self.assertEqual(second["exit_code"], 2, second)
+        self.assertFalse(second["applied"])
+        self.assertTrue(any("previous instance did not shut down" in d["error"]
+                            for d in second["degraded"]), second["degraded"])
+        from gateway.reload_plan import ReloadPlan
+        text = ReloadPlan.from_dict(second).render()
+        self.assertIn("No changes", text)
+        self.assertIn("[ERROR] connector 'script'", text, "current state, on a no-change plan too")
+
+    async def test_a_removal_whose_reclaim_fails_keeps_its_file_and_is_degraded(self):
+        await self._boot(self._two())
+        sm = self.service._session_managers["second"]
+        self._rewrite(self._text())
+
+        async def _reclaim_fails(*a, **kw):
+            raise OSError("prune could not be persisted")
+
+        with patch.object(sm._lifecycle, "reclaim_room", side_effect=_reclaim_fails):
+            result = await self._reload()
+
+        self.assertEqual(result["exit_code"], 2, result)
+        self.assertTrue(any("could not be reclaimed on removal" in d["error"]
+                            for d in result["degraded"]), result["degraded"])
+        self.assertTrue((self.runtime / "state.second.json").exists(),
+                        "kept for the next start's sweep, not unlinked as if reclaimed")
+        self.assertEqual([e.name for e in self.service._entries], ["script"])
+
+    async def test_a_removed_agents_stuck_backend_is_described_as_removed(self):
+        await self._boot(self._text(
+            agents={"default": {"type": "claude", "working_directory": str(self.tmp)},
+                    "other": {"type": "claude", "working_directory": str(self.tmp)}}))
+        other = self.service._agents["other"]
+
+        async def _stuck():
+            raise RuntimeError("sidecar refuses to die")
+
+        other.stop = _stuck
+        self._rewrite(self._text(
+            agents={"default": {"type": "claude", "working_directory": str(self.tmp)}}))
+        result = await self._reload()
+        finding = [d for d in result["degraded"] if d["kind"] == "agent"][0]
+        self.assertIn("removed from the config, so nothing replaces it", finding["error"])
+        self.assertNotIn("new backend was started", finding["error"])
+
+    async def test_a_record_the_new_rules_expire_is_reclaimed_before_its_agent_stops(self):
+        """Otherwise the reconciliation, after the stop pass, finds the backend gone
+        and skips the session / prompt-file / attachment cleanup."""
+        await self._boot()
+        sm = self.service._session_managers["script"]
+        backend = self.service._agents["default"]
+        order: list[str] = []
+        real_stop, real_reclaim = backend.stop, sm._lifecycle.reclaim_room
+
+        async def _stop():
+            order.append("backend.stop")
+            await real_stop()
+
+        async def _reclaim(*a, **kw):
+            order.append("reclaim")
+            return await real_reclaim(*a, **kw)
+
+        backend.stop = _stop
+        # The agent changes AND the only rule goes: the record expires.
+        self._rewrite(self._text(
+            agents={"default": {"type": "claude", "working_directory": str(self.tmp),
+                                "timeout": 99}},
+            rules=[]))
+        with patch.object(sm._lifecycle, "reclaim_room", side_effect=_reclaim):
+            result = await self._reload()
+
+        self.assertEqual(result["exit_code"], 0, result)
+        self.assertEqual(order[:2], ["reclaim", "backend.stop"])
+        self.assertNotIn("script:script", await self._rows())
+
+
 class TestShutdownAndReload(_ReloadCase):
+
+    async def test_the_scheduler_is_never_cancelled_mid_fire(self):
+        """A reload pauses the scheduler by cancelling it; the cancel must land
+        between fires, or a job that injected but had not recorded its slot
+        fires again on restart."""
+        await self._boot()
+        scheduler = self.service._job_scheduler
+        async with scheduler.fire_lock:  # a fire in progress
+            stopping = asyncio.create_task(self.service._stop_scheduler())
+            await asyncio.sleep(0.05)
+            self.assertFalse(stopping.done(), "waits for the fire to finish")
+        await asyncio.wait_for(stopping, timeout=5)
+        self.assertIsNone(self.service._scheduler_task)
 
     async def test_shutdown_waits_for_a_reload_that_is_applying(self):
         await self._boot()

@@ -147,10 +147,13 @@ never one pass per change:
 0. **Construct before destroying.** Every new backend and connector is built
    first; a factory that raises refuses the whole reload with nothing
    touched.
-1. **Pause the scheduler** (as shutdown does). A job due in the window fires
-   on the restart's catch-up pass; nothing is cancelled, and the scheduler
-   never observes a half-swapped mapping. This is how "a degraded
-   connector keeps its scheduled jobs" is met, with no new scheduler state.
+1. **Pause the scheduler** (as shutdown does) — under its fire lock, so the
+   cancel lands between fires and never between a job's injection and the
+   write that records the slot (which would fire it again on restart). A job
+   due in the window fires on the restart's catch-up pass; nothing is
+   cancelled, and the scheduler never observes a half-swapped mapping. A
+   connector left degraded keeps its jobs waiting: neither fired into it nor
+   cancelled.
 2. **Quiesce every kept manager**: no new wake, join or operator verb — each
    refused with "a config reload is in progress" — and in-flight ones are
    waited out; the sweep is stopped. A bot-membership removal that arrives
@@ -168,7 +171,12 @@ never one pass per change:
    file copied under the connector's new name may still name it, see #146).
    Every manager, the going ones too, is quiesced before that walk, so a wake
    mid-reclaim cannot mint a watcher and a session the sweep can only unlink.
-   Then the going managers shut down; then the processors of every
+   A record the reclaim could not remove keeps its connector's file out of
+   the sweep — left for the next start — and degrades the removal. Records
+   the new rules EXPIRE on an agent that is about to stop are reclaimed here
+   too, while that backend is still alive; the reconciliation runs after the
+   stop pass and would have to skip their cleanup. Then the going managers
+   shut down; then the processors of every
    changed *or removed* agent are drained, concurrently, while their backends
    are still alive; then those backends and brokers stop. **Every stop is
    retried** a few times, a few seconds apart (`core.retry_stop`), and that
@@ -176,7 +184,9 @@ never one pass per change:
    tracked (disconnected or stopped once more at the next reload and at
    shutdown — never saved again, its records belong to the replacement), named
    by `status`, reported on the plan as a degraded finding that tells the
-   operator to look at the process now. The replacement proceeds regardless.
+   operator to look at the process now — on EVERY later plan too, until it
+   stops, so a no-change reload cannot exit 0 while `status` says a process
+   needs attention. The replacement proceeds regardless.
    A permission broker that will not stop is that agent's failure, exactly
    like its backend. Then the orphaned state files are swept.
 4. **Rebuild**: the one shared agents dict and the core config are updated in
@@ -307,11 +317,13 @@ The digest is SHA-256 over a canonical serialization (sorted keys) of the
 **resolved** config — templates and inheritance expanded, connectors keyed
 by name and room patterns in their canonical spelling (`RoomPattern.canonical`,
 the form `==` compares) so that whatever the diff calls unchanged the digest
-does too (rule order stays significant in both); a date or other non-JSON
-scalar in a connector's open `raw` block serializes type-tagged, so
-`build_date: 2026-09-05` and `build_date: "2026-09-05"` — different dicts to
-the diff — are different to the digest too — so semantically identical files
-hash identically and comments never matter. The offline dry run carries the
+does too (rule order stays significant in both). **Every leaf in the
+canonical form carries its type** (`[type, value]`), outside the value
+space: `build_date: 2026-09-05` and `build_date: "2026-09-05"` are different
+dicts to the diff and different to the digest, and no mapping an operator can
+write in an open `raw` block can spell a tag — the form is injective over
+what the loader produces. The dump and the JSON strip the tags. So
+semantically identical files hash identically and comments never matter. The offline dry run carries the
 file's validation warnings like the online one. It is over the
 unredacted values: a rotated secret changes it, which is the point of a
 fingerprint. `config show` prints it with a flattened dump (connectors keyed

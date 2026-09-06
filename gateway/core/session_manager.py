@@ -751,7 +751,7 @@ class SessionManager:
                 rooms.append(record.room_id)
         return rooms, failures
 
-    async def reclaim_all(self, *, reason: str, jobs: tuple[str, str]) -> None:
+    async def reclaim_all(self, *, reason: str, jobs: tuple[str, str]) -> list[str]:
         """Reclaim every record — the removal path's shared tail, per room (#144).
 
         For a connector `config reload` removes: with the manager quiesced and
@@ -760,11 +760,29 @@ class SessionManager:
         jobs are cancelled — what boot's orphan sweep cannot do for a file
         whose connector is gone. The backend session is KEPT, as boot keeps it:
         a state file copied under the connector's new name still names it.
+        Returns the watchers whose record is STILL installed afterwards — a
+        reclaim that failed (the shared tail swallows and logs it): their file
+        must not be swept as if every record had gone.
         """
-        for record in self.records():
+        records = self.records()
+        for record in records:
             await self._reclaim_removed_room(
                 record.room_id, reason=reason, expected=record, jobs=jobs,
                 keep_backend_session=True)
+        return [r.watcher_name for r in records
+                if self._lifecycle.record_for_room(r.room_id) is r]
+
+    async def reclaim_rooms(self, room_ids: list[str], *, reason: str,
+                            jobs: tuple[str, str]) -> None:
+        """Reclaim these records now, through the shared tail — for a reload
+        whose new rules expire them while their agent is about to stop: the
+        reconciliation would run after the backend is gone and have to skip
+        the session, prompt-file and attachment cleanup (#144)."""
+        for room_id in room_ids:
+            record = self._lifecycle.record_for_room(room_id)
+            if record is not None:
+                await self._reclaim_removed_room(
+                    room_id, reason=reason, expected=record, jobs=jobs)
 
     async def start_watchers_on_agents(
         self, agents: set[str], *, rooms: Collection[str] = (),

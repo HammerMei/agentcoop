@@ -1448,6 +1448,29 @@ class TestCLIConfigShow(_ConfigCLIBase):
         self.assertIn("Active:  " + "0" * 64, stdout)
         self.assertIn("differs from the file", stdout)
 
+    def test_a_daemon_that_refuses_config_show_is_an_error_not_an_offline_show(self):
+        self._start_daemon({"config-show": {"ok": False, "error": "Unknown command: config-show"}})
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path], running=True)
+        self.assertEqual(code, 1)
+        self.assertIn("[ERROR] the daemon refused config-show", stderr)
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--json"], running=True)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIn("refused", doc["error"])
+
+    def test_config_show_json_reports_an_invalid_file_as_a_document(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
+
     def test_json_carries_digest_in_sync_and_redacted_config(self):
         self._start_daemon({"config-show": {
             "ok": True, "digest": "0" * 64, "loaded_at": "t", "config_path": self.cfg_path,
