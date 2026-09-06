@@ -1194,7 +1194,7 @@ class TestLeftoversAndReclaimFailures(_ReloadCase):
             "type": "claude", "working_directory": str(self.tmp), "timeout": 99}}))
         with patch.object(sm, "replace_rules", side_effect=RuntimeError("kaboom")):
             failed = await self._reload()
-        self.assertTrue(any(d["kind"] == "agent" and "failed part-way" in d["error"]
+        self.assertTrue(any(d["kind"] == "agent" and "apply that then failed" in d["error"]
                             for d in failed["degraded"]), failed["degraded"])
         self.assertEqual(self.service._suspect_agents, {"default"})
 
