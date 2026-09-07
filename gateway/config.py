@@ -803,6 +803,18 @@ def _parse_one_connector(
             f"reserved as the watcher-name divider (<connector>:<room>). "
             f"Rename the connector."
         )
+    if any(c in name for c in "*?["):
+        # The CLI reads a watcher name containing one of these as a glob
+        # (`reset 'mm-*'`, #151). The room half of a name is percent-encoded
+        # on its side of the divider, so the connector half is the only place
+        # one could enter a literal name — and `prod[1]:general` would then
+        # match nothing, silently. Refused here, where the rename is cheap.
+        raise ValueError(
+            f"Connector name '{name}' contains one of '*', '?', '[' — those "
+            f"are glob characters in watcher-name patterns "
+            f"(agent-chat-gateway reset 'mm-*'), so a connector carrying one "
+            f"could never be addressed literally. Rename the connector."
+        )
     if name in seen_connector_names:
         raise ValueError(
             f"Duplicate connector name '{name}' found. "

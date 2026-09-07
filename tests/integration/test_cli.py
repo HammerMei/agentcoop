@@ -14,6 +14,7 @@ import io
 import json
 import shutil
 import socket
+import sys
 import tempfile
 import textwrap
 import threading
@@ -856,6 +857,408 @@ class TestCLIList(_CLITestBase):
 
         self.assertEqual(code, 1)
         self.assertIn("rc-prod", stderr)
+
+
+# ---------------------------------------------------------------------------
+# Tests: a glob over watcher names (#151)
+# ---------------------------------------------------------------------------
+
+_NAMES = ["mm-wavebro:nest", "mm-wavebro:dm:glin", "rc-eng:nest", "rc-eng:general"]
+
+
+def _rows(names=_NAMES, state="active"):
+    return [{"watcher_name": n, "state": state} for n in names]
+
+
+_ROWS = _rows()
+
+
+def _listing(rows=_ROWS):
+    return {"ok": True, "data": rows}
+
+
+class TestCLILifecycleGlob(_CLITestBase):
+    """pause/resume/reset/expire over a glob: list once, act per match, summarise.
+
+    Spec is issue #151, items 1-7. The daemon here is the canned-response
+    mock, so what these pin is the CLI's contract — which commands it sends,
+    in what order, what it prints, what it exits with — not the verbs' own
+    behaviour, which has its own suites.
+    """
+
+    def _capture(self, verb, outcome_for=None, rows=None):
+        """A daemon that records the names a verb was sent, in order, and
+        answers per name via `outcome_for(name)` (default: ok). Rows default
+        to every name in the state the verb acts on, so a plain capture
+        exercises the send path rather than the state skip."""
+        sent: list[str] = []
+
+        def _handler(req):
+            name = req["watcher_name"]
+            sent.append(name)
+            return outcome_for(name) if outcome_for else {"ok": True}
+
+        if rows is None:
+            rows = _rows(state="paused" if verb == "resume" else "active")
+        return sent, {"list": _listing(rows), verb: _handler}
+
+    # ── item 1: matching is a glob over the NAME column, DMs included ────────
+
+    def test_glob_lists_every_state_and_acts_on_each_match_in_name_order(self):
+        received_lists: list[dict] = []
+        sent: list[str] = []
+
+        def _list(req):
+            received_lists.append(req)
+            return _listing()
+
+        def _pause(req):
+            sent.append(req["watcher_name"])
+            return {"ok": True}
+
+        self._start_daemon({"list": _list, "pause": _pause})
+        stdout, stderr, code = self._run(["pause", "mm-wavebro:*"])
+
+        self.assertEqual(code, 0, stderr)
+        # One list, asking for every state — a paused or idle watcher is as
+        # much a target as an active one.
+        self.assertEqual(len(received_lists), 1)
+        self.assertEqual(set(received_lists[0]["states"]),
+                         {"active", "idle", "paused", "failed"})
+        # The DM is matched like any other watcher (item 1), and the order is
+        # the sorted NAME column, so a run is reproducible.
+        self.assertEqual(sent, ["mm-wavebro:dm:glin", "mm-wavebro:nest"])
+
+    def test_star_alone_matches_everything(self):
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        _, _, code = self._run(["reset", "*"])
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, sorted(r["watcher_name"] for r in _ROWS))
+
+    def test_connector_prefix_glob_spans_rooms_and_dms(self):
+        sent, responses = self._capture("resume")
+        self._start_daemon(responses)
+        self._run(["resume", "mm-*"])
+        self.assertEqual(sent, ["mm-wavebro:dm:glin", "mm-wavebro:nest"])
+
+    def test_room_suffix_glob_spans_connectors(self):
+        sent, responses = self._capture("expire")
+        self._start_daemon(responses)
+        self._run(["expire", "*:nest"])
+        self.assertEqual(sent, ["mm-wavebro:nest", "rc-eng:nest"])
+
+    def test_matching_is_case_sensitive(self):
+        """Names are case-preserving, so matching is case-sensitive. Pins the
+        contract; note it cannot tell `fnmatchcase` from `fnmatch` on POSIX,
+        where `os.path.normcase` is the identity — the distinction only bites
+        on Windows, which is why the code says `fnmatchcase` explicitly."""
+        rows = [{"watcher_name": "rc-Eng:nest"}, {"watcher_name": "rc-eng:nest"}]
+        sent: list[str] = []
+
+        def _pause(req):
+            sent.append(req["watcher_name"])
+            return {"ok": True}
+
+        self._start_daemon({"list": _listing(rows), "pause": _pause})
+        self._run(["pause", "rc-e*"])
+        self.assertEqual(sent, ["rc-eng:nest"])
+
+    def test_literal_name_is_the_unchanged_single_path(self):
+        """No metacharacter → no `list` round-trip, the historical success
+        line, and the historical exit-1 on refusal. The batch summary does
+        not appear."""
+        received: list[dict] = []
+
+        def _pause(req):
+            received.append(req)
+            return {"ok": True}
+
+        def _list(req):
+            raise AssertionError("a literal name must not list")
+
+        self._start_daemon({"list": _list, "pause": _pause})
+        stdout, _, code = self._run(["pause", "mm-wavebro:nest"])
+        self.assertEqual(code, 0)
+        self.assertEqual(received, [{"cmd": "pause", "watcher_name": "mm-wavebro:nest"}])
+        self.assertIn("Watcher 'mm-wavebro:nest' paused", stdout)
+        self.assertNotIn("For ", stdout)
+
+    # ── item 2: one line before, one after, per watcher ──────────────────────
+
+    def test_prints_a_line_before_and_after_each_watcher(self):
+        _, responses = self._capture("resume")
+        self._start_daemon(responses)
+        stdout, _, _ = self._run(["resume", "rc-eng:*"])
+        lines = [line for line in stdout.splitlines() if "rc-eng" in line]
+        self.assertEqual(lines, [
+            "Resuming watcher 'rc-eng:general'…",
+            "Done resuming watcher 'rc-eng:general'",
+            "Resuming watcher 'rc-eng:nest'…",
+            "Done resuming watcher 'rc-eng:nest'",
+        ])
+
+    def test_participle_per_verb(self):
+        for verb, word in (("pause", "pausing"), ("reset", "resetting"),
+                           ("expire", "expiring")):
+            with self.subTest(verb=verb):
+                self._start_daemon({"list": _listing([{"watcher_name": "rc-eng:nest"}]),
+                                    verb: {"ok": True}})
+                stdout, _, _ = self._run([verb, "rc-*"])
+                self.assertIn(f"{word.capitalize()} watcher 'rc-eng:nest'…", stdout)
+                self.assertIn(f"Done {word} watcher 'rc-eng:nest'", stdout)
+                self._daemon.stop()
+                self.sock_path.unlink(missing_ok=True)
+
+    # ── a no-op state is skipped before anything is sent ─────────────────────
+
+    def test_resume_skips_watchers_that_are_not_paused_without_asking_the_daemon(self):
+        """Owner on #151: `resume` over a glob is "bring the paused ones back";
+        an active or idle match is reported as not paused, skipped, and
+        counted as succeeded — and the daemon is never asked, so a resume of
+        '*' cannot wake every idle room as a side effect."""
+        rows = (_rows(["rc-eng:nest"], state="paused")
+                + _rows(["rc-eng:general"], state="active")
+                + _rows(["rc-eng:archive"], state="idle"))
+        sent, responses = self._capture("resume", rows=rows)
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["resume", "rc-eng:*"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(sent, ["rc-eng:nest"])
+        self.assertIn("Watcher 'rc-eng:archive' is not paused — skipped", stdout)
+        self.assertIn("Watcher 'rc-eng:general' is not paused — skipped", stdout)
+        self.assertNotIn("Resuming watcher 'rc-eng:general'", stdout)
+        self.assertIn("For 3 watchers: 3 succeeded, 0 failed, 0 not run.", stdout)
+
+    def test_pause_skips_watchers_that_are_already_paused(self):
+        """The mirror of the resume skip: pausing a paused watcher is a no-op
+        the daemon would answer ok to anyway; the batch line says so."""
+        rows = _rows(["rc-eng:nest"], state="paused") + _rows(["rc-eng:general"])
+        sent, responses = self._capture("pause", rows=rows)
+        self._start_daemon(responses)
+        stdout, _, code = self._run(["pause", "rc-eng:*"])
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, ["rc-eng:general"])
+        self.assertIn("Watcher 'rc-eng:nest' is already paused — skipped", stdout)
+        self.assertIn("For 2 watchers: 2 succeeded", stdout)
+
+    def test_reset_and_expire_act_regardless_of_state(self):
+        """Only pause/resume have a state that makes them a no-op; reset and
+        expire are sent to every match, paused or idle included."""
+        rows = _rows(["rc-eng:nest"], state="paused") + _rows(["rc-eng:general"], state="idle")
+        for verb in ("reset", "expire"):
+            with self.subTest(verb=verb):
+                sent, responses = self._capture(verb, rows=rows)
+                self._start_daemon(responses)
+                self._run([verb, "rc-eng:*"])
+                self.assertEqual(sent, ["rc-eng:general", "rc-eng:nest"])
+                self._daemon.stop()
+                self.sock_path.unlink(missing_ok=True)
+
+    def test_state_skip_does_not_short_circuit_a_literal_name(self):
+        """A literal `resume x` on an active watcher still goes to the daemon
+        (whose own answer is the idempotent ok) — the skip is a batch-only
+        courtesy, the single path is unchanged."""
+        received: list[dict] = []
+
+        def _resume(req):
+            received.append(req)
+            return {"ok": True}
+
+        self._start_daemon({"resume": _resume})
+        stdout, _, code = self._run(["resume", "rc-eng:nest"])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(received), 1)
+        self.assertIn("Watcher 'rc-eng:nest' resumed", stdout)
+
+    # ── item 3: gone since the match set was collected → skip, not error ─────
+
+    def test_watcher_gone_mid_run_is_skipped_and_counted_as_success(self):
+        def _outcome(name):
+            if name == "rc-eng:general":
+                return {"ok": False, "code": "unknown_watcher",
+                        "error": "Unknown watcher: 'rc-eng:general'"}
+            return {"ok": True}
+
+        sent, responses = self._capture("expire", _outcome)
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["expire", "rc-eng:*"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("Watcher 'rc-eng:general' is no longer there — skipped", stdout)
+        self.assertEqual(stderr, "")
+        # The run did not stop there.
+        self.assertEqual(sent, ["rc-eng:general", "rc-eng:nest"])
+        self.assertIn("For 2 watchers: 2 succeeded, 0 failed, 0 not run.", stdout)
+
+    def test_skip_keys_on_the_code_not_the_text(self):
+        """A refusal whose text happens to mention 'unknown' is still a
+        failure: only the `code` field means "gone"."""
+        def _outcome(name):
+            return {"ok": False, "error": "Unknown room kind for this watcher"}
+
+        _, responses = self._capture("pause", _outcome)
+        self._start_daemon(responses)
+        _, stderr, code = self._run(["pause", "rc-eng:nest*"])
+        self.assertEqual(code, 1)
+        self.assertIn("failed", stderr)
+
+    # ── items 4-6: abort by default, --force continues, summary arithmetic ───
+
+    def test_error_aborts_by_default_and_later_watchers_are_not_run(self):
+        def _outcome(name):
+            if name == "mm-wavebro:nest":
+                return {"ok": False, "error": "connector degraded"}
+            return {"ok": True}
+
+        sent, responses = self._capture("reset", _outcome)
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["reset", "*"])
+
+        self.assertEqual(code, 1)
+        # Sorted order: dm:glin ok, nest fails, the two rc-eng never sent.
+        self.assertEqual(sent, ["mm-wavebro:dm:glin", "mm-wavebro:nest"])
+        self.assertIn("[ERROR] Resetting watcher 'mm-wavebro:nest' failed: connector degraded",
+                      stderr)
+        self.assertIn("--force", stderr)
+        self.assertIn("For 4 watchers: 1 succeeded, 1 failed, 2 not run.", stdout)
+
+    def test_force_continues_past_failures_and_still_exits_nonzero(self):
+        def _outcome(name):
+            if name.endswith(":nest"):
+                return {"ok": False, "error": "connector degraded"}
+            return {"ok": True}
+
+        sent, responses = self._capture("reset", _outcome)
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["reset", "*", "--force"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(len(sent), 4)
+        self.assertEqual(stderr.count("[ERROR]"), 2)
+        self.assertNotIn("Aborted", stderr)
+        self.assertIn("For 4 watchers: 2 succeeded, 2 failed, 0 not run.", stdout)
+
+    def test_force_with_no_failures_exits_zero(self):
+        _, responses = self._capture("pause")
+        self._start_daemon(responses)
+        stdout, _, code = self._run(["pause", "*", "--force"])
+        self.assertEqual(code, 0)
+        self.assertIn("For 4 watchers: 4 succeeded, 0 failed, 0 not run.", stdout)
+
+    def test_gone_watcher_and_real_failure_are_counted_apart(self):
+        def _outcome(name):
+            if name == "mm-wavebro:dm:glin":
+                return {"ok": False, "code": "unknown_watcher", "error": "Unknown watcher"}
+            if name == "rc-eng:general":
+                return {"ok": False, "error": "refused"}
+            return {"ok": True}
+
+        _, responses = self._capture("expire", _outcome)
+        self._start_daemon(responses)
+        stdout, _, code = self._run(["expire", "*", "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("For 4 watchers: 3 succeeded, 1 failed, 0 not run.", stdout)
+
+    # ── item 7: zero matches is just a summary of zeros ──────────────────────
+
+    def test_zero_matches_prints_the_zero_summary_and_exits_zero(self):
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["reset", "slack-*"])
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, [])
+        self.assertEqual(stderr, "")
+        self.assertIn("For 0 watchers: 0 succeeded, 0 failed, 0 not run.", stdout)
+
+    # ── transport failure mid-run: one watcher's failure, summary still owed ─
+
+    def test_transport_failure_mid_run_aborts_with_the_summary(self):
+        """`_send_command` exits the process when the daemon does not answer.
+        Inside a batch that must become the current watcher's failure — outcome
+        unknown — and the summary must still print (Codex on #152)."""
+        from gateway import cli as cli_mod
+        real = cli_mod._send_command
+
+        def _flaky(request, timeout=60.0):
+            if request.get("watcher_name") == "mm-wavebro:nest":
+                print("[ERROR] No response from the daemon within 300s", file=sys.stderr)
+                raise SystemExit(2)
+            return real(request, timeout=timeout)
+
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        with patch("gateway.cli._send_command", side_effect=_flaky):
+            stdout, stderr, code = self._run(["reset", "*"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, ["mm-wavebro:dm:glin"])  # nest never reached the daemon
+        self.assertIn("outcome is unknown", stderr)
+        self.assertIn("For 4 watchers: 1 succeeded, 1 failed, 2 not run.", stdout)
+
+    def test_transport_failure_mid_run_with_force_tries_the_rest(self):
+        from gateway import cli as cli_mod
+        real = cli_mod._send_command
+
+        def _flaky(request, timeout=60.0):
+            if request.get("watcher_name") == "mm-wavebro:nest":
+                raise SystemExit(2)
+            return real(request, timeout=timeout)
+
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        with patch("gateway.cli._send_command", side_effect=_flaky):
+            stdout, stderr, code = self._run(["reset", "*", "--force"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, ["mm-wavebro:dm:glin", "rc-eng:general", "rc-eng:nest"])
+        self.assertIn("For 4 watchers: 3 succeeded, 1 failed, 0 not run.", stdout)
+
+    # ── the list itself failing: nothing is touched ──────────────────────────
+
+    def test_partial_listing_aborts_before_touching_anything(self):
+        """A connector that failed to list leaves the match set incomplete.
+        Acting on what the others returned is not what was asked for."""
+        sent, responses = self._capture("reset")
+        responses["list"] = {
+            "ok": False, "data": [{"watcher_name": "rc-eng:nest"}],
+            "errors": [{"connector": "mm-wavebro", "error": "connection refused"}],
+        }
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["reset", "*"])
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, [])
+        self.assertIn("mm-wavebro", stderr)
+        self.assertIn("nothing was done", stderr)
+        self.assertNotIn("For ", stdout)
+
+    def test_hard_list_failure_aborts(self):
+        sent, responses = self._capture("pause")
+        responses["list"] = {"ok": False, "error": "Cannot list: reload in progress"}
+        self._start_daemon(responses)
+        _, stderr, code = self._run(["pause", "*"])
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, [])
+        self.assertIn("reload in progress", stderr)
+
+    def test_reset_keeps_its_long_timeout_per_watcher(self):
+        """reset's 300 s wait is per command, so a glob reset of N watchers
+        waits up to 300 s for EACH — not 300 s total, not 60 s each."""
+        seen: list[float] = []
+        from gateway import cli as cli_mod
+        real = cli_mod._send_command
+
+        def _spy(request, timeout=60.0):
+            if request["cmd"] == "reset":
+                seen.append(timeout)
+            return real(request, timeout=timeout)
+
+        _, responses = self._capture("reset")
+        self._start_daemon(responses)
+        with patch("gateway.cli._send_command", side_effect=_spy):
+            self._run(["reset", "rc-eng:*"])
+        self.assertEqual(seen, [300.0, 300.0])
 
 
 # ---------------------------------------------------------------------------

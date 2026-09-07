@@ -386,7 +386,25 @@ class ControlServer:
         for entry in self._entries:
             if entry.session_manager.get_watcher_state(watcher_name) is not None:
                 return entry
-        return {"ok": False, "error": f"Unknown watcher: {watcher_name!r}"}
+        # Not loaded is not the same as gone: `list` shows every record on
+        # disk, and `_hydrate` leaves the ones it cannot load there (no room
+        # id, or a room another record already holds). Such a name is listed,
+        # so a glob will send it here — and calling it unknown would have the
+        # batch count it as "no longer there", while the next `list` still
+        # shows it (Codex on #152). No `code`: it is a real refusal.
+        for entry in self._entries:
+            if entry.session_manager.has_persisted_record(watcher_name):
+                return {"ok": False, "error": (
+                    f"Watcher {watcher_name!r} has a persisted record this "
+                    f"daemon did not load — see the startup log ('Skipping "
+                    f"persisted watcher'). Repair or remove it in the "
+                    f"connector's state file; it cannot be operated on until "
+                    f"then.")}
+        # `code` is the stable key a batch CLI run keys on to tell "gone since
+        # the match set was collected" (skip, not an error) from every other
+        # refusal (#151). The text is for people and may change; this may not.
+        return {"ok": False, "code": "unknown_watcher",
+                "error": f"Unknown watcher: {watcher_name!r}"}
 
     def _handle_schedule(self, cmd: str, request: dict) -> dict:
         """Route schedule-* commands to the JobStore.

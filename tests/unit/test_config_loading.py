@@ -163,6 +163,34 @@ class TestConfigValidationHardening(unittest.TestCase):
             GatewayConfig.from_file(path)
         self.assertIn("Duplicate connector name 'rc'", str(ctx.exception))
 
+    def test_a_glob_character_in_a_connector_name_is_refused(self):
+        """'*', '?' and '[' make a watcher name a pattern on the CLI (#151);
+        a connector 'prod[1]' would give every one of its watchers a name
+        that matches nothing literally, so a pause of it would silently do
+        nothing (Codex on #152)."""
+        for bad in ("prod[1]", "mm*", "rc?"):
+            with self.subTest(name=bad):
+                path = self._write_config(f"""\
+                    connectors:
+                      - name: '{bad}'
+                        type: rocketchat
+                        server: {{url: http://localhost:3000, username: bot, password: pw}}
+                    agents:
+                      default:
+                        type: claude
+                        working_directory: /tmp
+                    watcher_rules:
+                      - name: w1
+                        connector: '{bad}'
+                        agent: default
+                        rooms:
+                          include: [general]
+                """)
+                with self.assertRaises(ValueError) as ctx:
+                    GatewayConfig.from_file(path)
+                self.assertIn(f"Connector name '{bad}'", str(ctx.exception))
+                self.assertIn("glob", str(ctx.exception))
+
     def test_a_colon_in_a_connector_name_is_refused(self):
         """':' is the watcher-handle divider (<connector>:<room label>) — the
         boundary is only unforgeable because a connector name can never
