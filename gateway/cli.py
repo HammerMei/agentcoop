@@ -515,7 +515,11 @@ _LIFECYCLE_WORDS = {
 # an active or idle match is "not paused — skipped"; `pause` on an already
 # paused one likewise. Both count as succeeded — the watcher is already where
 # the verb would leave it. Owner's call on #151 (resume); pause is the mirror.
-# Keyed on the STATE column of the same listing the match set came from.
+# Keyed on the STATE column of the same listing the match set came from, and
+# deliberately NOT re-checked at the watcher's turn: the run is "list, filter,
+# loop", not a transaction (owner, #152). A state that changed in between
+# fails at its turn or is skipped on the snapshot; `list` afterwards is the
+# operator's confirmation step.
 _SKIP_WHEN = {
     "resume": (lambda state: state != "paused", "is not paused"),
     "pause": (lambda state: state == "paused", "is already paused"),

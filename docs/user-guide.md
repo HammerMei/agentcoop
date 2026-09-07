@@ -844,8 +844,13 @@ agent-chat-gateway resume '*:nest'        # the "nest" room on every connector
 agent-chat-gateway expire '*:dm:*'        # every 1:1 DM watcher
 ```
 
-A glob run collects its matches once, up front, then acts on them one at a
-time in name order, printing a line before and after each:
+A glob run collects its matches — names and states — once, up front, then
+acts on them one at a time in name order, printing a line before and after
+each. **Nothing is re-checked between that snapshot and a watcher's turn**, by
+design: the CLI is a shorthand for "list, filter, loop", not a transaction. A
+watcher another operator changed in that window fails at its turn (and the
+run reports it) or is skipped on the snapshot's state; run `list` afterwards
+to confirm the end state.
 
 ```
 Resetting watcher 'mm-wavebro:dm:glin'…
