@@ -386,7 +386,11 @@ class ControlServer:
         for entry in self._entries:
             if entry.session_manager.get_watcher_state(watcher_name) is not None:
                 return entry
-        return {"ok": False, "error": f"Unknown watcher: {watcher_name!r}"}
+        # `code` is the stable key a batch CLI run keys on to tell "gone since
+        # the match set was collected" (skip, not an error) from every other
+        # refusal (#151). The text is for people and may change; this may not.
+        return {"ok": False, "code": "unknown_watcher",
+                "error": f"Unknown watcher: {watcher_name!r}"}
 
     def _handle_schedule(self, cmd: str, request: dict) -> dict:
         """Route schedule-* commands to the JobStore.

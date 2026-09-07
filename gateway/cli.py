@@ -85,20 +85,38 @@ def main():
         "--all", action="store_true", help="Include every state"
     )
 
+    # pause / resume / reset / expire share one positional and one flag: the
+    # name may be a glob, and a glob run wants a way to keep going past a
+    # failure (#151).
+    def _watcher_target(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "watcher_name",
+            help="Watcher name as shown by 'list', or a glob over names "
+                 "('*' and '?'; e.g. 'mm-*', '*:nest', '*') — quote it so the "
+                 "shell does not expand it. A glob acts on every matching "
+                 "watcher, one at a time, and ends with a summary line",
+        )
+        p.add_argument(
+            "--force", action="store_true",
+            help="With a glob: keep going after a watcher fails instead of "
+                 "aborting the run (the summary still reports the failure and "
+                 "the exit code is still non-zero)",
+        )
+
     # pause
     pause_p = sub.add_parser("pause", help="Pause a watcher (stops processing messages)")
-    pause_p.add_argument("watcher_name", help="Watcher name as defined in config.yaml")
+    _watcher_target(pause_p)
 
     # resume
     resume_p = sub.add_parser("resume", help="Resume a paused watcher")
-    resume_p.add_argument("watcher_name", help="Watcher name as defined in config.yaml")
+    _watcher_target(resume_p)
 
     # reset
     reset_p = sub.add_parser(
         "reset",
         help="Reset a watcher: clear runtime state and start a fresh session",
     )
-    reset_p.add_argument("watcher_name", help="Watcher name as defined in config.yaml")
+    _watcher_target(reset_p)
 
     # expire
     expire_p = sub.add_parser(
@@ -110,7 +128,7 @@ def main():
              "messages (voice, script): only a restart or a scheduled job would "
              "bring the watcher back — use 'reset' there",
     )
-    expire_p.add_argument("watcher_name", help="Watcher name as shown by 'list'")
+    _watcher_target(expire_p)
 
     # onboard
     onboard_p = sub.add_parser(
@@ -447,53 +465,8 @@ def main():
         if connector_errors:
             sys.exit(1)
 
-    elif args.command == "pause":
-        cmd_data = {"cmd": "pause", "watcher_name": args.watcher_name}
-        result = _send_command(cmd_data)
-        if result["ok"]:
-            print(f"Watcher '{args.watcher_name}' paused")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif args.command == "resume":
-        cmd_data = {"cmd": "resume", "watcher_name": args.watcher_name}
-        result = _send_command(cmd_data)
-        if result["ok"]:
-            print(f"Watcher '{args.watcher_name}' resumed")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif args.command == "expire":
-        cmd_data = {"cmd": "expire", "watcher_name": args.watcher_name}
-        result = _send_command(cmd_data)
-        if result["ok"]:
-            # NOT "scheduled jobs reclaimed" — expire does not touch them, and
-            # this is the success line an operator actually reads. It said the
-            # opposite of the `--help` two hundred lines up, which was fixed in
-            # the same commit that claimed to have swept "all of it
-            # operator-facing". Found by review.
-            print(f"Watcher '{args.watcher_name}' expired — record, session and "
-                  f"files reclaimed. Its scheduled jobs are kept; the room's "
-                  f"next message, or a job's own next run, recreates the "
-                  f"watcher.")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif args.command == "reset":
-        cmd_data = {"cmd": "reset", "watcher_name": args.watcher_name}
-        # Reset involves stopping + restarting the agent process and injecting
-        # context (an agent round-trip). This can take several minutes for slow
-        # agents (e.g. OpenCode startup + context injection). Use a 5-minute
-        # timeout so the CLI does not bail out before the restart completes.
-        result = _send_command(cmd_data, timeout=300)
-        if result["ok"]:
-            print(f"Watcher '{args.watcher_name}' reset")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
+    elif args.command in _LIFECYCLE_VERBS:
+        _run_lifecycle_verb(args)
 
     elif args.command == "onboard":
         from .onboard import run_onboard
@@ -517,6 +490,133 @@ def main():
 
     elif args.command == "config":
         _run_config(args)
+
+
+_LIFECYCLE_VERBS = ("pause", "resume", "reset", "expire")
+
+# Reset stops and restarts the agent process and injects context (an agent
+# round-trip). That can take minutes for a slow agent (OpenCode startup +
+# injection), so its per-command wait is 5 minutes, not the default 60 s.
+_LIFECYCLE_TIMEOUT = {"reset": 300.0}
+
+# Present participle per verb, for the batch path's per-watcher lines
+# ("Resuming watcher 'x'…" / "Done resuming watcher 'x'"). The single-name
+# success lines are the historical ones and stay byte-identical — see
+# `_single_success_line`.
+_LIFECYCLE_WORDS = {
+    "pause": "pausing",
+    "resume": "resuming",
+    "reset": "resetting",
+    "expire": "expiring",
+}
+
+# The label alphabet is [A-Za-z0-9._-] plus the ':' divider
+# (watcher_manager._LABEL_SAFE), so none of these can be part of a real name:
+# a name containing one is a pattern, unambiguously.
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _single_success_line(verb: str, name: str) -> str:
+    if verb == "expire":
+        # NOT "scheduled jobs reclaimed" — expire does not touch them, and
+        # this is the success line an operator actually reads. It said the
+        # opposite of the `--help` two hundred lines up, which was fixed in
+        # the same commit that claimed to have swept "all of it
+        # operator-facing". Found by review.
+        return (f"Watcher '{name}' expired — record, session and "
+                f"files reclaimed. Its scheduled jobs are kept; the room's "
+                f"next message, or a job's own next run, recreates the "
+                f"watcher.")
+    past = {"pause": "paused", "resume": "resumed", "reset": "reset"}[verb]
+    return f"Watcher '{name}' {past}"
+
+
+def _run_lifecycle_verb(args) -> None:
+    """pause / resume / reset / expire — one name, or a glob over names (#151).
+
+    A literal name is the path that always existed: one command, one line,
+    exit 1 on refusal. A glob is expanded HERE, once, at the operator
+    boundary — `list` every state, `fnmatchcase` on the NAME column — and the
+    verb is then sent per matched name exactly as the literal form sends it,
+    so the daemon protocol and the routing rule (§2.8) are untouched. The
+    result is by construction what `list --all`, a filter on NAME and a loop
+    over the matches would do.
+    """
+    verb = args.command
+    target = args.watcher_name
+    if not any(c in _GLOB_CHARS for c in target):
+        result = _send_command({"cmd": verb, "watcher_name": target},
+                               timeout=_LIFECYCLE_TIMEOUT.get(verb, 60.0))
+        if result["ok"]:
+            print(_single_success_line(verb, target))
+        else:
+            print(f"Error: {result.get('error')}", file=sys.stderr)
+            sys.exit(1)
+        return
+    _run_lifecycle_glob(verb, target, force=args.force)
+
+
+def _run_lifecycle_glob(verb: str, pattern: str, *, force: bool) -> None:
+    import fnmatch
+
+    listing = _send_command({"cmd": "list", "states": list(_ALL_STATES)})
+    # A partial listing is refused outright: acting on "the watchers the
+    # working connectors could see" is not what the operator asked for, and
+    # nothing has been touched yet, so aborting here costs nothing.
+    if not listing.get("ok"):
+        for ce in listing.get("errors", []):
+            print(f"[ERROR] connector '{ce['connector']}' failed to list watchers: "
+                  f"{ce['error']}", file=sys.stderr)
+        if "errors" not in listing:
+            print(f"[ERROR] {listing.get('error')}", file=sys.stderr)
+        print(f"[ERROR] Cannot {verb} '{pattern}': the watcher list is incomplete, "
+              f"nothing was done.", file=sys.stderr)
+        sys.exit(1)
+
+    # `fnmatchcase`, not `fnmatch`: the latter goes through os.path.normcase,
+    # which folds case on Windows (identity on POSIX), and names are
+    # case-preserving — a pattern must match the same rows on every OS. Names
+    # are unique across connectors, so the set() is only insurance against a
+    # duplicate row.
+    names = sorted({
+        w.get("watcher_name", "")
+        for w in listing.get("data", [])
+        if fnmatch.fnmatchcase(w.get("watcher_name", ""), pattern)
+    })
+
+    word = _LIFECYCLE_WORDS[verb]
+    succeeded = failed = 0
+    aborted_at: int | None = None
+    for i, name in enumerate(names):
+        # flush: a reset can take minutes, and the point of this line is that
+        # it is visible BEFORE the wait, even through a pipe.
+        print(f"{word.capitalize()} watcher '{name}'…", flush=True)
+        result = _send_command({"cmd": verb, "watcher_name": name},
+                               timeout=_LIFECYCLE_TIMEOUT.get(verb, 60.0))
+        if result.get("ok"):
+            print(f"Done {word} watcher '{name}'")
+            succeeded += 1
+        elif result.get("code") == "unknown_watcher":
+            # Gone since the match set was collected. Its absence is the state
+            # every verb here drives toward or tolerates, so it counts as done.
+            print(f"Watcher '{name}' is no longer there — skipped")
+            succeeded += 1
+        else:
+            print(f"[ERROR] {word.capitalize()} watcher '{name}' failed: "
+                  f"{result.get('error')}", file=sys.stderr)
+            failed += 1
+            if not force:
+                aborted_at = i + 1
+                break
+
+    not_run = len(names) - (aborted_at if aborted_at is not None else len(names))
+    if aborted_at is not None:
+        print(f"[ERROR] Aborted after the failure above; {not_run} watcher(s) not run "
+              f"(use --force to keep going past failures).", file=sys.stderr)
+    print(f"For {len(names)} watchers: {succeeded} succeeded, {failed} failed, "
+          f"{not_run} not run.")
+    if failed:
+        sys.exit(1)
 
 
 # The CLI's own spelling of every state, so `status` and `--all` cannot drift

@@ -833,7 +833,35 @@ agent-chat-gateway reset <watcher-name>
 # recreates it. Refused on voice/script connectors — nothing arrives on its
 # own there to bring the watcher back — use `reset` on those instead.
 agent-chat-gateway expire <watcher-name>
+
+# Any of the four takes a glob over watcher names instead of one name — the
+# NAME column of `list --all`, DMs included. Quote it so the shell does not
+# expand it.
+agent-chat-gateway reset '*'              # every watcher
+agent-chat-gateway reset 'mm-*'           # every watcher on connectors named mm-...
+agent-chat-gateway pause 'mm-wavebro:*'   # every room on one connector
+agent-chat-gateway resume '*:nest'        # the "nest" room on every connector
+agent-chat-gateway expire '*:dm:*'        # every 1:1 DM watcher
 ```
+
+A glob run collects its matches once, up front, then acts on them one at a
+time in name order, printing a line before and after each:
+
+```
+Resetting watcher 'mm-wavebro:dm:glin'…
+Done resetting watcher 'mm-wavebro:dm:glin'
+Resetting watcher 'mm-wavebro:nest'…
+Watcher 'mm-wavebro:nest' is no longer there — skipped
+For 2 watchers: 2 succeeded, 0 failed, 0 not run.
+```
+
+A watcher that disappeared between the listing and its turn is skipped and
+counted as succeeded — its absence is the state the verb was driving toward.
+Any other failure prints an `[ERROR]` line and **aborts the run**: the
+remaining watchers are reported as `not run` and the exit code is 1. Pass
+`--force` to keep going past failures instead; the summary still counts them
+and the exit code is still 1. A pattern that matches nothing is not an error —
+the summary just reads `For 0 watchers: …`.
 
 `list` reports the watchers the gateway has **state records** for, not the
 entries in `config.yaml`.

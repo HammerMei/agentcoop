@@ -253,6 +253,17 @@ class TestFindEntryForWatcher(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, dict)
         self.assertFalse(result["ok"])
         self.assertIn("nonexistent", result["error"])
+        # The batch CLI keys on this to count "gone since the match set was
+        # collected" as done rather than failed (#151). The text is free to
+        # change; the code is a contract.
+        self.assertEqual(result["code"], "unknown_watcher")
+
+    def test_empty_name_is_not_reported_as_unknown_watcher(self):
+        """An empty name is a malformed request, not a watcher that went away —
+        it must not carry the code a batch run treats as a benign skip."""
+        server = _make_server(_make_entry("rc", watcher_names=[]))
+        result = server._find_entry_for_watcher("")
+        self.assertNotEqual(result.get("code"), "unknown_watcher")
 
     def test_empty_watcher_name_returns_error(self):
         server = _make_server(_make_entry("rc", watcher_names=[]))
