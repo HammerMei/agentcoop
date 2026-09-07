@@ -159,11 +159,14 @@ class TestResumeResolvesTheRoomFirst(unittest.IsolatedAsyncioTestCase):
         # after it answers the replacement.
         mgr._lifecycle.get_watcher_state = MagicMock(side_effect=[old, replacement])
 
-        result = await mgr.dispatch_command(
-            {"cmd": "resume", "watcher_name": "mm:old-team-general"})
+        with self.assertLogs(_LOGGER, level="WARNING") as logs:
+            result = await mgr.dispatch_command(
+                {"cmd": "resume", "watcher_name": "mm:old-team-general"})
 
         self.assertFalse(result["ok"])
+        self.assertIn("skipped", result["error"])
         self.assertIn("replaced while the resume waited", result["error"])
+        self.assertTrue(any("skipped" in line for line in logs.output), logs.output)
         mgr._lifecycle.resume_watcher.assert_not_awaited()
 
     async def test_a_name_with_no_record_is_left_to_the_lifecycle_to_refuse(self):

@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.helpers import (
+    ENG_ROOM,
     evict_record,
     install_record,
     make_rule_derived_record,
@@ -34,6 +35,7 @@ from tests.unit.test_wake_path import (
 )
 
 ROOM_ID = "wake-1"
+LIFECYCLE_LOGGER = "agent-chat-gateway.core.watcher_lifecycle"
 NAME = "rc:eng-backend"
 
 
@@ -372,9 +374,16 @@ class TestVerbsOnRuleDerivedRecords(unittest.IsolatedAsyncioTestCase):
                 register_processor(lifecycle, NAME, replacement_proc)
                 lock.release()
 
-                with self.assertRaises(RuntimeError) as ctx:
+                # The skip is logged as well as raised (owner, PR #150): the
+                # CLI shows the operator the error, the daemon log shows
+                # whoever reads it later why the verb did nothing.
+                with self.assertRaises(RuntimeError) as ctx, \
+                        self.assertLogs(LIFECYCLE_LOGGER, level="WARNING") as logs:
                     await task
                 self.assertIn("replaced", str(ctx.exception))
+                self.assertIn("skipped", str(ctx.exception))
+                self.assertTrue(any("skipped" in line and "replaced" in line
+                                    for line in logs.output), logs.output)
                 self.assertIs(lifecycle.get_watcher_state(NAME), replacement,
                               "the replacement was left untouched")
                 # Round 5: the gates run BEFORE the destructive stop — a
@@ -384,6 +393,45 @@ class TestVerbsOnRuleDerivedRecords(unittest.IsolatedAsyncioTestCase):
                               "the replacement's processor survived the "
                               "rejected verb")
                 pop_processor(lifecycle, NAME)
+
+    async def test_resume_and_reset_say_so_when_the_record_was_reclaimed_while_they_waited(self):
+        """Owner, PR #150: the no-op is correct — an expire or a membership
+        removal landing inside the lock wait leaves nothing to act on — but an
+        operator who typed the verb must be told WHY nothing happened, on the
+        CLI (the raised message) and in the daemon log (the warning)."""
+        connector, lifecycle, _ = await self._harness()
+        with patch("gateway.core.watcher_lifecycle.MessageProcessor") as MockProc:
+            MockProc.return_value.start = MagicMock()
+            MockProc.return_value.stop = AsyncMock()
+
+            for verb, word in ((lifecycle.resume_watcher, "resume"),
+                               (lifecycle.reset_watcher, "reset")):
+                # A dormant rule-derived record, installed directly (the way
+                # the replaced-while-waited test installs its replacement):
+                # no processor, so the verb would recreate it.
+                install_record(lifecycle, make_rule_derived_record(
+                    name=NAME, room_id=ENG_ROOM.id), as_name=NAME)
+                lock = lifecycle._get_watcher_lock(NAME)
+                await lock.acquire()
+                task = asyncio.create_task(verb(NAME))
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                # The reclamation, completed while the verb waited.
+                evict_record(lifecycle, NAME)
+                lock.release()
+
+                with self.assertRaises(RuntimeError) as ctx, \
+                        self.assertLogs(LIFECYCLE_LOGGER, level="WARNING") as logs:
+                    await task
+                message = str(ctx.exception)
+                self.assertIn(f"{word.capitalize()} of watcher", message)
+                self.assertIn("skipped", message)
+                self.assertIn(f"reclaimed while the {word} waited", message)
+                self.assertIn("expired, or the bot was removed", message)
+                self.assertTrue(any("skipped" in line and "reclaimed" in line
+                                    for line in logs.output), logs.output)
+                self.assertIsNone(lifecycle.get_watcher_state(NAME),
+                                  "nothing was recreated")
 
     async def test_reset_refuses_a_pause_that_landed_while_it_waited(self):
         """Codex round 3: the paused refusal runs before the lock, so a pause

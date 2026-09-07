@@ -1371,9 +1371,16 @@ class SessionManager:
                 # #150). The lifecycle reads the name afresh, so it would
                 # resume the replacement — whose room this check never saw.
                 # Same identity pin as `_resume_locked`'s, one await earlier.
+                logger.warning(
+                    "Resume of watcher '%s' skipped: its record was replaced "
+                    "while the resume waited on the room lookup — the "
+                    "replacement's room was never checked, so it is left as it "
+                    "is", name,
+                )
                 raise RuntimeError(
-                    f"Watcher '{name}' was replaced while the resume waited — "
-                    f"re-check 'list' and retry."
+                    f"Resume of watcher '{name}' skipped: its record was "
+                    f"replaced while the resume waited (reclaimed and recreated "
+                    f"under the same name) — re-check 'list' and retry."
                 )
         await self._lifecycle.resume_watcher(name)
 

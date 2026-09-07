@@ -1026,9 +1026,15 @@ class WatcherLifecycle:
                 # resuming the replacement with it would run a config the
                 # persisted record no longer carries. Same identity-pin rule
                 # as the expire verb's `expected=`.
+                logger.warning(
+                    "Resume of watcher '%s' skipped: its record was replaced "
+                    "while the resume waited (reclaimed and recreated under "
+                    "the same name) — the replacement is left as it is", name,
+                )
                 raise RuntimeError(
-                    f"Watcher '{name}' was replaced while the resume waited — "
-                    f"re-check 'list' and retry."
+                    f"Resume of watcher '{name}' skipped: its record was "
+                    f"replaced while the resume waited (reclaimed and recreated "
+                    f"under the same name) — re-check 'list' and retry."
                 )
             if self._processor_named(name) is not None:
                 logger.info("Watcher '%s' is already running", name)
@@ -1043,10 +1049,16 @@ class WatcherLifecycle:
                 # expire, or a membership removal). Same rule as everywhere:
                 # re-read under the lock, and a record that is gone cannot
                 # be resumed.
+                logger.warning(
+                    "Resume of watcher '%s' skipped: its record was reclaimed "
+                    "while the resume waited (expired, or the bot was removed "
+                    "from the room) — nothing left to resume", name,
+                )
                 raise RuntimeError(
-                    f"Watcher '{name}' was reclaimed while the resume waited "
-                    f"— its record is gone. The room's next message creates "
-                    f"a fresh watcher."
+                    f"Resume of watcher '{name}' skipped: its record was "
+                    f"reclaimed while the resume waited (expired, or the bot "
+                    f"was removed from the room) — nothing left to resume. The "
+                    f"room's next message creates a fresh watcher."
                 )
             if state.paused:
                 # SEAL the muted interval (Codex round 10): §4.4 drops the
@@ -1214,19 +1226,31 @@ class WatcherLifecycle:
             if state is None or not state.config:
                 # Reclaimed while the reset waited on the lock — same re-read
                 # rule as resume's.
+                logger.warning(
+                    "Reset of watcher '%s' skipped: its record was reclaimed "
+                    "while the reset waited (expired, or the bot was removed "
+                    "from the room) — nothing left to reset", name,
+                )
                 raise RuntimeError(
-                    f"Watcher '{name}' was reclaimed while the reset waited "
-                    f"— its record is gone. The room's next message creates "
-                    f"a fresh watcher."
+                    f"Reset of watcher '{name}' skipped: its record was "
+                    f"reclaimed while the reset waited (expired, or the bot "
+                    f"was removed from the room) — nothing left to reset. The "
+                    f"room's next message creates a fresh watcher."
                 )
             if state is not record:
                 # Replaced while the reset waited (TOCTOU sweep after Codex
                 # round 4): the reset would wipe the session of a watcher the
                 # operator did not select, and restart it with the OLD
                 # record's config. Same identity pin as resume's.
+                logger.warning(
+                    "Reset of watcher '%s' skipped: its record was replaced "
+                    "while the reset waited (reclaimed and recreated under the "
+                    "same name) — the replacement is left as it is", name,
+                )
                 raise RuntimeError(
-                    f"Watcher '{name}' was replaced while the reset waited — "
-                    f"re-check 'list' and retry."
+                    f"Reset of watcher '{name}' skipped: its record was "
+                    f"replaced while the reset waited (reclaimed and recreated "
+                    f"under the same name) — re-check 'list' and retry."
                 )
             if state.paused:
                 # Re-checked UNDER the lock (Codex round 3): the refusal above
