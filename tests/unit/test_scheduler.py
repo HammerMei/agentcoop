@@ -1216,6 +1216,14 @@ class TestInjectMessageWakesAnIdleRoom(unittest.IsolatedAsyncioTestCase):
         sm = make_bare_session_manager(_connector_name="rc")
         sm._lifecycle.processor_for_room = MagicMock(return_value=None)  # idle
         sm._lifecycle.record_for_room = MagicMock(return_value=self._record())
+        # An idle record is a RECREATION, so the connector is asked first
+        # (#145). Its answer here matches the record, so this test pins only
+        # that the wake happens; which source describes the room is pinned in
+        # test_recreation_resolves_room_scope.py.
+        sm._connector.supports_room_lookup = MagicMock(return_value=True)
+        sm._connector.room_ref_by_id = AsyncMock(return_value=RoomRef(
+            id="room-1", kind=RoomKind.CHANNEL, name="eng-backend",
+            participants=("alice",)))
         sm._watcher_manager = MagicMock()
         sm._watcher_manager.get_or_create = AsyncMock(return_value=woken_processor)
 
@@ -1238,12 +1246,19 @@ class TestInjectMessageWakesAnIdleRoom(unittest.IsolatedAsyncioTestCase):
         import logging
         from unittest.mock import AsyncMock, MagicMock
 
+        from gateway.core.watcher_manager import RoomRef
+        from gateway.core.watcher_rule import RoomKind
         from tests.helpers import make_bare_session_manager
 
         sm = make_bare_session_manager(_connector_name="rc")
         sm._lifecycle.processor_for_room = MagicMock(return_value=None)
         sm._lifecycle.record_for_room = MagicMock(
             return_value=self._record(paused=True))
+        # The room IS served (#145's check passes) — so the refusal below is
+        # `get_or_create`'s, not the room lookup's.
+        sm._connector.supports_room_lookup = MagicMock(return_value=True)
+        sm._connector.room_ref_by_id = AsyncMock(return_value=RoomRef(
+            id="room-1", kind=RoomKind.CHANNEL, name="eng-backend"))
         sm._watcher_manager = MagicMock()
         sm._watcher_manager.get_or_create = AsyncMock(return_value=None)
 
@@ -1257,19 +1272,31 @@ class TestInjectMessageWakesAnIdleRoom(unittest.IsolatedAsyncioTestCase):
         """No watcher manager → no creation path; the injection fails exactly
         as it always has rather than reaching for a router that is not there."""
         import logging
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock
 
+        from gateway.core.watcher_manager import RoomRef
+        from gateway.core.watcher_rule import RoomKind
         from tests.helpers import make_bare_session_manager
 
         sm = make_bare_session_manager()
         sm._lifecycle.processor_for_room = MagicMock(return_value=None)
         sm._lifecycle.record_for_room = MagicMock(return_value=self._record())
+        # The room resolves fine (#145's check is not what fails here): with
+        # an un-awaitable MagicMock the lookup would raise TypeError, be
+        # swallowed as a transient blip, and satisfy assertLogs with the wrong
+        # warning — the test would pass for a reason its docstring does not
+        # claim.
+        sm._connector.supports_room_lookup = MagicMock(return_value=True)
+        sm._connector.room_ref_by_id = AsyncMock(return_value=RoomRef(
+            id="room-1", kind=RoomKind.CHANNEL, name="eng-backend"))
 
         with self.assertLogs("agent-chat-gateway.core.session_manager",
-                             level=logging.WARNING):
+                             level=logging.WARNING) as logs:
             result = await sm.inject_message("room-1", "hello")
 
         self.assertFalse(result)
+        self.assertTrue(any("no active processor" in line for line in logs.output),
+                        logs.output)
 
 
 class TestAJobWithNoResolvableRoomIsNotFired(unittest.TestCase):

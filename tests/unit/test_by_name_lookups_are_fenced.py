@@ -59,6 +59,9 @@ ALLOWED = {
         "thin delegator for the operator boundary (control.py)",
     ("core/session_manager.py", "SessionManager.expire_watcher"):
         "an operator verb: `agent-chat-gateway expire <name>` — the human typed the name",
+    ("core/session_manager.py", "SessionManager.resume_watcher"):
+        "an operator verb: `agent-chat-gateway resume <name>` — the human typed the name; "
+        "the record is read to resolve ITS room id through the connector first (#145)",
     ("core/scheduler.py", "JobScheduler._resolve_target"):
         "the scheduler's single resolution seam; calls resolve_handle once per fire",
 }

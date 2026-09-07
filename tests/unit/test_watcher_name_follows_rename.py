@@ -378,6 +378,18 @@ class TestAStaleHandleIsRederivedEvenWhenTheRoomNameMatches(unittest.IsolatedAsy
         lifecycle._state_store.save.assert_not_called()
 
 
+def _serve_room(mgr, room_id):
+    """The connector answers for `room_id`: with the bare manager's MagicMock
+    connector the #145 lookup would raise TypeError on `await`, be swallowed as
+    a transient blip, and `get_or_create` would never be reached."""
+    from gateway.core.watcher_manager import RoomRef
+    from gateway.core.watcher_rule import RoomKind
+
+    mgr._connector.supports_room_lookup = MagicMock(return_value=True)
+    mgr._connector.room_ref_by_id = AsyncMock(
+        return_value=RoomRef(id=room_id, kind=RoomKind.CHANNEL, name="eng"))
+
+
 class TestAScheduledWakeRetriesPastAStaleRecord(unittest.IsolatedAsyncioTestCase):
     """`get_or_create` raises `StaleRecordError` when the record it read was
     reclaimed while it waited on the watcher lock; the contract is "the caller
@@ -396,6 +408,7 @@ class TestAScheduledWakeRetriesPastAStaleRecord(unittest.IsolatedAsyncioTestCase
         processor.enqueue = AsyncMock(return_value=True)
         mgr._lifecycle.record_for_room = MagicMock(return_value=record)
         mgr._lifecycle.processor_for_room = MagicMock(return_value=None)
+        _serve_room(mgr, "R1")  # a dormant record resolves the room first (#145)
         mgr._watcher_manager = MagicMock()
         mgr._watcher_manager.get_or_create = AsyncMock(
             side_effect=[StaleRecordError("reclaimed while waiting"), processor])
@@ -412,6 +425,7 @@ class TestAScheduledWakeRetriesPastAStaleRecord(unittest.IsolatedAsyncioTestCase
         mgr._connector_name = "rc"
         mgr._lifecycle.record_for_room = MagicMock(return_value=make_rule_derived_record(name="rc:eng", room_id="R1"))
         mgr._lifecycle.processor_for_room = MagicMock(return_value=None)
+        _serve_room(mgr, "R1")  # a dormant record resolves the room first (#145)
         mgr._watcher_manager = MagicMock()
         mgr._watcher_manager.get_or_create = AsyncMock(side_effect=StaleRecordError("again"))
 
