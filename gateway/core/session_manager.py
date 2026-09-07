@@ -1365,6 +1365,16 @@ class SessionManager:
         if (record is not None and record.room_id
                 and self._lifecycle.processor_for_room(record.room_id) is None):
             await self._require_room_served(record, verb="resume")
+            if self._lifecycle.get_watcher_state(name) is not record:
+                # The lookup yielded, and in that window the record was
+                # reclaimed and another room took the handle over (Codex on
+                # #150). The lifecycle reads the name afresh, so it would
+                # resume the replacement — whose room this check never saw.
+                # Same identity pin as `_resume_locked`'s, one await earlier.
+                raise RuntimeError(
+                    f"Watcher '{name}' was replaced while the resume waited — "
+                    f"re-check 'list' and retry."
+                )
         await self._lifecycle.resume_watcher(name)
 
     async def _require_room_served(self, record: WatcherState, *, verb: str) -> None:

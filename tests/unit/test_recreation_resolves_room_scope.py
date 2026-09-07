@@ -145,6 +145,27 @@ class TestResumeResolvesTheRoomFirst(unittest.IsolatedAsyncioTestCase):
         mgr._connector.room_ref_by_id.assert_not_awaited()
         mgr._lifecycle.resume_watcher.assert_awaited_once()
 
+    async def test_a_record_replaced_during_the_lookup_is_not_resumed(self):
+        """The lookup yields; in that window the record is reclaimed and another
+        room takes the handle over (Codex on #150). The lifecycle would read
+        the name afresh and resume the replacement, whose room was never
+        checked — so the name is re-read after the lookup and pinned to the
+        record the check ran on, like `_resume_locked`'s own pin."""
+        old = _dormant_record(paused=True)
+        replacement = _dormant_record(paused=True, room_id="r-new",
+                                      session_id="sess-new-9999")
+        mgr = _resume_manager(old, resolved=_served())
+        # First read (before the lookup) answers the old record; the re-read
+        # after it answers the replacement.
+        mgr._lifecycle.get_watcher_state = MagicMock(side_effect=[old, replacement])
+
+        result = await mgr.dispatch_command(
+            {"cmd": "resume", "watcher_name": "mm:old-team-general"})
+
+        self.assertFalse(result["ok"])
+        self.assertIn("replaced while the resume waited", result["error"])
+        mgr._lifecycle.resume_watcher.assert_not_awaited()
+
     async def test_a_name_with_no_record_is_left_to_the_lifecycle_to_refuse(self):
         """No record, nothing to resolve: the lifecycle owns that error message."""
         mgr = _resume_manager(None, resolved=None)
