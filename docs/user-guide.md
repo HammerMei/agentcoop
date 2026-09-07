@@ -857,6 +857,11 @@ For 2 watchers: 2 succeeded, 0 failed, 0 not run.
 
 A watcher that disappeared between the listing and its turn is skipped and
 counted as succeeded — its absence is the state the verb was driving toward.
+So is a watcher the verb would not change: `resume` skips a match that is not
+paused (`Watcher 'x' is not paused — skipped`) and `pause` skips one that
+already is, without asking the daemon — `resume '*'` brings the paused
+watchers back and leaves the idle ones idle. `reset` and `expire` are sent to
+every match regardless of state.
 Any other failure prints an `[ERROR]` line and **aborts the run**: the
 remaining watchers are reported as `not run` and the exit code is 1. Pass
 `--force` to keep going past failures instead; the summary still counts them

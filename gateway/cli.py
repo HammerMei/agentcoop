@@ -510,6 +510,17 @@ _LIFECYCLE_WORDS = {
     "expire": "expiring",
 }
 
+# A verb that would be a no-op on a watcher in this state is SKIPPED by the
+# batch path, before any command is sent: `resume` is for paused watchers, so
+# an active or idle match is "not paused — skipped"; `pause` on an already
+# paused one likewise. Both count as succeeded — the watcher is already where
+# the verb would leave it. Owner's call on #151 (resume); pause is the mirror.
+# Keyed on the STATE column of the same listing the match set came from.
+_SKIP_WHEN = {
+    "resume": (lambda state: state != "paused", "is not paused"),
+    "pause": (lambda state: state == "paused", "is already paused"),
+}
+
 # The label alphabet is [A-Za-z0-9._-] plus the ':' divider
 # (watcher_manager._LABEL_SAFE), so none of these can be part of a real name:
 # a name containing one is a pattern, unambiguously.
@@ -578,16 +589,22 @@ def _run_lifecycle_glob(verb: str, pattern: str, *, force: bool) -> None:
     # case-preserving — a pattern must match the same rows on every OS. Names
     # are unique across connectors, so the set() is only insurance against a
     # duplicate row.
-    names = sorted({
-        w.get("watcher_name", "")
+    state_of = {
+        w.get("watcher_name", ""): w.get("state", "")
         for w in listing.get("data", [])
         if fnmatch.fnmatchcase(w.get("watcher_name", ""), pattern)
-    })
+    }
+    names = sorted(state_of)
 
     word = _LIFECYCLE_WORDS[verb]
+    skip_if, skip_reason = _SKIP_WHEN.get(verb, (lambda state: False, ""))
     succeeded = failed = 0
     aborted_at: int | None = None
     for i, name in enumerate(names):
+        if skip_if(state_of[name]):
+            print(f"Watcher '{name}' {skip_reason} — skipped")
+            succeeded += 1
+            continue
         # flush: a reset can take minutes, and the point of this line is that
         # it is visible BEFORE the wait, even through a pipe.
         print(f"{word.capitalize()} watcher '{name}'…", flush=True)

@@ -862,12 +862,14 @@ class TestCLIList(_CLITestBase):
 # Tests: a glob over watcher names (#151)
 # ---------------------------------------------------------------------------
 
-_ROWS = [
-    {"watcher_name": "mm-wavebro:nest"},
-    {"watcher_name": "mm-wavebro:dm:glin"},
-    {"watcher_name": "rc-eng:nest"},
-    {"watcher_name": "rc-eng:general"},
-]
+_NAMES = ["mm-wavebro:nest", "mm-wavebro:dm:glin", "rc-eng:nest", "rc-eng:general"]
+
+
+def _rows(names=_NAMES, state="active"):
+    return [{"watcher_name": n, "state": state} for n in names]
+
+
+_ROWS = _rows()
 
 
 def _listing(rows=_ROWS):
@@ -883,9 +885,11 @@ class TestCLILifecycleGlob(_CLITestBase):
     behaviour, which has its own suites.
     """
 
-    def _capture(self, verb, outcome_for=None):
+    def _capture(self, verb, outcome_for=None, rows=None):
         """A daemon that records the names a verb was sent, in order, and
-        answers per name via `outcome_for(name)` (default: ok)."""
+        answers per name via `outcome_for(name)` (default: ok). Rows default
+        to every name in the state the verb acts on, so a plain capture
+        exercises the send path rather than the state skip."""
         sent: list[str] = []
 
         def _handler(req):
@@ -893,7 +897,9 @@ class TestCLILifecycleGlob(_CLITestBase):
             sent.append(name)
             return outcome_for(name) if outcome_for else {"ok": True}
 
-        return sent, {"list": _listing(), verb: _handler}
+        if rows is None:
+            rows = _rows(state="paused" if verb == "resume" else "active")
+        return sent, {"list": _listing(rows), verb: _handler}
 
     # ── item 1: matching is a glob over the NAME column, DMs included ────────
 
@@ -983,7 +989,7 @@ class TestCLILifecycleGlob(_CLITestBase):
         _, responses = self._capture("resume")
         self._start_daemon(responses)
         stdout, _, _ = self._run(["resume", "rc-eng:*"])
-        lines = [l for l in stdout.splitlines() if "rc-eng" in l]
+        lines = [line for line in stdout.splitlines() if "rc-eng" in line]
         self.assertEqual(lines, [
             "Resuming watcher 'rc-eng:general'…",
             "Done resuming watcher 'rc-eng:general'",
@@ -1002,6 +1008,68 @@ class TestCLILifecycleGlob(_CLITestBase):
                 self.assertIn(f"Done {word} watcher 'rc-eng:nest'", stdout)
                 self._daemon.stop()
                 self.sock_path.unlink(missing_ok=True)
+
+    # ── a no-op state is skipped before anything is sent ─────────────────────
+
+    def test_resume_skips_watchers_that_are_not_paused_without_asking_the_daemon(self):
+        """Owner on #151: `resume` over a glob is "bring the paused ones back";
+        an active or idle match is reported as not paused, skipped, and
+        counted as succeeded — and the daemon is never asked, so a resume of
+        '*' cannot wake every idle room as a side effect."""
+        rows = (_rows(["rc-eng:nest"], state="paused")
+                + _rows(["rc-eng:general"], state="active")
+                + _rows(["rc-eng:archive"], state="idle"))
+        sent, responses = self._capture("resume", rows=rows)
+        self._start_daemon(responses)
+        stdout, stderr, code = self._run(["resume", "rc-eng:*"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(sent, ["rc-eng:nest"])
+        self.assertIn("Watcher 'rc-eng:archive' is not paused — skipped", stdout)
+        self.assertIn("Watcher 'rc-eng:general' is not paused — skipped", stdout)
+        self.assertNotIn("Resuming watcher 'rc-eng:general'", stdout)
+        self.assertIn("For 3 watchers: 3 succeeded, 0 failed, 0 not run.", stdout)
+
+    def test_pause_skips_watchers_that_are_already_paused(self):
+        """The mirror of the resume skip: pausing a paused watcher is a no-op
+        the daemon would answer ok to anyway; the batch line says so."""
+        rows = _rows(["rc-eng:nest"], state="paused") + _rows(["rc-eng:general"])
+        sent, responses = self._capture("pause", rows=rows)
+        self._start_daemon(responses)
+        stdout, _, code = self._run(["pause", "rc-eng:*"])
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, ["rc-eng:general"])
+        self.assertIn("Watcher 'rc-eng:nest' is already paused — skipped", stdout)
+        self.assertIn("For 2 watchers: 2 succeeded", stdout)
+
+    def test_reset_and_expire_act_regardless_of_state(self):
+        """Only pause/resume have a state that makes them a no-op; reset and
+        expire are sent to every match, paused or idle included."""
+        rows = _rows(["rc-eng:nest"], state="paused") + _rows(["rc-eng:general"], state="idle")
+        for verb in ("reset", "expire"):
+            with self.subTest(verb=verb):
+                sent, responses = self._capture(verb, rows=rows)
+                self._start_daemon(responses)
+                self._run([verb, "rc-eng:*"])
+                self.assertEqual(sent, ["rc-eng:general", "rc-eng:nest"])
+                self._daemon.stop()
+                self.sock_path.unlink(missing_ok=True)
+
+    def test_state_skip_does_not_short_circuit_a_literal_name(self):
+        """A literal `resume x` on an active watcher still goes to the daemon
+        (whose own answer is the idempotent ok) — the skip is a batch-only
+        courtesy, the single path is unchanged."""
+        received: list[dict] = []
+
+        def _resume(req):
+            received.append(req)
+            return {"ok": True}
+
+        self._start_daemon({"resume": _resume})
+        stdout, _, code = self._run(["resume", "rc-eng:nest"])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(received), 1)
+        self.assertIn("Watcher 'rc-eng:nest' resumed", stdout)
 
     # ── item 3: gone since the match set was collected → skip, not error ─────
 
