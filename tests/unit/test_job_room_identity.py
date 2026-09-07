@@ -149,15 +149,22 @@ class TestTheReplyIsAddressedFromTheSameResolution(unittest.IsolatedAsyncioTestC
         self.assertNotEqual(_enqueued_room(manager).id, "")
 
     async def test_a_resident_watcher_is_addressed_from_its_record(self):
-        """The ordinary path: a record exists, so it describes the room and no
-        connector round trip happens."""
+        """The ordinary path: the watcher is RUNNING, so its record describes
+        the room it is serving and no connector round trip happens. A record
+        with no resident processor is a recreation and does resolve first
+        (#145 — test_recreation_resolves_room_scope.py)."""
         record = _record()
-        manager = _manager(record=record, record_for_room=record)
+        resident = MagicMock()
+        resident.enqueue = AsyncMock(return_value=True)
+        manager = _manager(record=record, record_for_room=record,
+                           resident={"room-1": resident})
 
         await manager.inject_message("room-1", "poke")
 
         manager._connector.room_ref_by_id.assert_not_awaited()
-        self.assertEqual(_enqueued_room(manager).id, "room-1")
+        manager._watcher_manager.get_or_create.assert_not_awaited()
+        resident.enqueue.assert_awaited_once()
+        self.assertEqual(resident.enqueue.await_args.args[0].room.id, "room-1")
 
     async def test_an_empty_room_id_is_a_programming_error_not_a_lookup(self):
         """`inject_message` used to take a handle first and fall back to it when

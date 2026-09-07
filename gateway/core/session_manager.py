@@ -1354,7 +1354,71 @@ class SessionManager:
         await self._lifecycle.pause_watcher(name)
 
     async def resume_watcher(self, name: str) -> None:
+        # A resume with no resident processor RECREATES the watcher from the
+        # record's stored room fields (`_resume_record`), so it asks the
+        # connector first, like boot and the wake path (#145). A resume on a
+        # running watcher only clears the paused flag — nothing to resolve.
+        # Residency is read here, outside the watcher lock the lifecycle takes:
+        # a processor dropped by the idle sweep in that window is recreated
+        # without the check, which is the pre-#145 behaviour and nothing worse.
+        record = self._lifecycle.get_watcher_state(name)
+        if (record is not None and record.room_id
+                and self._lifecycle.processor_for_room(record.room_id) is None):
+            await self._require_room_served(record, verb="resume")
         await self._lifecycle.resume_watcher(name)
+
+    async def _require_room_served(self, record: WatcherState, *, verb: str) -> None:
+        """Refuse an operator-driven recreation of a room this connector no
+        longer serves (#145) — the check `_room_still_served` makes at boot,
+        with the other answer to "and then what".
+
+        Boot RECLAIMS such a record, because nobody is there to act and the
+        record would otherwise come back to life. Here an operator is present,
+        asked for the watcher back, and is told why that cannot happen; a verb
+        that meant "bring it back" must not quietly do something destructive
+        instead. The record is left as it is — paused, so no timer touches it,
+        or idle, and the expiry TTL reclaims it in time — and the refusal names
+        `expire`, the verb that reclaims it now. The wake path refuses the same
+        way and reclaims nothing.
+
+        The connector contract's two failure shapes stay apart, as everywhere:
+        `None` is permanent (gone, another team, no longer a member) and the
+        refusal says so; a raise is transient and the refusal says to retry.
+        Without `supports_room_lookup` the base `room_ref_by_id`'s `None` would
+        read as "gone" and refuse every resume, so the check is skipped, as at
+        boot.
+        """
+        if not self._connector.supports_room_lookup():
+            return
+        try:
+            current = await self._connector.room_ref_by_id(record.room_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not reach the connector to resolve room %s for watcher "
+                "'%s' — the %s is refused and the record left as it is: %s",
+                record.room_id, record.watcher_name, verb, exc,
+            )
+            raise RuntimeError(
+                f"Could not reach the connector to resolve room "
+                f"{record.room_id} for watcher '{record.watcher_name}' — the "
+                f"{verb} is refused and the record left as it is. Retry: {exc}"
+            ) from exc
+        if current is not None:
+            return
+        logger.warning(
+            "Room %s is not available to this connector (gone, in another "
+            "team, or this account is no longer in it) — the %s of watcher "
+            "'%s' is refused and its record left as it is (session %s); "
+            "'expire' reclaims it",
+            record.room_id, verb, record.watcher_name, record.session_id or "-",
+        )
+        raise RuntimeError(
+            f"Room {record.room_id} is not available to this connector (gone, "
+            f"in another team, or this account is no longer in it) — the {verb} "
+            f"is refused and watcher '{record.watcher_name}' is left as it is. "
+            f"This is final, not a retry: 'expire {record.watcher_name}' "
+            f"reclaims its record."
+        )
 
     async def reset_watcher(self, name: str) -> None:
         await self._lifecycle.reset_watcher(name)
@@ -1495,8 +1559,14 @@ class SessionManager:
         # a resurrected-under-a-new-name watcher: the agent ran a full turn and
         # the reply went nowhere, while `enqueue` returned True.
         record = self._lifecycle.record_for_room(room_id)
+        processor = self._lifecycle.processor_for_room(room_id)
         room: "RoomRef | None"
-        if record is not None:
+        if record is not None and (
+                processor is not None or not self._connector.supports_room_lookup()):
+            # A running watcher: the record describes the room it is serving,
+            # and nothing is recreated. (Or a connector that cannot look rooms
+            # up, whose base `room_ref_by_id` would read as "gone" — recreate
+            # from the record, as before the check existed.)
             room = RoomRef(
                 id=record.room_id,
                 kind=_room_kind_or_channel(record),
@@ -1504,17 +1574,35 @@ class SessionManager:
                 participants=tuple(record.participants),
             )
         else:
-            # No record — `expire` reclaimed it, or it never existed. Re-resolved
-            # from the connector rather than reconstructed from anything
-            # persisted: a name is display-only and a rename frees it for another
-            # room (§2.3), which is the whole reason this path takes an id.
+            # No resident processor: this fire RECREATES a watcher, from the
+            # record or from nothing, and either way the connector is asked
+            # first (#145, #141). A record's room fields say what the room was
+            # when the record was written, not whether this connector still
+            # serves it; and with no record — `expire` reclaimed it, or it
+            # never existed — there is nothing else to ask. A name is
+            # display-only and a rename frees it for another room (§2.3),
+            # which is the whole reason this path takes an id. The lookup
+            # precedes the pause decision `get_or_create` makes under its
+            # lock, so a job aimed at a paused room pays it at every slot.
             room = await self._resolve_room_for_wake(room_id)
+            if room is None and record is not None:
+                # `_resolve_room_for_wake` said which failure it was, by room
+                # id; this line adds what the record knows, so the session id
+                # is in the log for this site too (#145). Nothing is
+                # reclaimed — `expire` is the operator's, as for `resume`.
+                logger.warning(
+                    "inject_message: watcher '%s' for room %s is not recreated "
+                    "(see the line above) — its record is left as it is "
+                    "(session %s); if the room is gone for good, 'expire %s' "
+                    "reclaims it",
+                    record.watcher_name, room_id, record.session_id or "-",
+                    record.watcher_name,
+                )
 
         # ── The processor ─────────────────────────────────────────────────
         # Resident for THIS room, else `get_or_create`, which is also where
         # pause, the creation cap and the rule match are decided — what makes
         # "a job cannot reach a room a message could not" true, not asserted.
-        processor = self._lifecycle.processor_for_room(room_id)
         if processor is None and self._watcher_manager is not None and room is not None:
             try:
                 processor = await self._watcher_manager.get_or_create(

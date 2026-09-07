@@ -821,7 +821,9 @@ agent-chat-gateway list --active --paused
 # Pause a watcher (stops processing messages)
 agent-chat-gateway pause <watcher-name>
 
-# Resume a paused watcher
+# Resume a paused watcher. Refused, and the watcher left paused, when the
+# connector no longer serves its room (deleted, another team, this account
+# removed from it) — `expire` reclaims the record in that case.
 agent-chat-gateway resume <watcher-name>
 
 # Reset a watcher (clear state, create new session)
