@@ -1350,6 +1350,10 @@ class SessionManager:
         only watcher identity left (§2.8)."""
         return sorted(self._lifecycle.states().keys())
 
+    def has_persisted_record(self, name: str) -> bool:
+        """Thin delegator for the operator boundary — see the lifecycle's."""
+        return self._lifecycle.has_persisted_record(name)
+
     async def pause_watcher(self, name: str) -> None:
         await self._lifecycle.pause_watcher(name)
 

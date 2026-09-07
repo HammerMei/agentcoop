@@ -21,14 +21,23 @@ from gateway.control import ControlServer
 
 def _make_entry(name: str, dispatch_result: dict | None = None,
                 send_raises: Exception | None = None,
-                watcher_names: list[str] | None = None) -> MagicMock:
+                watcher_names: list[str] | None = None,
+                unloaded_names: list[str] | None = None) -> MagicMock:
     """Build a minimal ConnectorEntry-like mock.
 
     watcher_names: if provided, get_watcher_config() returns a truthy value
     only for names in the list (simulating globally-unique watcher ownership).
+    unloaded_names: records on disk that hydration skipped — listed, but
+    `get_watcher_state` is None for them. Both lists feed
+    `has_persisted_record`, which must be explicit: a bare MagicMock's answer
+    is truthy, and that would turn every unknown name into an "unloaded
+    record" refusal.
     """
     entry = MagicMock()
     entry.name = name
+    persisted = set(watcher_names or []) | set(unloaded_names or [])
+    entry.session_manager.has_persisted_record = MagicMock(
+        side_effect=lambda wname: wname in persisted)
     entry.session_manager.dispatch_command = AsyncMock(
         return_value=dispatch_result or {"ok": True, "data": []}
     )
@@ -257,6 +266,21 @@ class TestFindEntryForWatcher(unittest.IsolatedAsyncioTestCase):
         # collected" as done rather than failed (#151). The text is free to
         # change; the code is a contract.
         self.assertEqual(result["code"], "unknown_watcher")
+
+    def test_a_record_on_disk_that_was_not_loaded_is_refused_without_the_code(self):
+        """`list` shows every record on disk, including the ones `_hydrate`
+        skipped; a glob sends those names here. Calling one unknown would
+        make the batch print "no longer there — skipped" and count a success
+        for a record the next `list` still shows (Codex on #152). Refused,
+        with the reason, and WITHOUT `unknown_watcher`."""
+        e = _make_entry("rc", watcher_names=["support"], unloaded_names=["rc:orphan"])
+        server = _make_server(e)
+        result = server._find_entry_for_watcher("rc:orphan")
+        self.assertIsInstance(result, dict)
+        self.assertFalse(result["ok"])
+        self.assertNotIn("code", result)
+        self.assertIn("did not load", result["error"])
+        self.assertIn("rc:orphan", result["error"])
 
     def test_empty_name_is_not_reported_as_unknown_watcher(self):
         """An empty name is a malformed request, not a watcher that went away —

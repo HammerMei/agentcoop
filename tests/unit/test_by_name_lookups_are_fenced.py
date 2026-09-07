@@ -44,6 +44,7 @@ RUNTIME_MODULES = (
 # indexed, and iteration does not choose a room.
 BY_NAME_LOOKUPS = frozenset({
     "get_watcher_state",
+    "has_persisted_record",
     "get_processor",
     "processor_named",
     "resolve_handle",
@@ -57,6 +58,9 @@ ALLOWED = {
         "thin delegator for the operator boundary (control.py)",
     ("core/session_manager.py", "SessionManager.get_processor"):
         "thin delegator for the operator boundary (control.py)",
+    ("core/session_manager.py", "SessionManager.has_persisted_record"):
+        "thin delegator for the operator boundary (control.py): tells an unloaded "
+        "record from a gone one before a name is called unknown (#151)",
     ("core/session_manager.py", "SessionManager.expire_watcher"):
         "an operator verb: `agent-chat-gateway expire <name>` — the human typed the name",
     ("core/session_manager.py", "SessionManager.resume_watcher"):

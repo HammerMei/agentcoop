@@ -14,6 +14,7 @@ import io
 import json
 import shutil
 import socket
+import sys
 import tempfile
 import textwrap
 import threading
@@ -1170,6 +1171,49 @@ class TestCLILifecycleGlob(_CLITestBase):
         self.assertEqual(sent, [])
         self.assertEqual(stderr, "")
         self.assertIn("For 0 watchers: 0 succeeded, 0 failed, 0 not run.", stdout)
+
+    # ── transport failure mid-run: one watcher's failure, summary still owed ─
+
+    def test_transport_failure_mid_run_aborts_with_the_summary(self):
+        """`_send_command` exits the process when the daemon does not answer.
+        Inside a batch that must become the current watcher's failure — outcome
+        unknown — and the summary must still print (Codex on #152)."""
+        from gateway import cli as cli_mod
+        real = cli_mod._send_command
+
+        def _flaky(request, timeout=60.0):
+            if request.get("watcher_name") == "mm-wavebro:nest":
+                print("[ERROR] No response from the daemon within 300s", file=sys.stderr)
+                raise SystemExit(2)
+            return real(request, timeout=timeout)
+
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        with patch("gateway.cli._send_command", side_effect=_flaky):
+            stdout, stderr, code = self._run(["reset", "*"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, ["mm-wavebro:dm:glin"])  # nest never reached the daemon
+        self.assertIn("outcome is unknown", stderr)
+        self.assertIn("For 4 watchers: 1 succeeded, 1 failed, 2 not run.", stdout)
+
+    def test_transport_failure_mid_run_with_force_tries_the_rest(self):
+        from gateway import cli as cli_mod
+        real = cli_mod._send_command
+
+        def _flaky(request, timeout=60.0):
+            if request.get("watcher_name") == "mm-wavebro:nest":
+                raise SystemExit(2)
+            return real(request, timeout=timeout)
+
+        sent, responses = self._capture("reset")
+        self._start_daemon(responses)
+        with patch("gateway.cli._send_command", side_effect=_flaky):
+            stdout, stderr, code = self._run(["reset", "*", "--force"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(sent, ["mm-wavebro:dm:glin", "rc-eng:general", "rc-eng:nest"])
+        self.assertIn("For 4 watchers: 3 succeeded, 1 failed, 0 not run.", stdout)
 
     # ── the list itself failing: nothing is touched ──────────────────────────
 

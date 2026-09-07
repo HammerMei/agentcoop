@@ -1391,6 +1391,14 @@ class WatcherLifecycle:
         """Return the WatcherState for a watcher, or None if not found."""
         return self._state_named(name)
 
+    def has_persisted_record(self, name: str) -> bool:
+        """Whether `name` has a record in the same view `list_watchers` reads —
+        on disk or in memory. Differs from `get_watcher_state` exactly for a
+        record `_hydrate` skipped (no room id, or a room already bound): listed,
+        left on disk, not loaded. The operator boundary asks this to tell
+        "gone" from "never loaded" before calling a name unknown (#151)."""
+        return name in self._state_store.merged_view(self._by_name())
+
     def get_processor(self, watcher_name: str) -> "MessageProcessor | None":
         """Return the active MessageProcessor for a watcher, or None if not running.
 

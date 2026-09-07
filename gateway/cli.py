@@ -521,9 +521,10 @@ _SKIP_WHEN = {
     "pause": (lambda state: state == "paused", "is already paused"),
 }
 
-# The label alphabet is [A-Za-z0-9._-] plus the ':' divider
-# (watcher_manager._LABEL_SAFE), so none of these can be part of a real name:
-# a name containing one is a pattern, unambiguously.
+# Neither half of a watcher name can carry one of these: the room label's
+# alphabet is [A-Za-z0-9._-] (watcher_manager._LABEL_SAFE), and config load
+# refuses a connector name containing any of them (config.py, next to the ':'
+# rule). So a name containing one is a pattern, unambiguously.
 _GLOB_CHARS = frozenset("*?[")
 
 
@@ -608,8 +609,26 @@ def _run_lifecycle_glob(verb: str, pattern: str, *, force: bool) -> None:
         # flush: a reset can take minutes, and the point of this line is that
         # it is visible BEFORE the wait, even through a pipe.
         print(f"{word.capitalize()} watcher '{name}'…", flush=True)
-        result = _send_command({"cmd": verb, "watcher_name": name},
-                               timeout=_LIFECYCLE_TIMEOUT.get(verb, 60.0))
+        try:
+            result = _send_command({"cmd": verb, "watcher_name": name},
+                                   timeout=_LIFECYCLE_TIMEOUT.get(verb, 60.0))
+        except SystemExit:
+            # `_send_command` exits the process on a transport failure — no
+            # daemon, no socket, no answer in time — having printed why. Inside
+            # a batch that is one watcher's failure, not the run's: the
+            # outcome of THIS watcher is unknown (a timed-out reset may still
+            # complete), the summary is still owed, and `--force` still means
+            # "try the rest". Without it the run aborts like any failure.
+            print(f"[ERROR] {word.capitalize()} watcher '{name}': no answer from "
+                  f"the daemon — its outcome is unknown, check 'list'.",
+                  file=sys.stderr)
+            result = None
+        if result is None:
+            failed += 1
+            if not force:
+                aborted_at = i + 1
+                break
+            continue
         if result.get("ok"):
             print(f"Done {word} watcher '{name}'")
             succeeded += 1
