@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.5.2] - 2026-09-03
+
+The last stable release of the v0 line — two fixes over v0.5.1, no new
+features, no breaking changes. The version to roll back to if the next
+release (the dynamic-watcher cutover) misbehaves.
+
 ### Fixed
 - **File attachment uploads restored on Rocket.Chat 8.0+.** RC 8.0 removed
   the one-step `rooms.upload/{rid}` endpoint that `RocketChatREST.upload_file()`

@@ -1,6 +1,6 @@
 [project]
 name = "agent-chat-gateway"
-version = "0.5.1"
+version = "0.5.2"
 description = "Daemon that bridges chat platforms (Rocket.Chat and more) to AI agent backends (Claude, OpenCode)"
 readme = "README.md"
 license = { file = "LICENSE" }
