@@ -17,11 +17,11 @@ from pathlib import Path
 INSTALL_SH = Path(__file__).resolve().parents[2] / "install.sh"
 
 
-def _is_foreign(link: Path, venv_bin: Path) -> int:
+def _is_foreign(link: Path) -> int:
     """Exit status of is_foreign_command: 0 = foreign, 1 = ours or absent."""
     script = (
         f'eval "$(sed -n \'/^is_foreign_command() {{/,/^}}/p\' "{INSTALL_SH}")"\n'
-        f'is_foreign_command "{link}" "{venv_bin}"'
+        f'is_foreign_command "{link}"'
     )
     return subprocess.run(["bash", "-c", script]).returncode
 
@@ -37,36 +37,52 @@ class TestIsForeignCommand(unittest.TestCase):
         self.link = self.local_bin / "coop"
 
     def test_nothing_there_is_not_foreign(self):
-        self.assertEqual(_is_foreign(self.link, self.venv_bin), 1)
+        self.assertEqual(_is_foreign(self.link), 1)
 
     def test_our_own_symlink_is_not_foreign(self):
         self.link.symlink_to(self.venv_bin / "coop")
-        self.assertEqual(_is_foreign(self.link, self.venv_bin), 1)
+        self.assertEqual(_is_foreign(self.link), 1)
 
     def test_a_real_file_is_foreign(self):
         """AndrewDryga/coop's binary: a regular file, not a symlink."""
         self.link.write_text("#!/bin/sh\necho someone else\n")
-        self.assertEqual(_is_foreign(self.link, self.venv_bin), 0)
+        self.assertEqual(_is_foreign(self.link), 0)
 
-    def test_a_symlink_elsewhere_is_foreign(self):
+    def test_a_symlink_to_another_tool_is_foreign(self):
         other = self.tmp / "other-tool" / "coop"
         other.parent.mkdir()
         other.write_text("")
         self.link.symlink_to(other)
-        self.assertEqual(_is_foreign(self.link, self.venv_bin), 0)
+        self.assertEqual(_is_foreign(self.link), 0)
 
-    def test_a_dangling_symlink_into_our_venv_is_still_ours(self):
-        """A stale link from a previous install of ours (target gone after a
-        re-clone) must be replaceable without --force: it points into OUR venv."""
+    def test_a_symlink_to_an_earlier_install_elsewhere_is_ours(self):
+        """The user installed from a clone at another path, or the repo moved:
+        the link points at SOME `<repo>/.venv/bin/coop`. That is AgentCoop's
+        own console-script shape, so re-running the installer repairs it
+        instead of refusing (review: the first version compared against THIS
+        run's venv only and refused its own earlier link)."""
+        earlier = self.tmp / "elsewhere" / "agentcoop" / ".venv" / "bin" / "coop"
+        earlier.parent.mkdir(parents=True)
+        earlier.write_text("")
+        self.link.symlink_to(earlier)
+        self.assertEqual(_is_foreign(self.link), 1)
+
+    def test_a_dangling_symlink_of_ours_is_still_ours(self):
+        """Repo deleted or moved: the link dangles, but its shape says whose it
+        was — replaceable without --force."""
         self.link.symlink_to(self.venv_bin / "coop")
         (self.venv_bin / "coop").unlink()
-        self.assertEqual(_is_foreign(self.link, self.venv_bin), 1)
+        self.assertEqual(_is_foreign(self.link), 1)
 
-    def test_installer_wires_the_check_before_linking_and_offers_force(self):
+    def test_installer_decides_before_uv_sync_and_offers_force(self):
         text = INSTALL_SH.read_text()
         self.assertIn('--force) FORCE=true ;;', text)
         check = text.index('is_foreign_command "$COOP_LINK"')
+        sync = text.index('uv sync --project "$REPO_DIR"')
         link = text.index('link_console_script "$VENV_BIN" "$COOP_LINK"')
-        self.assertLess(check, link, "the foreign check must run before the link is made")
+        self.assertLess(check, sync, "refuse before spending minutes on uv sync")
+        self.assertLess(check, link)
         self.assertIn("ln -s $VENV_BIN", text)          # the manual-link instruction
         self.assertIn("use --force", text)
+        # The --force wording is honest about symlinks: only a regular file gets a .bak.
+        self.assertIn("a symlink is replaced outright", text)

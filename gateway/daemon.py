@@ -18,7 +18,7 @@ from .service import GatewayService, sanitize_pipe_message
 
 logger = logging.getLogger("coop.daemon")
 
-# RUNTIME_DIR is imported from runtime_lock — single source of truth.
+# RUNTIME_DIR comes from gateway.paths (via runtime_lock), the one definition.
 # PID_FILE imported from runtime_lock (shared with control.py to break circular import)
 LOG_FILE = RUNTIME_DIR / "gateway.log"
 

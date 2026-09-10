@@ -172,6 +172,15 @@ def _backup_path(link: Path) -> Path:
     return candidate
 
 
+def _looks_like_our_console_script(target: Path) -> bool:
+    """Whether a symlink target is an AgentCoop `coop` console script — from
+    THIS install or an earlier one somewhere else. The shape install.sh creates
+    is `<repo>/.venv/bin/coop`; the repo may have moved, so only the tail is
+    compared. The same rule, in shell, is install.sh's is_foreign_command()."""
+    return (target.name == "coop" and target.parent.name == "bin"
+            and target.parent.parent.name == ".venv")
+
+
 def _ensure_local_bin_symlinks(repo_path: Path) -> None:
     """Ensure ~/.local/bin has a symlink for each console script.
 
@@ -187,8 +196,7 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
     symlink is install.sh's own fingerprint: its presence means this machine
     opted into that layout. Without the guard, a pipx / distro-package /
     manual-venv install would suddenly acquire symlinks it never asked for.
-    (Only the `git` upgrade method reaches this — brew and pip manage their own
-    shims.) "Present" deliberately includes a *dangling* symlink; see the gate.
+    "Present" deliberately includes a *dangling* symlink; see the gate.
 
     What happens at an occupied destination, following the same policy as
     install.sh's link_console_script():
@@ -225,13 +233,30 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
     """
     local_bin = Path.home() / ".local" / "bin"
     fingerprint = local_bin / "coop"
-    # `or is_symlink()` is load-bearing: exists() FOLLOWS symlinks, so an
-    # installer symlink whose target has gone away (the repo or venv was moved)
-    # reads as False. Gating on exists() alone bailed out in exactly the case
-    # this function is supposed to repair, leaving the primary command dangling
-    # AND every other script unlinked. A dangling symlink is still install.sh's
-    # fingerprint — arguably more so, since only a managed install creates it.
-    if not (fingerprint.exists() or fingerprint.is_symlink()):
+    # The fingerprint is a symlink shaped like install.sh's (`…/.venv/bin/coop`,
+    # dangling or not — a dangling one is exactly what a moved repo leaves, and
+    # this function exists to repair it). A REGULAR FILE named `coop` is not our
+    # fingerprint and not ours to move aside: `coop` is a short name and other
+    # tools install one into the same directory (AndrewDryga/coop). install.sh
+    # applies the same test before it links (#154), so the two agree on what
+    # "ours" means. The pre-rename policy of backing up any occupant and taking
+    # the name was right when the name was `agent-chat-gateway`; it is not right
+    # for `coop`.
+    if not fingerprint.is_symlink():
+        if fingerprint.exists():
+            console.print(
+                f"  ~/.local/bin/coop exists and is not a symlink, so it is not "
+                f"AgentCoop's — left untouched. To use this install's command, "
+                f"link it under another name: ln -s {repo_path / '.venv' / 'bin' / 'coop'} "
+                f"~/.local/bin/agentcoop",
+                markup=False,
+            )
+        return
+    if not _looks_like_our_console_script(fingerprint.readlink()):
+        console.print(
+            f"  ~/.local/bin/coop is a symlink to {fingerprint.readlink()}, which is "
+            f"not an AgentCoop console script — left untouched.", markup=False,
+        )
         return
 
     for script in _LOCAL_BIN_SCRIPTS:
@@ -279,7 +304,7 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
             # pipe (on_broken_pipe(), reached from _check_buffer's BrokenPipeError
             # handler). SystemExit is a BaseException, so `except (OSError,
             # RuntimeError)` below does NOT catch it and the rollback never runs.
-            # With a print between rename() and symlink_to(), `AgentCoop
+            # With a print between rename() and symlink_to(), `coop
             # upgrade | head -4` left the user's own wrapper in a .bak with NOTHING
             # on PATH, silently — SystemExit(1) prints nothing at all. Reproduced
             # end to end on 3.12 and 3.13.
@@ -429,6 +454,16 @@ def run_post_upgrade(repo_path: Path, from_version: str = "") -> None:
     in the PREVIOUS release, so parameters can be added with defaults but never
     removed or reordered. Anything else the step needs, it should read from disk.
     """
+    if from_version.startswith("0."):
+        # A v0 (agent-chat-gateway) install just pulled the rename. Nothing here
+        # can make that install work — its runtime dir, command and config are
+        # the old ones and v1 does not migrate them — so the useful thing to do
+        # is say so NOW, at upgrade time, instead of leaving the user to discover
+        # it from a failed restart and then the tombstone. Skips the symlink
+        # work too: linking `coop` into a v0 layout is not a repair.
+        from .tombstone import MESSAGE
+        print(MESSAGE, file=sys.stderr, end="")
+        return
     _ensure_local_bin_symlinks(repo_path)
 
 

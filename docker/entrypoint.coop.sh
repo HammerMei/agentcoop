@@ -52,7 +52,7 @@
 #     AGENT_TYPE        "claude" (default) or "opencode"
 #     COOP_WATCHER_ROOM  room to watch (default: "@<first_owner>" DM)
 #
-# See docker/docker-compose.acg.example.yml for a full example with all mounts.
+# See docker/docker-compose.example/docker-compose.yml for a full example with all mounts.
 # =============================================================================
 set -euo pipefail
 
@@ -278,7 +278,7 @@ if coop status; then
 else
     warn "Gateway failed to start — container will stay alive for inspection."
     warn "Fix your config, then run: docker exec coop coop start"
-    warn "Logs: docker logs acg  OR  docker exec coop tail -f $RUNTIME_DIR/gateway.log"
+    warn "Logs: docker logs coop  OR  docker exec coop tail -f $RUNTIME_DIR/gateway.log"
 fi
 
 # -----------------------------------------------------------------------------

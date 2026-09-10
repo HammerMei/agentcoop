@@ -1846,7 +1846,7 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
         # the daemon took the request and may well still be working on it
         # (a long reload). Neither "nothing changed" nor "done": exit 2.
         print(f"[ERROR] No response from the daemon within {timeout:.0f}s (pid={pid}). "
-              f"It may still be working on the request — check 'AgentCoop "
+              f"It may still be working on the request — check 'coop "
               f"status' and the log before running it again.", file=sys.stderr)
         sys.exit(2)
     except OSError as exc:

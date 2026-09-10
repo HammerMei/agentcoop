@@ -143,7 +143,7 @@ e2e-shell: ## Shell into a running E2E container (S=acg|rocketchat|mongodb|matte
 
 e2e-acg: ## Run an AgentCoop command inside the container (e.g. make e2e-acg C="list")
 	@test -n "$(C)" || (echo "usage: make e2e-acg C=\"list\"" && exit 1)
-	docker compose -f $(E2E_COMPOSE) exec acg AgentCoop $(C)
+	docker compose -f $(E2E_COMPOSE) exec acg coop $(C)
 
 e2e-dump: ## Write full container logs + state to ./e2e-logs (same set CI uploads)
 	@mkdir -p e2e-logs

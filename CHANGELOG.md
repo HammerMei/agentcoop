@@ -64,7 +64,7 @@ Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
   gateway creates each room's watcher on the room's first message (Rocket.Chat,
   Mattermost) or eagerly at startup for connectors with no inbound stream
   (voice, script, whose rules must name literal rooms). Rules match top-down;
-  the first rule that claims a room wins, and `agent-chat-gateway config validate` warns about
+  the first rule that claims a room wins, and `coop config validate` warns about
   rules an earlier rule shadows. Each created watcher is named
   `<connector>:<room>`, which is what `list` shows and the operator verbs act
   on. **The static shape — a `room:` key, or `rooms:` as a list — is a hard
@@ -92,13 +92,13 @@ Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
   fire resolves through that id, not through the watcher's name — a name is a
   pure function of `(connector, room)` and moves when the room does. Jobs written
   before this keep working by resolving their name; **run
-  `agent-chat-gateway schedule migrate` to record their room ids**, before
+  `coop schedule migrate` to record their room ids**, before
   renaming any rooms, since the migration finds each room through its job's
   watcher name. The daemon warns at startup while anything is unmigrated. The
   command is version-aware and safe to re-run, and it never guesses: a job whose
   room cannot be identified is reported and left alone.
 - **Operator verbs act on records, and there is a new one**:
-  `agent-chat-gateway expire <watcher>` clears a room's session and reclaims its record and
+  `coop expire <watcher>` clears a room's session and reclaims its record and
   files now (it overrides pause, audibly — the audit line names the room). It
   does NOT cancel the room's scheduled jobs: expire does not stop a rule
   watching a room, so the job records the room's id and brings the watcher back
@@ -250,7 +250,7 @@ Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
   adapter had no `reclaim_durable_instructions`, so every expired OpenCode
   watcher left its `system-prompts/<key>.md` behind. The file is now removed,
   as `ClaudeBackend` already did.
-- **`agent-chat-gateway schedule migrate` no longer hides work done at an unchanged version.**
+- **`coop schedule migrate` no longer hides work done at an unchanged version.**
   A version-2 jobs file with a live job lacking a room id re-runs the 1→2 step;
   the CLI keyed "nothing to do" on the versions matching and hid the steps,
   outcomes and jobs needing attention. It now says "nothing to do" only when

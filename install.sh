@@ -108,6 +108,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Is `coop` on PATH already someone else's? Decided BEFORE uv sync, so a refusal
+# costs nothing but the clone.
+#
+# `coop` is a short name and at least one other tool (AndrewDryga/coop, a sandbox
+# runner for coding agents) installs a binary by that name into the same
+# directory. link_console_script() would move such a file to a .bak and take the
+# name — correct for a stale copy of OUR script, wrong for someone else's
+# working command. "Ours" is a symlink shaped like the one this installer makes,
+# `<some repo>/.venv/bin/coop` — from THIS repo or an earlier install elsewhere,
+# dangling or not (a moved or deleted repo leaves exactly that, and re-running
+# the installer is how it gets repaired). Anything else at that path belongs to
+# something else. gateway/upgrade.py applies the same test.
+# ---------------------------------------------------------------------------
+is_foreign_command() {
+  # $1 = path on PATH. 0 = foreign (someone else's), 1 = ours or nothing there.
+  [ -e "$1" ] || [ -L "$1" ] || return 1
+  if [ -L "$1" ]; then
+    case "$(readlink "$1")" in
+      */.venv/bin/coop) return 1 ;;
+    esac
+  fi
+  return 0
+}
+
+VENV_BIN="$REPO_DIR/.venv/bin/coop"
+COOP_LINK="$HOME/.local/bin/coop"
+if [ "$FORCE" != true ] && is_foreign_command "$COOP_LINK"; then
+  warn "$COOP_LINK already exists and is not AgentCoop's:"
+  warn "  $(ls -l "$COOP_LINK" 2>/dev/null | sed 's/^/  /')"
+  warn "Either keep that command and, after installing, link AgentCoop under another name:"
+  warn "    ln -s $VENV_BIN \$HOME/.local/bin/agentcoop"
+  warn "or re-run the installer with --force to replace it (a regular file is kept as a .bak;"
+  warn "a symlink is replaced outright)."
+  error "Refusing to replace a command that is not ours (use --force)."
+fi
+
+# ---------------------------------------------------------------------------
 # uv sync
 # ---------------------------------------------------------------------------
 info "Installing Python dependencies (uv sync)..."
@@ -225,50 +262,18 @@ link_console_script() {
   return 1
 }
 
-VENV_BIN="$REPO_DIR/.venv/bin/coop"
 if [ ! -f "$VENV_BIN" ]; then
   error "Expected binary not found: $VENV_BIN"
 fi
 
 mkdir -p "$HOME/.local/bin"
 
-# `coop` is a short name and at least one other tool (AndrewDryga/coop, a sandbox
-# runner for coding agents) installs a binary by that name into the same
-# directory. link_console_script() would move such a file to a .bak and take the
-# name — correct for a stale copy of OUR script, wrong for someone else's
-# working command. So: a `coop` that is not ours stops the install, unless the
-# user said --force. The check is "is it a symlink into this install's venv";
-# anything else on that path belongs to something else.
-is_foreign_command() {
-  # $1 = path on PATH, $2 = the venv bin dir that is ours
-  [ -e "$1" ] || [ -L "$1" ] || return 1          # nothing there → not foreign
-  if [ -L "$1" ]; then
-    case "$(readlink "$1")" in
-      "$2"/*) return 1 ;;                         # our own symlink → not foreign
-    esac
-  fi
-  return 0
-}
-
-COOP_LINK="$HOME/.local/bin/coop"
-if [ "$FORCE" != true ] && is_foreign_command "$COOP_LINK" "$REPO_DIR/.venv/bin"; then
-  warn "$COOP_LINK already exists and is not AgentCoop's:"
-  warn "  $(ls -l "$COOP_LINK" 2>/dev/null | sed 's/^/  /')"
-  warn "AgentCoop was installed to $REPO_DIR but NOT linked onto your PATH."
-  warn "Either keep the existing command and link AgentCoop under another name:"
-  warn "    ln -s $VENV_BIN \$HOME/.local/bin/agentcoop"
-  warn "or re-run the installer with --force to replace it (the old file is kept as a .bak)."
-  error "Refusing to replace a command that is not ours (use --force)."
-fi
-# Fatal for the entrypoint: an install whose primary command is not on the PATH
-# it just configured has not succeeded, and install_meta.json written below would
-# describe a repo the user cannot invoke.
 if ! link_console_script "$VENV_BIN" "$COOP_LINK"; then
   error "Could not install ~/.local/bin/coop"
 fi
 
 # coop-provision (RC/MM account & channel provisioning). A first-class command, not
-# an optional extra: it is linked here and kept current by `AgentCoop
+# an optional extra: it is linked here and kept current by `coop
 # upgrade`, and INSTALL.md documents both links together.
 #
 # Deliberately a WARNING rather than error() if absent, which is about INSTALL

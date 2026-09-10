@@ -19,14 +19,23 @@ Do this before installing v1, so the two do not both connect to your chat
 platform with the same bot account.
 
 ```bash
-# 1. Stop the old daemon (the old command still works until the repo is removed)
-agent-chat-gateway stop
+# 1. Stop the old daemon. If `agent-chat-gateway stop` only prints the rename
+#    notice (the install already pulled v1), stop it by its pid file instead:
+agent-chat-gateway stop || kill "$(cat ~/.agent-chat-gateway/gateway.pid)"
 
 # 2. Remove what the old installer created
 rm -rf ~/.agent-chat-gateway                         # repo clone, config, state, logs, jobs
 rm -f ~/.local/bin/agent-chat-gateway ~/.local/bin/acg-provision
+# If you cloned the repo yourself and ran install.sh from it, the clone is
+# wherever you put it (install_meta.json's repo_path) — remove or keep as you like.
 
-# 3. Install AgentCoop and run its setup wizard
+# 3. OpenCode only: the role-enforcement plugin the v0 wizard copied to
+#    ~/.opencode/plugins/ reads the OLD ACG_ROLE variable. With it in place,
+#    v1's owner sessions would get no approval prompts for write tools — silently.
+#    Remove it; the v1 wizard installs the new copy.
+rm -f ~/.opencode/plugins/role-enforcement.ts
+
+# 4. Install AgentCoop and run its setup wizard
 curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
 ```
 

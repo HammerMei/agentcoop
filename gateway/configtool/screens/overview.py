@@ -109,7 +109,7 @@ class OverviewScreen(Screen):
         # error(s)") — result.errors/warnings/lint_findings (the actual
         # message text, e.g. "Agent 'x': working_directory is required")
         # were computed but never surfaced anywhere, leaving the user no
-        # way to find out what to fix short of running `AgentCoop
+        # way to find out what to fix short of running `coop
         # config validate` in a separate terminal. show=False (per the
         # user's own request) — the banner text itself says "press 'v' to
         # view details" only when there's actually something to show,

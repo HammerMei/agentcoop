@@ -1308,3 +1308,115 @@ class TestPostUpgradeHook:
         assert events == ["run:git", "run:uv", "hook"], (
             f"the hook must run after both git pull and uv sync, got {events}"
         )
+
+
+class TestForeignCoopIsLeftAlone:
+    """`coop` is a name other tools use (AndrewDryga/coop installs one into
+    ~/.local/bin). install.sh refuses to displace such a file; the upgrade-time
+    symlink repair must apply the same rule instead of backing it up and taking
+    the name (#154, review). Ours = a symlink shaped `<repo>/.venv/bin/coop`."""
+
+    def _home(self, tmp_path: Path):
+        home = tmp_path / "home"
+        local_bin = home / ".local" / "bin"
+        local_bin.mkdir(parents=True)
+        repo = tmp_path / "repo"
+        venv_bin = repo / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        for name in ("coop", "coop-provision"):
+            (venv_bin / name).write_text("#!/bin/sh\n")
+        return home, local_bin, repo, venv_bin
+
+    def test_a_regular_file_named_coop_is_not_touched_and_nothing_is_linked(self, tmp_path: Path):
+        from gateway.upgrade import _ensure_local_bin_symlinks
+        home, local_bin, repo, _ = self._home(tmp_path)
+        (local_bin / "coop").write_text("#!/bin/sh\necho someone else\n")
+
+        with patch("gateway.upgrade.Path.home", return_value=home):
+            _ensure_local_bin_symlinks(repo)
+
+        assert (local_bin / "coop").read_text() == "#!/bin/sh\necho someone else\n"
+        assert not (local_bin / "coop").is_symlink()
+        assert list(local_bin.glob("coop.*.bak")) == []
+        assert not (local_bin / "coop-provision").exists()   # foreign file is not our fingerprint
+
+    def test_a_symlink_to_another_tool_is_not_touched(self, tmp_path: Path):
+        from gateway.upgrade import _ensure_local_bin_symlinks
+        home, local_bin, repo, _ = self._home(tmp_path)
+        other = tmp_path / "other" / "coop"
+        other.parent.mkdir()
+        other.write_text("")
+        (local_bin / "coop").symlink_to(other)
+
+        with patch("gateway.upgrade.Path.home", return_value=home):
+            _ensure_local_bin_symlinks(repo)
+
+        assert (local_bin / "coop").readlink() == other
+        assert not (local_bin / "coop-provision").exists()
+
+    def test_our_own_dangling_link_from_a_moved_repo_is_repaired(self, tmp_path: Path):
+        """The case the fingerprint's dangling-symlink tolerance exists for."""
+        from gateway.upgrade import _ensure_local_bin_symlinks
+        home, local_bin, repo, venv_bin = self._home(tmp_path)
+        (local_bin / "coop").symlink_to(tmp_path / "old-place" / ".venv" / "bin" / "coop")
+
+        with patch("gateway.upgrade.Path.home", return_value=home):
+            _ensure_local_bin_symlinks(repo)
+
+        assert (local_bin / "coop").resolve() == (venv_bin / "coop").resolve()
+        assert (local_bin / "coop-provision").resolve() == (venv_bin / "coop-provision").resolve()
+
+    def test_the_shell_and_python_predicates_agree(self, tmp_path: Path):
+        """One rule in two languages. Enumerate the shapes both must classify
+        the same way, so the next edit to either is caught here."""
+        import subprocess
+
+        from gateway.upgrade import _looks_like_our_console_script
+        install_sh = Path(__file__).resolve().parents[2] / "install.sh"
+        cases = {
+            tmp_path / "a" / ".venv" / "bin" / "coop": True,
+            tmp_path / "b" / "deep" / "er" / ".venv" / "bin" / "coop": True,
+            tmp_path / "c" / ".venv" / "bin" / "coop-provision": False,
+            tmp_path / "d" / "bin" / "coop": False,
+            tmp_path / "e" / "coop": False,
+        }
+        for target, ours in cases.items():
+            link = tmp_path / "link"
+            link.unlink(missing_ok=True)
+            link.symlink_to(target)
+            assert _looks_like_our_console_script(link.readlink()) is ours, target
+            rc = subprocess.run(["bash", "-c",
+                f'eval "$(sed -n \'/^is_foreign_command() {{/,/^}}/p\' "{install_sh}")"; '
+                f'is_foreign_command "{link}"']).returncode
+            assert (rc == 1) is ours, (target, rc)   # 1 = ours/absent, 0 = foreign
+
+
+class TestRunPostUpgradeFromV0:
+    def test_a_v0_install_gets_the_tombstone_and_no_symlink_work(self, tmp_path: Path, capsys):
+        """A main-tracking v0 install (one that already has the post-upgrade
+        hook) pulls the rename: the hook runs NEW code with from_version=0.x.
+        Nothing here can make that install work, so it says so at upgrade time
+        instead of after a failed restart (#154, review)."""
+        from gateway.upgrade import run_post_upgrade
+        home = tmp_path / "home"
+        (home / ".local" / "bin").mkdir(parents=True)
+        repo = tmp_path / "repo"
+        (repo / ".venv" / "bin").mkdir(parents=True)
+        (repo / ".venv" / "bin" / "coop").write_text("")
+        (home / ".local" / "bin" / "coop").symlink_to(repo / ".venv" / "bin" / "coop")
+
+        with patch("gateway.upgrade.Path.home", return_value=home), \
+             patch("gateway.upgrade._ensure_local_bin_symlinks") as links:
+            run_post_upgrade(repo, from_version="0.5.1")
+
+        assert "has become AgentCoop" in capsys.readouterr().err
+        links.assert_not_called()
+
+    def test_a_v1_or_unknown_from_version_does_the_normal_work(self, tmp_path: Path, capsys):
+        from gateway.upgrade import run_post_upgrade
+        repo = tmp_path / "repo"
+        for fv in ("1.0.0", "unknown", ""):
+            with patch("gateway.upgrade._ensure_local_bin_symlinks") as links:
+                run_post_upgrade(repo, from_version=fv)
+            links.assert_called_once_with(repo)
+        assert "has become AgentCoop" not in capsys.readouterr().err
