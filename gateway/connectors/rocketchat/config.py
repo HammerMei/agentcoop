@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from ...config import AttachmentConfig, ConnectorConfig
 from ...core.agent_chain import AgentChainConfig  # noqa: F401 — re-export for connector consumers
+from ...paths import ATTACHMENTS_DIR_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class RocketChatConfig:
             download_timeout=attach_raw.get("download_timeout", 30),
             cache_dir=attach_raw.get("cache_dir", "agent-chat.cache"),
             cache_dir_global=attach_raw.get(
-                "cache_dir_global", "~/.agent-chat-gateway/attachments"
+                "cache_dir_global", ATTACHMENTS_DIR_DEFAULT
             ),
         )
 

@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .config import MattermostConfig
     from .rest import MattermostREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.normalize")
+logger = logging.getLogger("coop.connectors.mattermost.normalize")
 
 
 def bare_handle(display: str) -> str:

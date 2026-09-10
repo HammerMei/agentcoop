@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from ...core.adapter_utils import build_attachment_prompt
 from ...core.paths import resolve_under
+from ...paths import RUNTIME_DIR
 from .. import AgentBackend, GatewayBrokerConfig
 from ..errors import (
     AgentExecutionError,
@@ -53,14 +54,10 @@ if TYPE_CHECKING:
         PermissionRegistry,
     )
 
-logger = logging.getLogger("agent-chat-gateway.agents.claude")
+logger = logging.getLogger("coop.agents.claude")
 
-# Redeclared locally rather than imported from gateway.core.state / gateway.runtime_lock
-# to avoid a core-layer → application-layer import (same pattern already used in
-# gateway/cli.py, gateway/daemon.py, gateway/runtime_lock.py, gateway/core/state.py,
-# gateway/core/job_store.py, gateway/upgrade.py, gateway/onboard.py). Patch this
-# module-local constant in tests (see tests/unit/test_claude_adapter.py).
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+# Bound as a module attribute so tests patch THIS module's RUNTIME_DIR (see
+# tests/unit/test_claude_adapter.py); the value itself has one home, gateway/paths.py.
 
 _RATE_LIMIT_PATTERNS = (
     "usage limit",
@@ -613,7 +610,7 @@ class ClaudeBackend(AgentBackend):
             cmd += ["--append-system-prompt-file", append_system_prompt_file]
 
         # Strip CLAUDECODE so the subprocess does not inherit the parent session context,
-        # then merge any role env vars (e.g. ACG_ROLE) for hook enforcement.
+        # then merge any role env vars (e.g. COOP_ROLE) for hook enforcement.
         process_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         if env:
             process_env.update(env)

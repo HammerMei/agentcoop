@@ -32,7 +32,6 @@ from typing import Literal
 
 import yaml
 
-# Re-export core config types — canonical definitions in gateway.core.config
 from .core.config import (  # noqa: F401 — re-exports
     AgentConfig,
     ConnectorConfig,
@@ -52,6 +51,9 @@ from .core.room_pattern import (
     union_subsumes,
 )
 from .core.watcher_rule import RoomMatcher, WatcherRule
+
+# Re-export core config types — canonical definitions in gateway.core.config
+from .paths import ATTACHMENTS_DIR_DEFAULT
 
 # v0.2's global `*_defaults:` blocks (removed in v0.3 — see docs/migration-0.3.md) merged
 # flatly and unconditionally into EVERY entry of a kind, regardless of type: setting
@@ -204,7 +206,7 @@ class AttachmentConfig:
     max_file_size_mb: float = 10.0  # files larger than this are skipped (0 = no limit)
     download_timeout: int = 30  # seconds per file download
     cache_dir: str = "agent-chat.cache"  # relative to watcher's working_directory (legacy; unused when cache_dir_global is set)
-    cache_dir_global: str = "~/.agent-chat-gateway/attachments"  # connector-global base dir for attachment downloads
+    cache_dir_global: str = ATTACHMENTS_DIR_DEFAULT  # connector-global base dir for attachment downloads
 
 
 @dataclass
@@ -678,7 +680,7 @@ def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_f
     return resolved
 
 
-_config_logger = logging.getLogger("agent-chat-gateway.config")
+_config_logger = logging.getLogger("coop.config")
 
 # $VAR / ${VAR} reference pattern — the one place this is defined.
 # gateway/config_migrate.py's migration imports this directly (code-review

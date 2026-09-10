@@ -27,7 +27,7 @@ def build_system_header(wc: WatcherConfig, agent_username: str) -> str:
         always present.
     """
     header = (
-        f"## ACG Session Identity\n"
+        f"## Coop Session Identity\n"
         f"- **Watcher name:** `{wc.name}`\n"
         f"- **Room:** `{wc.room}`\n"
         f"- **Connector:** `{wc.connector}`\n"

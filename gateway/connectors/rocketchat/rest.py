@@ -13,7 +13,7 @@ import httpx
 
 from ...core.connector import HistoryPage
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat.rest")
+logger = logging.getLogger("coop.connectors.rocketchat.rest")
 
 
 def _to_rc_ts(value: str | None) -> str | None:

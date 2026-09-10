@@ -32,11 +32,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import get_ident as _thread_ident
 
+from ..paths import RUNTIME_DIR
 from ..schedule_types import JobStatus, ScheduledJob
 
-logger = logging.getLogger("agent-chat-gateway.core.job_store")
+logger = logging.getLogger("coop.core.job_store")
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+
 DATA_DIR = RUNTIME_DIR / "data"
 JOBS_FILE = DATA_DIR / "jobs.json"
 # Bump when a change to jobs.json needs an operator step. Written on every

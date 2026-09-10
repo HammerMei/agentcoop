@@ -11,7 +11,7 @@ from typing import Any
 
 import websockets
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat.ws")
+logger = logging.getLogger("coop.connectors.rocketchat.ws")
 
 
 @dataclass

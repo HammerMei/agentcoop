@@ -18,13 +18,9 @@ from enum import Flag, auto
 from pathlib import Path
 from typing import Collection, get_origin
 
-logger = logging.getLogger("agent-chat-gateway.state")
+from ..paths import RUNTIME_DIR
 
-# Importing RUNTIME_DIR from the application layer would create a circular import
-# (state.py is in core, runtime_lock.py is in the gateway package).
-# We define it here directly — runtime_lock.py is the canonical definition;
-# state.py keeps its own copy to avoid the cross-layer import.
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+logger = logging.getLogger("coop.state")
 
 # Current on-disk format. Bumped when a record gains fields that cannot be
 # defaulted from an older file — which is why this exists at all: the fields added

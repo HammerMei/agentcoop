@@ -47,7 +47,7 @@ from ...core.tool_match import all_params_match_any, get_param_strings_for_openc
 if TYPE_CHECKING:
     from ...config import ToolRule
 
-logger = logging.getLogger("agent-chat-gateway.permissions.opencode")
+logger = logging.getLogger("coop.permissions.opencode")
 
 
 class OpenCodePermissionBroker(PermissionBroker):

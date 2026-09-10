@@ -253,17 +253,17 @@ class CoreConfig:
         Passed as ``env`` to AgentBackend.send() so the permission broker can
         identify which role is making a request.
 
-        ACG_ROLE is hardcoded ("owner" / "guest") and never user-configurable.
+        COOP_ROLE is hardcoded ("owner" / "guest") and never user-configurable.
         Tool allow-list enforcement is handled entirely by the permission broker
         using the structured ToolRule lists from config.
         """
         if role == UserRole.OWNER:
-            return {"ACG_ROLE": "owner"}
+            return {"COOP_ROLE": "owner"}
         if role == UserRole.ANONYMOUS:
             raise ValueError(
                 "ANONYMOUS users are not permitted to interact with agent sessions"
             )
-        return {"ACG_ROLE": "guest"}
+        return {"COOP_ROLE": "guest"}
 
     def context_inject_files_for(
         self,

@@ -52,7 +52,7 @@ from .watcher_manager import (
 )
 from .watcher_rule import RoomKind, WatcherRule
 
-logger = logging.getLogger("agent-chat-gateway.core.session_manager")
+logger = logging.getLogger("coop.core.session_manager")
 
 # Why a reclaimed room's scheduled jobs are cancelled, and what the operator can
 # do about it — `(reason, advice)`, one pair per cause, so the AUDIT line names

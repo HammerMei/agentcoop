@@ -11,7 +11,7 @@ import secrets
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger("agent-chat-gateway.schedule_types")
+logger = logging.getLogger("coop.schedule_types")
 
 
 class JobStatus(str, Enum):

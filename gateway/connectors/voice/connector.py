@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from ...core.watcher_manager import RoomRef
 from .config import VoiceConfig
 
-logger = logging.getLogger("agent-chat-gateway.connectors.voice")
+logger = logging.getLogger("coop.connectors.voice")
 
 _VOICE_USER = User(id="siri-user", username="siri", display_name="Siri")
 

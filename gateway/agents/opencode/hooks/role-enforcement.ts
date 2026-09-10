@@ -2,15 +2,15 @@
  * RC Gateway role enforcement plugin.
  *
  * Fires before every opencode tool call.
- * ACG_ROLE unset (local CLI) or "owner" → full access.
- * ACG_ROLE="guest" → enforce ACG_ALLOWED_TOOLS whitelist.
+ * COOP_ROLE unset (local CLI) or "owner" → full access.
+ * COOP_ROLE="guest" → enforce COOP_ALLOWED_TOOLS whitelist.
  *
- * ACG_ALLOWED_TOOLS: comma-separated tool name patterns.
+ * COOP_ALLOWED_TOOLS: comma-separated tool name patterns.
  * Supports * wildcard suffix (e.g. "mcp__rocketchat__*").
- * If ACG_ALLOWED_TOOLS is empty, all tools are blocked for guests.
+ * If COOP_ALLOWED_TOOLS is empty, all tools are blocked for guests.
  *
  * For owner sessions, sensitive write/exec tools require human-in-the-loop
- * approval via the RC chat gateway.  ACG_APPROVAL_TOOLS lists the tool
+ * approval via the RC chat gateway.  COOP_APPROVAL_TOOLS lists the tool
  * patterns that trigger the opencode built-in permission.ask flow.
  * The gateway's OpenCodePermissionBroker listens for the resulting
  * permission.asked SSE event and posts an approval request to RC chat.
@@ -25,11 +25,11 @@ export default function () {
       input: { tool: string; sessionID: string; callID: string },
       output: unknown,
     ) => {
-      const role = process.env.ACG_ROLE
+      const role = process.env.COOP_ROLE
 
       // ── Guest enforcement ────────────────────────────────────────────────
       if (role === "guest") {
-        const allowed = (process.env.ACG_ALLOWED_TOOLS ?? "")
+        const allowed = (process.env.COOP_ALLOWED_TOOLS ?? "")
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean)
@@ -42,18 +42,18 @@ export default function () {
         )
 
         if (!permitted) {
-          throw new Error(`Guest: tool '${input.tool}' not in ACG_ALLOWED_TOOLS`)
+          throw new Error(`Guest: tool '${input.tool}' not in COOP_ALLOWED_TOOLS`)
         }
         return
       }
 
       // ── Owner: human-in-the-loop approval for sensitive tools ────────────
-      // Only active when running via the RC gateway (ACG_ROLE=owner).
-      // ACG_APPROVAL_TOOLS overrides the default list if set.
+      // Only active when running via the RC gateway (COOP_ROLE=owner).
+      // COOP_APPROVAL_TOOLS overrides the default list if set.
       if (role !== "owner") return  // local CLI (role unset) → no approval needed
 
-      const approvalPatterns = process.env.ACG_APPROVAL_TOOLS
-        ? process.env.ACG_APPROVAL_TOOLS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+      const approvalPatterns = process.env.COOP_APPROVAL_TOOLS
+        ? process.env.COOP_APPROVAL_TOOLS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
         : DEFAULT_APPROVAL_TOOLS
 
       const toolLower = input.tool.toLowerCase()

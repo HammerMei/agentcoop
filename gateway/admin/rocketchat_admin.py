@@ -36,7 +36,7 @@ from gateway.admin.config import AdminConfigError, AdminProfile
 from gateway.connectors.rocketchat.rest import RocketChatREST
 from gateway.connectors.rocketchat.rest import logger as _rc_rest_logger
 
-logger = logging.getLogger("agent-chat-gateway.admin.rocketchat")
+logger = logging.getLogger("coop.admin.rocketchat")
 
 # RC treats "not found" on info-lookup endpoints as a 400, not a 404 (same
 # behavior RocketChatREST.resolve_room already works around).

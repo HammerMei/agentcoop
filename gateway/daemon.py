@@ -16,7 +16,7 @@ from .runtime_lock import acquire as _lock_acquire
 from .runtime_lock import release as _lock_release
 from .service import GatewayService, sanitize_pipe_message
 
-logger = logging.getLogger("agent-chat-gateway.daemon")
+logger = logging.getLogger("coop.daemon")
 
 # RUNTIME_DIR is imported from runtime_lock — single source of truth.
 # PID_FILE imported from runtime_lock (shared with control.py to break circular import)

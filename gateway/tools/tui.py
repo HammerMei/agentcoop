@@ -232,7 +232,7 @@ class TUIState:
         """Send a message and return (AgentResponse, elapsed_sec)."""
         await self.ensure_session()
 
-        env = {"ACG_ROLE": self.role}
+        env = {"COOP_ROLE": self.role}
 
         prompt = f"{self.prefix} {text}".strip() if self.prefix else text
 

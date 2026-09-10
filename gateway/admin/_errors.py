@@ -22,7 +22,7 @@ from gateway.admin.base import VerificationError
 # (by name, so there is no import cycle). Note this is NOT the REST logger
 # that quiet_expected_error() suppresses, and _error_logger has propagate=False,
 # so records written here are unaffected by either.
-_readback_logger = logging.getLogger("agent-chat-gateway.admin.errors")
+_readback_logger = logging.getLogger("coop.admin.errors")
 
 
 @contextlib.contextmanager

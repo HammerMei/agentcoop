@@ -35,7 +35,7 @@ from .config import CoreConfig, WatcherConfig
 from .prompt_builder import build_system_header
 from .state import WatcherState
 
-logger = logging.getLogger("agent-chat-gateway.core.injected_context_builder")
+logger = logging.getLogger("coop.core.injected_context_builder")
 
 _MAX_FILE_SIZE = 256 * 1024  # 256 KB per file
 _MAX_CONTEXT_SIZE = 512 * 1024  # 512 KB total

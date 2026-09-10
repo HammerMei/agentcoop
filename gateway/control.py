@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .core.job_store import JobStore
     from .service import ConnectorEntry, GatewayService
 
-logger = logging.getLogger("agent-chat-gateway.control")
+logger = logging.getLogger("coop.control")
 
 
 def _to_epoch_ms(dt) -> str | None:

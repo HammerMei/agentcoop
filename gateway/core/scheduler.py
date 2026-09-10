@@ -47,7 +47,7 @@ from .job_store import JobStore
 if TYPE_CHECKING:
     from .session_manager import SessionManager
 
-logger = logging.getLogger("agent-chat-gateway.core.scheduler")
+logger = logging.getLogger("coop.core.scheduler")
 
 _TICK_INTERVAL = 60  # seconds between scheduler polls
 

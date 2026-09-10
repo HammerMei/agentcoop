@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .message_processor import MessageProcessor
     from .watcher_lifecycle import WatcherLifecycle
 
-logger = logging.getLogger("agent-chat-gateway.core.watcher_manager")
+logger = logging.getLogger("coop.core.watcher_manager")
 
 WatcherKey = tuple[str, str]  # (connector, room_id)
 

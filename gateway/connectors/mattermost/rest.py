@@ -12,7 +12,7 @@ import httpx
 
 from ...core.connector import HistoryPage
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.rest")
+logger = logging.getLogger("coop.connectors.mattermost.rest")
 
 
 class RoomNotFoundError(Exception):

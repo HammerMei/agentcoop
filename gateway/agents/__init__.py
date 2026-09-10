@@ -117,12 +117,12 @@ class AgentBackend(ABC):
         """Whether this backend uses the ``env`` dict passed to :meth:`send`.
 
         When ``True`` (the default), :class:`~gateway.core.message_processor.MessageProcessor`
-        generates per-message role env (``ACG_ROLE``) and passes it via ``send(env=...)``.
+        generates per-message role env (``COOP_ROLE``) and passes it via ``send(env=...)``.
         The backend's subprocess uses these vars for role-aware hook enforcement.
 
         When ``False``, per-message env is a no-op — the backend either ignores
         ``env`` entirely or requires role to be set at process startup (e.g.
-        OpenCode HTTP mode sets ``ACG_ROLE=owner`` on ``opencode serve`` at launch).
+        OpenCode HTTP mode sets ``COOP_ROLE=owner`` on ``opencode serve`` at launch).
         In this case, the processor skips env generation to avoid misleading
         no-op computation.  Guest/owner enforcement is handled entirely by the
         permission broker for such backends.
@@ -425,7 +425,7 @@ class AgentBackend(ABC):
             attachments: Optional list of local file paths to attach (backend support varies).
             env: Optional extra environment variables to inject into the agent subprocess.
                  Merged on top of the inherited process environment. Used to pass role context
-                 (e.g. ACG_ROLE) for hook/plugin enforcement.
+                 (e.g. COOP_ROLE) for hook/plugin enforcement.
             append_system_prompt_file: Optional path to a file whose content should be
                  appended to the system prompt on this turn (backend support varies —
                  e.g. Claude's ``--append-system-prompt-file``). Backends without an

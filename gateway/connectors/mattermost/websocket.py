@@ -36,7 +36,7 @@ from typing import Any
 
 import websockets
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.ws")
+logger = logging.getLogger("coop.connectors.mattermost.ws")
 
 # Bound concurrent per-channel worker tasks, same rationale as RC's
 # _callback_sem: caps total in-flight handler invocations across all channels.

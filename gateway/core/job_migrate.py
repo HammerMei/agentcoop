@@ -29,7 +29,7 @@ from typing import Callable
 from ..schedule_types import JobStatus, ScheduledJob
 from .job_store import _SCHEMA_VERSION, JobStore
 
-logger = logging.getLogger("agent-chat-gateway.core.job_migrate")
+logger = logging.getLogger("coop.core.job_migrate")
 
 
 @dataclass

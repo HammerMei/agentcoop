@@ -26,7 +26,7 @@ from .agent_chain import AGENT_CHAIN_TERMINATION_TOKEN
 from .config import CoreConfig
 from .connector import Connector
 
-logger = logging.getLogger("agent-chat-gateway.core.turn_runner")
+logger = logging.getLogger("coop.core.turn_runner")
 
 
 def _user_facing_agent_error_message(exc: Exception, session_id: str = "") -> str:

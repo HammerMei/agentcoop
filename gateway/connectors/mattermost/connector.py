@@ -74,7 +74,7 @@ from .policy import apply_thread_policy
 from .rest import MattermostREST, RoomNotFoundError
 from .websocket import MattermostWebSocketClient
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost")
+logger = logging.getLogger("coop.connectors.mattermost")
 
 
 # ---------------------------------------------------------------------------

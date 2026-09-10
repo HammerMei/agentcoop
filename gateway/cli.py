@@ -9,19 +9,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+from .paths import RUNTIME_DIR
+
 CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 
-# Default config: check ACG_CONFIG env var first, then ~/.agent-chat-gateway/config.yaml.
-DEFAULT_CONFIG = os.environ.get(
-    "ACG_CONFIG",
-    str(Path.home() / ".agent-chat-gateway" / "config.yaml"),
-)
+# Default config: the COOP_CONFIG env var first, then ~/.agentcoop/config.yaml.
+DEFAULT_CONFIG = os.environ.get("COOP_CONFIG", str(RUNTIME_DIR / "config.yaml"))
 
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="agent-chat-gateway",
+        prog="coop",
         description="Standalone service bridging Rocket.Chat rooms to agent sessions",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
@@ -30,7 +28,7 @@ def main():
     start_p = sub.add_parser("start", help="Start the gateway service")
     start_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
 
     # stop
@@ -40,7 +38,7 @@ def main():
     restart_p = sub.add_parser("restart", help="Restart the gateway service")
     restart_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
 
     # status
@@ -174,7 +172,7 @@ def main():
         help="Fetch channel history on-demand (for agent mid-session use)",
     )
     fh_p.add_argument("--watcher", required=True, metavar="NAME",
-                      help="Watcher name (from ACG Session Identity context)")
+                      help="Watcher name (from Coop Session Identity context)")
     fh_p.add_argument("--count", type=int, default=50, metavar="N",
                       help="Max messages to fetch (default: 50; server cap: max_fetch_count)")
     fh_p.add_argument("--before", default=None, metavar="TS",
@@ -212,7 +210,7 @@ def main():
     # was fixed for --config only, missed here, then caught in review.)
     config_p.add_argument(
         "--config", dest="config_path_for_tui", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
     config_p.add_argument(
         "--lint", dest="lint_for_tui", action="store_true",
@@ -227,7 +225,7 @@ def main():
     )
     config_validate_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
     config_validate_p.add_argument(
         "--lint", action="store_true",
@@ -246,7 +244,7 @@ def main():
     )
     config_reload_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
     config_reload_p.add_argument(
         "--dry-run", action="store_true",
@@ -265,7 +263,7 @@ def main():
     )
     config_show_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
     config_show_p.add_argument(
         "--json", action="store_true",
@@ -278,7 +276,7 @@ def main():
     )
     config_migrate_env_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agent-chat-gateway/config.yaml)",
     )
 
     # schedule (sub-subcommands)

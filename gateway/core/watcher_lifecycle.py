@@ -43,7 +43,7 @@ from .state_store import StateStore
 # never back into this module (its lifecycle reference is TYPE_CHECKING only).
 from .watcher_manager import config_from_record
 
-logger = logging.getLogger("agent-chat-gateway.core.watcher_lifecycle")
+logger = logging.getLogger("coop.core.watcher_lifecycle")
 
 # The default reason a disarmed lifecycle gives a refused transition.
 _SHUTTING_DOWN = "the gateway is shutting down"
@@ -1508,7 +1508,7 @@ class WatcherLifecycle:
         self._state_store.save(self._by_name(), prune={old} if new != old else None)
         if new != old:
             # The resident processor carries the handle too — in its logs and,
-            # load-bearing, in the "ACG Session Identity" header the agent is
+            # load-bearing, in the "Coop Session Identity" header the agent is
             # given on every turn, which is where the agent learns the handle
             # it types into `schedule create`. A stale one there fails, or —
             # once the platform reuses the old name — targets another room

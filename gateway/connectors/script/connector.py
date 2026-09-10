@@ -74,7 +74,7 @@ from ...core.connector import (
 if TYPE_CHECKING:
     from ...core.watcher_manager import RoomRef
 
-logger = logging.getLogger("agent-chat-gateway.connectors.script")
+logger = logging.getLogger("coop.connectors.script")
 
 _DEFAULT_ROOM = Room(id="script-room", name="script", type="script")
 _DEFAULT_USER = User(id="script-user", username="user")

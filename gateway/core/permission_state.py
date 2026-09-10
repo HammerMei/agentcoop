@@ -12,7 +12,7 @@ import string
 import time
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("agent-chat-gateway.permissions")
+logger = logging.getLogger("coop.permissions")
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────

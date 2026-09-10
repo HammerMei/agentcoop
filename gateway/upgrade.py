@@ -8,8 +8,8 @@ from pathlib import Path
 from rich.console import Console
 
 from .daemon import is_running, start_daemon, stop_daemon  # noqa: F401 (re-exported for patching)
+from .paths import RUNTIME_DIR
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
 META_FILE = RUNTIME_DIR / "install_meta.json"
 
 console = Console()
@@ -145,7 +145,7 @@ def _find_uv() -> str:
 # Console scripts that install.sh symlinks into ~/.local/bin. Kept in sync with
 # the symlink block in install.sh by hand — there is no clean way to share one
 # list between bash and Python, so a script added there must be added here too.
-_LOCAL_BIN_SCRIPTS = ("agent-chat-gateway", "acg-provision")
+_LOCAL_BIN_SCRIPTS = ("coop", "coop-provision")
 
 # Post-upgrade steps are local filesystem work, so this is a hang guard rather
 # than a work budget. It is kept short on purpose: the hook runs while the daemon
@@ -588,10 +588,10 @@ def _is_pip_installed() -> bool:
     try:
         import importlib.metadata
 
-        importlib.metadata.version("agent-chat-gateway")
+        importlib.metadata.version("agentcoop")
         # Confirm it's not a local editable install (editable installs have a direct_url.json
         # with "editable": true, or a .pth file pointing to a local path)
-        dist = importlib.metadata.distribution("agent-chat-gateway")
+        dist = importlib.metadata.distribution("agentcoop")
         direct_url_text = None
         for f in dist.files or []:
             if f.name == "direct_url.json":
@@ -617,9 +617,9 @@ def _is_pip_installed() -> bool:
 def _do_pip_upgrade() -> None:
     """Upgrade via pip install --upgrade."""
     console.print("  Detected install method: [bold]pip (PyPI)[/bold]")
-    console.print("  Running [bold]pip install --upgrade agent-chat-gateway[/bold] ...")
+    console.print("  Running [bold]pip install --upgrade agentcoop[/bold] ...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "agent-chat-gateway"],
+        [sys.executable, "-m", "pip", "install", "--upgrade", "agentcoop"],
         check=False,
     )
     if result.returncode != 0:
@@ -675,19 +675,6 @@ def run_upgrade() -> None:
 
     method = meta.get("method", "unknown")
     old_version = meta.get("version", "unknown")
-
-    if method == "brew":
-        console.print("  Detected install method: [bold]Homebrew[/bold]")
-        console.print("  Running [bold]brew upgrade agent-chat-gateway[/bold] ...")
-        result = subprocess.run(
-            ["brew", "upgrade", "agent-chat-gateway"],
-            check=False,
-        )
-        if result.returncode != 0:
-            console.print("[red]Error:[/red] brew upgrade failed.")
-            sys.exit(1)
-        console.print("[green]Upgrade complete![/green]")
-        return
 
     if method == "git":
         repo_path_str = meta.get("repo_path")

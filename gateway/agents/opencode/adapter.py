@@ -15,7 +15,7 @@ into the prompt text via :func:`~gateway.core.adapter_utils.build_attachment_pro
 so the agent can access them using the Read tool — the same fallback used by the
 Claude CLI backend.
 
-The ``env`` parameter of :meth:`send` is a no-op in HTTP mode.  ``ACG_ROLE``
+The ``env`` parameter of :meth:`send` is a no-op in HTTP mode.  ``COOP_ROLE``
 is set on the ``opencode serve`` process at startup via ``sidecar_env``,
 hardcoded to ``"owner"`` in ``GatewayService._build_agent_backend()`` because
 the sidecar always runs as the gateway's own backend process.  Per-message
@@ -48,6 +48,7 @@ import httpx
 
 from ...core.adapter_utils import build_attachment_prompt
 from ...core.paths import resolve_under
+from ...paths import RUNTIME_DIR
 from .. import AgentBackend, GatewayBrokerConfig
 from ..errors import (
     AgentExecutionError,
@@ -64,19 +65,16 @@ if TYPE_CHECKING:
         PermissionRegistry,
     )
 
-logger = logging.getLogger("agent-chat-gateway.agents.opencode")
+logger = logging.getLogger("coop.agents.opencode")
 
-# ACG's own runtime state directory — same convention as
-# gateway/agents/claude/adapter.py's RUNTIME_DIR. Durable per-watcher
-# instructions files live under RUNTIME_DIR/system-prompts/<path_key>.md, where
-# path_key is opaque to this adapter — the caller derives it per watcher-in-a-room
+# The runtime state directory (one definition: gateway/paths.py; bound here so
+# tests patch this module's copy). Durable per-watcher instructions files live
+# under RUNTIME_DIR/system-prompts/<path_key>.md, where path_key is opaque to
+# this adapter — the caller derives it per watcher-in-a-room
 # (gateway/core/paths.py's watcher_prompt_key), never from the display name (§2.3)
 # for both backends; watcher names are globally unique and forbidden from
 # containing "/" (see gateway/config.py), so paths never collide, and each
-# watcher only ever uses one backend type, so there's no cross-backend clash
-# either. Defined locally (not imported from the claude adapter) to keep the
-# two backend modules independent of each other.
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+# watcher only ever uses one backend type, so there's no cross-backend clash.
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -153,7 +151,7 @@ _DEFAULT_BASH_ALLOW_PATTERNS: list[str] = [
     "git diff *",
     "git status *",
     "git show *",
-    "agent-chat-gateway send *",
+    "coop send *",
 ]
 
 
@@ -262,7 +260,7 @@ class OpenCodeBackend(AgentBackend):
                 Claude backend, these are **server startup flags**, not per-message args.
             timeout: Default HTTP timeout in seconds for all API calls.
             sidecar_env: Environment variables to inject into the sidecar process.
-                Hardcoded to ``{"ACG_ROLE": "owner"}`` by GatewayService because
+                Hardcoded to ``{"COOP_ROLE": "owner"}`` by GatewayService because
                 the sidecar always runs as the gateway's own agent backend.
                 Guest enforcement is handled by the PermissionBroker at the
                 per-request level, not via process environment.
@@ -903,7 +901,7 @@ class OpenCodeBackend(AgentBackend):
         File attachments are injected into the prompt text via build_attachment_prompt
         (no native HTTP upload equivalent to the CLI's ``-f`` flag).
 
-        The ``env`` kwarg is a no-op: ACG_ROLE and other role vars must be set on the
+        The ``env`` kwarg is a no-op: COOP_ROLE and other role vars must be set on the
         opencode server process at startup, not per-message.
 
         The ``append_system_prompt_file`` kwarg holds a path written by

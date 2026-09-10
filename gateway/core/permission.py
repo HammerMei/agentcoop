@@ -40,7 +40,7 @@ _format_request_msg = format_request_msg
 _format_timeout_msg = format_timeout_msg
 _generate_id = generate_request_id
 
-logger = logging.getLogger("agent-chat-gateway.permissions")
+logger = logging.getLogger("coop.permissions")
 
 
 # ── PermissionBroker ABC ──────────────────────────────────────────────────────

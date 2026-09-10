@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .rest import RocketChatREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat.outbound")
+logger = logging.getLogger("coop.connectors.rocketchat.outbound")
 
 # RC has a generous practical limit, but very long messages can be rejected.
 # We leave chunking disabled by default (None) and let the connector's

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .config import RocketChatConfig
     from .rest import RocketChatREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat.normalize")
+logger = logging.getLogger("coop.connectors.rocketchat.normalize")
 
 
 @functools.lru_cache(maxsize=8)

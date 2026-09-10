@@ -31,7 +31,7 @@ _TOMBSTONE_TTL_FACTOR = 2
 # about again rather than because two hundred and fifty-six means anything.
 _RELEASED_TOKENS_REMEMBERED = 256
 
-logger = logging.getLogger("agent-chat-gateway.core.agent_chain")
+logger = logging.getLogger("coop.core.agent_chain")
 
 # Sentinel the LLM outputs to self-terminate an agent chain turn.
 # ACG detects this via exact match (response.text.strip() == TOKEN).

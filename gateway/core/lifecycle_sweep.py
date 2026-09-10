@@ -72,7 +72,7 @@ from .state import past_expire_ttl, past_idle_ttl
 if TYPE_CHECKING:
     from .watcher_lifecycle import WatcherLifecycle
 
-logger = logging.getLogger("agent-chat-gateway.core.lifecycle_sweep")
+logger = logging.getLogger("coop.core.lifecycle_sweep")
 
 # TTLs are whole days, so hourly resolution is two orders of magnitude finer
 # than anything it measures.

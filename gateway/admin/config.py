@@ -121,7 +121,7 @@ _StrictLoader.add_constructor(
 
 
 DEFAULT_CONFIG_PATH = Path("admin-profiles.yaml")
-CONFIG_PATH_ENV_VAR = "ACG_ADMIN_CONFIG"
+CONFIG_PATH_ENV_VAR = "COOP_ADMIN_CONFIG"
 
 SUPPORTED_TYPES = ("rocketchat", "mattermost")
 
@@ -227,7 +227,7 @@ def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
     """Load all profiles from a YAML file.
 
     Resolution order for the file path: explicit ``path`` argument, then
-    the ``ACG_ADMIN_CONFIG`` env var, then ``./admin-profiles.yaml``.
+    the ``COOP_ADMIN_CONFIG`` env var, then ``./admin-profiles.yaml``.
 
     The file is opened in *binary* mode and handed to PyYAML undecoded, so
     PyYAML applies its own YAML-spec encoding detection (UTF-8/16/32, BOM

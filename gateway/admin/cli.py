@@ -40,9 +40,9 @@ from gateway.admin.base import ChannelAlreadyExistsError, UserAlreadyExistsError
 from gateway.admin.config import AdminConfigError, get_profile, load_profiles
 from gateway.admin.factory import admin_factory
 
-DEFAULT_LOG_FILE = "acg-provision.log"
+DEFAULT_LOG_FILE = "coop-provision.log"
 
-_error_logger = logging.getLogger("agent-chat-gateway.admin.errors")
+_error_logger = logging.getLogger("coop.admin.errors")
 
 
 def _has_file_handler_for(logger: logging.Logger, target: str) -> bool:
@@ -130,7 +130,7 @@ def _configure_error_log(path: str) -> None:
             handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
             _error_logger.addHandler(handler)
 
-        umbrella_logger = logging.getLogger("agent-chat-gateway")
+        umbrella_logger = logging.getLogger("coop")
         if not _has_file_handler_for(umbrella_logger, target):
             umbrella_handler = logging.FileHandler(path)
             umbrella_handler.setLevel(logging.WARNING)
@@ -145,12 +145,12 @@ def _configure_error_log(path: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="acg-provision",
+        prog="coop-provision",
         description="Standalone admin CLI for Rocket.Chat / Mattermost user & channel provisioning.",
     )
     parser.add_argument(
         "--config",
-        help="Path to the profiles YAML file (default: ./admin-profiles.yaml, or $ACG_ADMIN_CONFIG)",
+        help="Path to the profiles YAML file (default: ./admin-profiles.yaml, or $COOP_ADMIN_CONFIG)",
     )
     parser.add_argument(
         "--log-file", default=DEFAULT_LOG_FILE,

@@ -12,7 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+from .paths import RUNTIME_DIR
+
 CONFIG_FILE = RUNTIME_DIR / "config.yaml"
 ENV_FILE = RUNTIME_DIR / ".env"
 META_FILE = RUNTIME_DIR / "install_meta.json"
@@ -190,7 +191,7 @@ def install_opencode_plugin(
     The plugin is installed at the **global** level (``~/.opencode/``) rather
     than inside a specific project directory.  This means it is available for
     every opencode session regardless of working directory, while remaining
-    completely inert when ``ACG_ROLE`` is not set (i.e. normal CLI / web-UI use).
+    completely inert when ``COOP_ROLE`` is not set (i.e. normal CLI / web-UI use).
 
     Installation layout::
 

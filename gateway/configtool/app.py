@@ -24,7 +24,7 @@ class ConfigToolApp(App):
     (`self.editable_config`), or `self.load_error` if the file doesn't
     currently parse."""
 
-    TITLE = "agent-chat-gateway config"
+    TITLE = "coop config"
 
     def __init__(self, config_path: str, lint: bool = False):
         super().__init__()

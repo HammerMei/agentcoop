@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .rest import MattermostREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.outbound")
+logger = logging.getLogger("coop.connectors.mattermost.outbound")
 
 # Mattermost's default per-post character limit (ServiceSettings.MaxPostSize)
 # is 16383. Surfaced via the connector's text_chunk_limit property; kept here
