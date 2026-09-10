@@ -89,7 +89,7 @@ def weekday_abbrev(ts_iso: str | None) -> str | None:
     themselves — LLMs calculate day-of-week from a date string unreliably
     (it's pattern-matching over training data, not true calendar arithmetic),
     which has caused agents to mistake a weekday for a weekend and silently
-    skip scheduled tasks. See: agent-chat-gateway#53.
+    skip scheduled tasks. See: AgentCoop#53.
 
     Looks up a fixed table indexed by ``datetime.weekday()`` rather than
     ``strftime("%a")`` so the abbreviation is always English, regardless of

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger("agent-chat-gateway.core.tz_utils")
+logger = logging.getLogger("coop.core.tz_utils")
 
 
 def local_iana_timezone() -> str:

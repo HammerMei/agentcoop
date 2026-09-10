@@ -1,4 +1,4 @@
-"""Bundled instruction document lookup for lazy-loaded ACG docs."""
+"""Bundled instruction document lookup for lazy-loaded AgentCoop docs."""
 
 from __future__ import annotations
 

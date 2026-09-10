@@ -23,7 +23,7 @@ from pathlib import Path
 from .connector import Attachment, Connector
 from .paths import resolve_under
 
-logger = logging.getLogger("agent-chat-gateway.core.attachment_workspace")
+logger = logging.getLogger("coop.core.attachment_workspace")
 
 
 def localize_attachment_paths(

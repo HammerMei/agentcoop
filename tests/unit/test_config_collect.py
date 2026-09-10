@@ -497,7 +497,7 @@ class TestExplicitNullWatchersBlock(_CollectConfigTestBase):
     """A bare `watchers:` — the natural way to empty the block — used to
     reach `enumerate(None)` and raise a raw TypeError, because the guard
     checked truthiness BEFORE type. That crashed the daemon at startup and
-    `agent-chat-gateway config validate` with it, on a config an operator produces by
+    `coop config validate` with it, on a config an operator produces by
     deleting their rules. Found while testing the config TUI's rollback
     (Codex review of PR #129, round 11); the rule this violated is stated in
     this same file, on `_resolve_watcher_connector`."""

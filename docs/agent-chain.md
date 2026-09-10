@@ -6,7 +6,7 @@ What if your AI agents could talk to each other?
 
 Imagine a Rocket.Chat room where a **research agent** gathers information, then asks a **writing agent** to draft a report. Or a **code review agent** examines a PR, then delegates testing to a **test automation agent**. Or a **project manager agent** breaks down a task and routes it to specialists — all without human hand-offs.
 
-Agent-to-agent communication turns Rocket.Chat into a coordination layer for heterogeneous AI systems. Multiple ACG bots with different backends (Claude Code, OpenCode, custom agents) share a room and collaborate via natural language messages. The chat platform becomes the "bus" — transparent, auditable, and always under human observation.
+Agent-to-agent communication turns Rocket.Chat into a coordination layer for heterogeneous AI systems. Multiple AgentCoop bots with different backends (Claude Code, OpenCode, custom agents) share a room and collaborate via natural language messages. The chat platform becomes the "bus" — transparent, auditable, and always under human observation.
 
 This is fundamentally different from traditional agent frameworks where agents communicate via direct API calls. Here, agents are loosely coupled, can be deployed independently, and humans can observe or intervene in the conversation at any point.
 
@@ -20,7 +20,7 @@ The `agent_chain` feature solves this with three protective layers: **LLM self-t
 
 ### Layer 1: LLM Self-Termination (Primary Defense)
 
-When ACG forwards an agent message to Claude (or another LLM backend), it appends a special prompt suffix that teaches the agent to detect loops and exit gracefully.
+When AgentCoop forwards an agent message to Claude (or another LLM backend), it appends a special prompt suffix that teaches the agent to detect loops and exit gracefully.
 
 **Example suffix (simplified):**
 ```
@@ -32,7 +32,7 @@ please respond with: <end-of-agent-chain>
 This tells the gateway to stop the conversation gracefully without posting your response.
 ```
 
-The agent reads this instruction and decides whether to continue or stop. If it chooses to stop, it includes the token `<end-of-agent-chain>` in its response. ACG detects this token, **silently drops the response** (never posts it), and the chain stops naturally.
+The agent reads this instruction and decides whether to continue or stop. If it chooses to stop, it includes the token `<end-of-agent-chain>` in its response. AgentCoop detects this token, **silently drops the response** (never posts it), and the chain stops naturally.
 
 **Why this is the primary layer:** It's the most elegant. The agent understands the situation and makes an informed decision. No hard limits, no counter-based cutoffs — just intelligent self-regulation.
 
@@ -42,7 +42,7 @@ The agent reads this instruction and decides whether to continue or stop. If it 
 
 Even with self-termination, we need a hard ceiling. What if the LLM doesn't recognize the loop, or if loop detection fails?
 
-Each agent sender gets an independent turn counter per room/thread. Once `max_turns` is exceeded, ACG force-drops all further messages from that sender until:
+Each agent sender gets an independent turn counter per room/thread. Once `max_turns` is exceeded, AgentCoop force-drops all further messages from that sender until:
 - A **human message** arrives (which resets all counters for that room/thread)
 - The **TTL expires** (configurable grace period)
 
@@ -109,7 +109,7 @@ connectors:
     # ── Agent-to-agent loop protection ───────────────────────────────────
     agent_chain:
       agent_usernames:
-        - another-bot                  # RC username of the other ACG bot
+        - another-bot                  # RC username of the other AgentCoop bot
         - research-agent               # and any other agent bots in this room
       max_turns: 5                     # turns per agent before force-drop (default: 5)
       ttl_seconds: 3600                # idle timeout in seconds (default: 3600)
@@ -119,7 +119,7 @@ connectors:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `agent_usernames` | List[str] | — | **Required.** Rocket.Chat usernames of other ACG bots that may send messages to this room. Messages from these senders bypass the allow-list check and are tracked against their own turn budget. |
+| `agent_usernames` | List[str] | — | **Required.** Rocket.Chat usernames of other AgentCoop bots that may send messages to this room. Messages from these senders bypass the allow-list check and are tracked against their own turn budget. |
 | `max_turns` | Int | 5 | Maximum turns (response count) per agent per room/thread before force-drop. Use higher values (10+) for complex multi-turn tasks; lower values (2–3) for simple exchanges. |
 | `ttl_seconds` | Int | 3600 | Idle timeout in seconds. Stale counters older than this are automatically deleted. 3600 = 1 hour. |
 
@@ -127,7 +127,7 @@ connectors:
 
 ### Addressing and `@all`
 
-In Rocket.Chat rooms, ACG adds a trusted `to:` field to each agent prompt so agents can
+In Rocket.Chat rooms, AgentCoop adds a trusted `to:` field to each agent prompt so agents can
 tell whether a message is meant for them, another agent, or the room at large:
 
 - `to: me` — this bot was explicitly mentioned, or the message arrived as a DM.
@@ -137,7 +137,7 @@ tell whether a message is meant for them, another agent, or the room at large:
 - `to: me+@all+@other-agent` — room-wide fan-out plus specific priority responders.
 - `to: *` — no explicit agent mention; agents should be conservative and respond only with useful new information.
 
-When `@all` appears together with specific agent mentions, ACG preserves the specific
+When `@all` appears together with specific agent mentions, AgentCoop preserves the specific
 mentions as **priority responders** rather than letting `@all` erase them. Agents that
 do not have useful, non-duplicative input should respond with only
 `<end-of-agent-chain>` so the chain terminates cleanly.
@@ -146,7 +146,7 @@ do not have useful, non-duplicative input should respond with only
 
 ## Prompt Injection & Turn Awareness
 
-ACG doesn't send the raw agent message to Claude. It wraps it with context:
+AgentCoop doesn't send the raw agent message to Claude. It wraps it with context:
 
 ### Normal Turns
 ```
@@ -175,7 +175,7 @@ If you detect a loop or have nothing meaningful to add, respond with: <end-of-ag
 ---
 [AGENT CHAIN CONTEXT]
 ⚠️  This is your final turn. After this response, the conversation will be locked until a human sends a new message.
-Consider scheduling a follow-up task if more work is needed (use `agent-chat-gateway schedule`).
+Consider scheduling a follow-up task if more work is needed (use `coop schedule`).
 If you have nothing meaningful to add, respond with: <end-of-agent-chain>
 ```
 
@@ -315,7 +315,7 @@ If an agent reaches the final turn but the task isn't done, encourage it to sche
 
 ```
 Prompt:
-  "If you need to continue, use: agent-chat-gateway schedule create rc:general 
+  "If you need to continue, use: coop schedule create rc:general 
    'Continue the X task' --every 1h --times 1"
 ```
 
@@ -380,7 +380,7 @@ Agent-to-agent communication in Rocket.Chat is the foundation for a new model of
 - Adding a new agent requires changes to the orchestrator
 - Humans see only the final output, not intermediate steps
 
-**ACG agent chains:**
+**AgentCoop agent chains:**
 - Agents communicate through a shared chat room
 - Workflow emerges from natural language negotiation
 - New agents can be added without changing existing code

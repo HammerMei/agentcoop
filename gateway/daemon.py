@@ -16,9 +16,9 @@ from .runtime_lock import acquire as _lock_acquire
 from .runtime_lock import release as _lock_release
 from .service import GatewayService, sanitize_pipe_message
 
-logger = logging.getLogger("agent-chat-gateway.daemon")
+logger = logging.getLogger("coop.daemon")
 
-# RUNTIME_DIR is imported from runtime_lock — single source of truth.
+# RUNTIME_DIR comes from gateway.paths (via runtime_lock), the one definition.
 # PID_FILE imported from runtime_lock (shared with control.py to break circular import)
 LOG_FILE = RUNTIME_DIR / "gateway.log"
 
@@ -30,7 +30,7 @@ def _harden_config_permissions(config_path: str) -> None:
     chmods config.yaml when a migration actually ran (i.e. only when a
     `.env` file existed) — a hand-written config.yaml that never had a
     companion `.env` (exactly what the docs now recommend) was never
-    getting this protection from `agent-chat-gateway start` at all,
+    getting this protection from `coop start` at all,
     contradicting the documented guarantee. Extracted as its own function
     so it's unit-testable without going through `os.fork()` (this whole
     module's docstring already notes `start_daemon()` itself isn't

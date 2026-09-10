@@ -16,18 +16,18 @@ indefinitely (a nag people can ignore isn't enforcement). This module holds
 the actual migration LOGIC as one function, callable from two TRIGGERS:
 `gateway/daemon.py`'s `start_daemon()` (automatic, on every server start —
 becomes a permanent no-op the moment `.env` is gone) and a standalone CLI
-command (`agent-chat-gateway config migrate-env`) for a manual/dry-run/
+command (`coop config migrate-env`) for a manual/dry-run/
 Docker-entrypoint invocation. Same function either way — no logic
 duplicated between the two call sites.
 
 Symlink safety (Docker bind-mount deployments): `EditableConfig.save()`
 writes via `os.replace()`, which replaces a destination that is itself a
 symlink rather than writing through it — relevant because the Docker
-entrypoint's Mode 1 (`docker/entrypoint.acg.sh`) symlinks the runtime
+entrypoint's Mode 1 (`docker/entrypoint.coop.sh`) symlinks the runtime
 `config.yaml`/`.env` to a bind-mounted host directory. Code-review finding:
 `gateway/daemon.py`'s automatic trigger resolved `config_path` before
 calling this function, so it was accidentally safe — but the standalone
-`agent-chat-gateway config migrate-env` CLI command (the one Docker users
+`coop config migrate-env` CLI command (the one Docker users
 are explicitly told to run manually) did NOT resolve first, so it would
 silently "migrate" the container-local symlinks only, never touch the real
 host files, and report false success. Fixed by resolving `config_path`
@@ -104,7 +104,7 @@ def migrate_env_to_config(config_path: str | Path) -> MigrationResult:
     `.env` before confirming `config_path` exists let a missing config with
     no `.env` alongside it slip through as a silent, false "nothing to
     migrate" no-op instead of a clear error — misleading standalone via the
-    CLI, `agent-chat-gateway config migrate-env`, and worse via `gateway/
+    CLI, `coop config migrate-env`, and worse via `gateway/
     daemon.py`'s automatic trigger, where it let the subsequent
     unconditional `_harden_config_permissions()` chmod call crash on a
     nonexistent file with an unhandled traceback instead of a clean

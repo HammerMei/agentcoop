@@ -145,7 +145,7 @@ class TestDispatchCommand(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["name"], "scheduling")
-        self.assertIn("# ACG Scheduling Commands", result["text"])
+        self.assertIn("# AgentCoop Scheduling Commands", result["text"])
 
     async def test_instructions_unknown_name_returns_error(self):
         """Unknown instruction names return a structured error."""
@@ -663,7 +663,7 @@ class TestHandleFetchHistory(unittest.IsolatedAsyncioTestCase):
 
         This is the one place a human writes a timestamp, so it is the one
         place that converts — connector bounds are epoch-ms like every other
-        timestamp inside ACG, and leaving the ISO to travel further is how a
+        timestamp inside AgentCoop, and leaving the ISO to travel further is how a
         value that looked right met an interface that wanted the other form.
         """
         entry = _make_history_entry("my-watcher")

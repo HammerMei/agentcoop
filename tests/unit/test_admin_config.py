@@ -266,7 +266,7 @@ class TestLoadProfiles(unittest.TestCase):
                 "profiles:\n  rc-lab:\n    type: rocketchat\n"
                 "    server_url: https://rc\n    username: admin\n    password: pw\n"
             )
-            with patch.dict("os.environ", {"ACG_ADMIN_CONFIG": str(path)}):
+            with patch.dict("os.environ", {"COOP_ADMIN_CONFIG": str(path)}):
                 profiles = load_profiles()
             self.assertEqual(set(profiles), {"rc-lab"})
 
@@ -277,7 +277,7 @@ class TestLoadProfiles(unittest.TestCase):
                 "profiles:\n  rc-lab:\n    type: rocketchat\n"
                 "    server_url: https://rc\n    username: admin\n    password: pw\n"
             )
-            with patch.dict("os.environ", {"ACG_ADMIN_CONFIG": "/nonexistent/other.yaml"}):
+            with patch.dict("os.environ", {"COOP_ADMIN_CONFIG": "/nonexistent/other.yaml"}):
                 profiles = load_profiles(real_path)
             self.assertEqual(set(profiles), {"rc-lab"})
 

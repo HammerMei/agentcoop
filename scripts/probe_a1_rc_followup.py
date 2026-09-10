@@ -8,7 +8,7 @@
   6. a DM sent to the probe user — does __my_messages__ deliver it, and what
      do roomType/roomName look like for a room that has no name?
   7. the same subscription with the second `sub` param set to true (RC's own
-     Go SDK sends true; ACG sends false) — does anything observable change?
+     Go SDK sends true; AgentCoop sends false) — does anything observable change?
 
 Usage:
     uv run python scripts/probe_a1_rc_followup.py --url https://rc.labpig.com \

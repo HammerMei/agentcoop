@@ -24,7 +24,7 @@ from gateway.core.session_manager import SessionManager
 from gateway.core.state import StateFilter
 from tests.helpers import MockAgentBackend, make_manager, make_rule
 
-# Patch load_state globally so tests never touch the live ~/.agent-chat-gateway/state.json.
+# Patch load_state globally so tests never touch the live ~/.agentcoop/state.json.
 # Each test creates a fresh SessionManager; we don't want persisted production state
 # to bleed in and cause spurious "resume" attempts against a ScriptConnector.
 _patch_load_state = patch("gateway.core.state_store.load_state", return_value=[])
@@ -38,7 +38,7 @@ _patch_save_state = patch("gateway.core.state_store.save_state")
 pytestmark = pytest.mark.integration
 
 class IsolatedTestCase(unittest.IsolatedAsyncioTestCase):
-    """Base: patches load_state/save_state so tests don't touch live ~/.agent-chat-gateway/."""
+    """Base: patches load_state/save_state so tests don't touch live ~/.agentcoop/."""
 
     def setUp(self):
         _patch_load_state.start()
@@ -218,18 +218,18 @@ class TestRoleHandling(IsolatedTestCase):
         await self.connector.receive_reply(timeout=5.0)
 
         env = self.agent.sent_messages[-1]["env"]
-        self.assertEqual(env.get("ACG_ROLE"), "owner")
+        self.assertEqual(env.get("COOP_ROLE"), "owner")
 
     async def test_guest_role_env(self):
         await self.connector.inject("hi", role=UserRole.GUEST)
         await self.connector.receive_reply(timeout=5.0)
 
         env = self.agent.sent_messages[-1]["env"]
-        self.assertEqual(env.get("ACG_ROLE"), "guest")
-        # ACG_ALLOWED_TOOLS is only injected for opencode agents via sidecar env
+        self.assertEqual(env.get("COOP_ROLE"), "guest")
+        # COOP_ALLOWED_TOOLS is only injected for opencode agents via sidecar env
         # (service.py), not via env_for_role(). The permission broker enforces
         # guest_allowed_tools via structured ToolRule lists, not env vars.
-        self.assertNotIn("ACG_ALLOWED_TOOLS", env)
+        self.assertNotIn("COOP_ALLOWED_TOOLS", env)
 
 
 class TestMultiRoomRouting(IsolatedTestCase):

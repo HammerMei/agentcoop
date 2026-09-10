@@ -1,6 +1,6 @@
 """Test-wide isolation of the runtime directory.
 
-`gateway.core.state.RUNTIME_DIR` defaults to `~/.agent-chat-gateway`, so anything
+`gateway.core.state.RUNTIME_DIR` defaults to `~/.agentcoop`, so anything
 that reaches `load_state` — `validate_config`, and through it the config TUI —
 reads the *developer's own* state files unless a test remembers to patch it.
 

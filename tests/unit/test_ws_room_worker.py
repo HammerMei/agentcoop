@@ -126,7 +126,7 @@ class TestRoomWorkerCancelLogging(unittest.IsolatedAsyncioTestCase):
         # Wait until the callback starts
         await asyncio.wait_for(started_callback.wait(), timeout=2.0)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", level="WARNING") as cm:
+        with self.assertLogs("coop.connectors.rocketchat.ws", level="WARNING") as cm:
             worker_task.cancel()
             try:
                 await worker_task
@@ -219,7 +219,7 @@ class TestRoomWorkerQueueDrainOnCancel(unittest.IsolatedAsyncioTestCase):
         worker_task = asyncio.create_task(ws._room_worker("room-aabbcc", queue))
         await callback_entered.wait()  # worker is now inside the blocking callback
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws",
+        with self.assertLogs("coop.connectors.rocketchat.ws",
                               level=logging.WARNING) as log_cm:
             worker_task.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -329,7 +329,7 @@ class TestRoomWorkerInFlightCounted(unittest.IsolatedAsyncioTestCase):
 
         # Cancel the worker while it's blocked at semaphore acquire
         with self.assertLogs(
-            "agent-chat-gateway.connectors.rocketchat.ws", level="WARNING"
+            "coop.connectors.rocketchat.ws", level="WARNING"
         ) as log_ctx:
             worker_task.cancel()
             task_cancel_event.set()
@@ -592,7 +592,7 @@ class TestTheCreationPathJoinsTheRoomsQueue(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("r1", c._ws._callbacks)
 
         with self.assertLogs(
-            "agent-chat-gateway.connectors.rocketchat.ws", level="WARNING"
+            "coop.connectors.rocketchat.ws", level="WARNING"
         ) as logs:
             c._ws.deliver_to_room("r1", {"_id": "m1"}, None)
             await asyncio.sleep(0.05)
@@ -731,7 +731,7 @@ class TestRoutingFramesDoNotOutliveARecovery(unittest.IsolatedAsyncioTestCase):
         ws._recovery_generation += 1
 
         with self.assertLogs(
-            "agent-chat-gateway.connectors.rocketchat.ws", level="WARNING"
+            "coop.connectors.rocketchat.ws", level="WARNING"
         ) as logs:
             await asyncio.sleep(0.05)
 

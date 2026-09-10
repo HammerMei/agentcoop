@@ -117,12 +117,12 @@ class AgentBackend(ABC):
         """Whether this backend uses the ``env`` dict passed to :meth:`send`.
 
         When ``True`` (the default), :class:`~gateway.core.message_processor.MessageProcessor`
-        generates per-message role env (``ACG_ROLE``) and passes it via ``send(env=...)``.
+        generates per-message role env (``COOP_ROLE``) and passes it via ``send(env=...)``.
         The backend's subprocess uses these vars for role-aware hook enforcement.
 
         When ``False``, per-message env is a no-op — the backend either ignores
         ``env`` entirely or requires role to be set at process startup (e.g.
-        OpenCode HTTP mode sets ``ACG_ROLE=owner`` on ``opencode serve`` at launch).
+        OpenCode HTTP mode sets ``COOP_ROLE=owner`` on ``opencode serve`` at launch).
         In this case, the processor skips env generation to avoid misleading
         no-op computation.  Guest/owner enforcement is handled entirely by the
         permission broker for such backends.
@@ -134,16 +134,16 @@ class AgentBackend(ABC):
     def typical_session_retention_days(self) -> int | None:
         """How many days this backend itself typically keeps a session alive
         before its own cleanup mechanism (if any) would delete it, independent
-        of anything ACG configures.
+        of anything AgentCoop configures.
 
         Used by the on-the-fly-watcher idle/expire lifecycle
         (docs/design/dynamic-watcher-design.md) to compute an effective
         ``session_expire_days`` of ``min(configured value, this value)`` when
-        the agent declares one — there's no point in ACG holding onto a
+        the agent declares one — there's no point in AgentCoop holding onto a
         session reference the backend has already thrown away.
 
         Returns ``None`` (the default here) when the backend has no automatic
-        expiry of its own — ACG's own ``session_expire_days`` setting is then
+        expiry of its own — AgentCoop's own ``session_expire_days`` setting is then
         the only limit in effect. Backends with a real, known limit should
         override this rather than let callers assume unbounded retention.
         """
@@ -425,7 +425,7 @@ class AgentBackend(ABC):
             attachments: Optional list of local file paths to attach (backend support varies).
             env: Optional extra environment variables to inject into the agent subprocess.
                  Merged on top of the inherited process environment. Used to pass role context
-                 (e.g. ACG_ROLE) for hook/plugin enforcement.
+                 (e.g. COOP_ROLE) for hook/plugin enforcement.
             append_system_prompt_file: Optional path to a file whose content should be
                  appended to the system prompt on this turn (backend support varies —
                  e.g. Claude's ``--append-system-prompt-file``). Backends without an

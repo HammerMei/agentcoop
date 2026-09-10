@@ -74,7 +74,7 @@ from .policy import apply_thread_policy
 from .rest import MattermostREST, RoomNotFoundError
 from .websocket import MattermostWebSocketClient
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost")
+logger = logging.getLogger("coop.connectors.mattermost")
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ class _ChannelState(ReplayWindow):
     # Mattermost gets the *hand-back* half of that module and not the outage half: there is
     # no per-channel subscribe handshake, so one connection resumes every channel at the
     # same instant and the staggered-resubscribe race Rocket.Chat captures a window for
-    # cannot happen here. This mark exists only because ACG itself refuses messages when
+    # cannot happen here. This mark exists only because AgentCoop itself refuses messages when
     # its queues are full.
     replay_boundary: str | None = None
     boundary_claims: int = 0
@@ -409,7 +409,7 @@ class MattermostConnector(Connector):
         if not raw_msgs:
             if page.was_full:
                 # Not an empty window — a page the server filled entirely with system
-                # posts, because `per_page` is applied before ACG filters them out.
+                # posts, because `per_page` is applied before AgentCoop filters them out.
                 # Every user post older than this page is still waiting behind it, and
                 # reporting the outage as read would skip them silently. Same rule, and
                 # same reason, as the Rocket.Chat replay: the count the server applied
@@ -1646,7 +1646,7 @@ class MattermostConnector(Connector):
         for Mattermost's ID-based identity and lack of a wire subscription:
         events for channels with no local _ChannelState (i.e. no watcher has
         called subscribe_room for them) are ignored even though the socket
-        delivers them, since the bot may belong to channels ACG isn't
+        delivers them, since the bot may belong to channels AgentCoop isn't
         watching.
 
         Args:

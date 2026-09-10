@@ -32,7 +32,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
-logger = logging.getLogger("agent-chat-gateway.permissions.opencode_callable")
+logger = logging.getLogger("coop.permissions.opencode_callable")
 
 PermissionHandler = Callable[[str, dict], Awaitable[bool]]
 

@@ -37,7 +37,7 @@ from .state import WatcherState, now_iso
 if TYPE_CHECKING:
     from .permission import PermissionRegistry
 
-logger = logging.getLogger("agent-chat-gateway.core.processor")
+logger = logging.getLogger("coop.core.processor")
 
 # Sentinel placed on the queue by stop() to wake a blocked consumer.
 _DRAIN_SENTINEL = object()
@@ -598,7 +598,7 @@ class MessageProcessor:
         """The room was renamed; take the new handle and re-issue the identity header.
 
         The handle is display data, but it is display data the AGENT reads: the
-        "ACG Session Identity" block names the watcher and the room (from
+        "Coop Session Identity" block names the watcher and the room (from
         `_watcher_config`), and it is handed to the backend on every turn, so a
         stale one sends the agent's own `schedule create` at a name that no
         longer resolves — or, once the platform reuses it, at another room

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/gateway/schema/config.schema.json",
-  "title": "agent-chat-gateway config.yaml",
-  "description": "Hand-written schema for editor autocomplete / typo-checking of config.yaml. It intentionally does NOT re-validate every connector-type-specific field (server/allowed_users/attachments/agent_chain vary by connector 'type') \u2014 that stays the job of `agent-chat-gateway config validate`. See docs/migration-0.3.md for the format this schema describes (v0.3+: connector_templates/agent_templates/watcher_templates + per-entry 'inherits:', tool_presets, watcher rooms:).",
+  "$id": "https://raw.githubusercontent.com/HammerMei/agentcoop/main/gateway/schema/config.schema.json",
+  "title": "AgentCoop config.yaml",
+  "description": "Hand-written schema for editor autocomplete / typo-checking of config.yaml. It intentionally does NOT re-validate every connector-type-specific field (server/allowed_users/attachments/agent_chain vary by connector 'type') \u2014 that stays the job of `coop config validate`. See docs/migration-0.3.md for the format this schema describes (v0.3+: connector_templates/agent_templates/watcher_templates + per-entry 'inherits:', tool_presets, watcher rooms:).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -301,7 +301,7 @@
       }
     },
     "watcher": {
-      "description": "A 'watchers:' entry \u2014 a watcher RULE (docs/design/dynamic-watcher-design.md \u00a72.1). The static shape ('room:', or 'rooms:' as an array) was removed at cutover; the loader refuses it with a pointer at docs/migration-dynamic-watchers.md, and this schema matches that refusal rather than dual-accepting a shape nothing runs.",
+      "description": "A 'watchers:' entry \u2014 a watcher RULE (docs/design/dynamic-watcher-design.md \u00a72.1). The static shape ('room:', or 'rooms:' as an array) was removed at cutover; the loader refuses it with a pointer at docs/migration-v1.md, and this schema matches that refusal rather than dual-accepting a shape nothing runs.",
       "$ref": "#/$defs/watcherRule"
     },
     "dmOptIn": {

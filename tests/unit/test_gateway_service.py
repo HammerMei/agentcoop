@@ -533,7 +533,7 @@ class TestWriteStartupSignal(unittest.TestCase):
         rfd, wfd = os.pipe()
         os.close(wfd)  # pre-close to force OSError on write
 
-        with self.assertLogs("agent-chat-gateway.service", level="WARNING") as log_ctx:
+        with self.assertLogs("coop.service", level="WARNING") as log_ctx:
             # Must NOT raise — the OSError must be caught and logged.
             _write_startup_signal(wfd, [])
 
@@ -560,7 +560,7 @@ class TestWriteStartupSignal(unittest.TestCase):
 
         import logging
         # suppress the expected warning so it doesn't pollute test output
-        logger = logging.getLogger("agent-chat-gateway.service")
+        logger = logging.getLogger("coop.service")
         logger.disabled = True
         try:
             _write_startup_signal(wfd, [])

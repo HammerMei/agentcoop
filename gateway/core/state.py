@@ -18,13 +18,9 @@ from enum import Flag, auto
 from pathlib import Path
 from typing import Collection, get_origin
 
-logger = logging.getLogger("agent-chat-gateway.state")
+from ..paths import RUNTIME_DIR
 
-# Importing RUNTIME_DIR from the application layer would create a circular import
-# (state.py is in core, runtime_lock.py is in the gateway package).
-# We define it here directly — runtime_lock.py is the canonical definition;
-# state.py keeps its own copy to avoid the cross-layer import.
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+logger = logging.getLogger("coop.state")
 
 # Current on-disk format. Bumped when a record gains fields that cannot be
 # defaulted from an older file — which is why this exists at all: the fields added
@@ -80,7 +76,7 @@ class LegacyStateError(StateFormatError):
             f"To proceed: move '{path}' aside — keep the copy, because the file IS "
             "the inventory: it lists each watcher's name, session id, paused flag and "
             "message watermark in plain JSON. Then start again. Do not reach for "
-            "'agent-chat-gateway list' at this point: it queries the running daemon, "
+            "'coop list' at this point: it queries the running daemon, "
             "and the daemon is what just refused to start. Your config.yaml does NOT need "
             "rewriting for this: rule-shaped watchers are not active yet, so the "
             "§5.3 procedure's config rewrite belongs to the later cutover, not to "
@@ -118,7 +114,7 @@ def _state_file(connector_name: str) -> Path:
     Each connector gets its own namespaced file so multiple connectors
     can run side by side without clobbering each other's state.
 
-    Example: connector_name="rc-home" → ~/.agent-chat-gateway/state.rc-home.json
+    Example: connector_name="rc-home" → ~/.agentcoop/state.rc-home.json
     """
     return RUNTIME_DIR / f"state.{connector_name}.json"
 

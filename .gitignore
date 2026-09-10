@@ -15,7 +15,7 @@ htmlcov/
 .env
 config.yaml
 admin-profiles.yaml
-acg-provision.log
+coop-provision.log
 .config-backups/
 .DS_Store
 example-agents/**/node_modules/

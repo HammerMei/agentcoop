@@ -1,6 +1,6 @@
 """Operator-run migrations for `jobs.json`.
 
-`agent-chat-gateway schedule migrate` runs these. Deliberately not automatic,
+`coop schedule migrate` runs these. Deliberately not automatic,
 and not lazy at fire time: the 1→2 step reads each job's watcher HANDLE to find
 its room, and a handle only names the right room while nobody has renamed it.
 The operator is the one who can choose a moment when that holds — right after an
@@ -29,7 +29,7 @@ from typing import Callable
 from ..schedule_types import JobStatus, ScheduledJob
 from .job_store import _SCHEMA_VERSION, JobStore
 
-logger = logging.getLogger("agent-chat-gateway.core.job_migrate")
+logger = logging.getLogger("coop.core.job_migrate")
 
 
 @dataclass
@@ -184,7 +184,7 @@ async def _resolve_room_id(entry, job: ScheduledJob) -> tuple[str, str]:
         # startup warning went quiet and every later fire delivered into the
         # wrong room, silently. Measured, not reasoned.
         #
-        # `migration-dynamic-watchers.md` step 7 already says these jobs must be
+        # `migration-v1.md` step 7 already says these jobs must be
         # deleted and recreated. Saying so here is what makes that instruction
         # hold for an operator who skipped it.
         return "", (
@@ -319,9 +319,9 @@ async def migrate(store: JobStore, entries) -> MigrationReport:
     from_version = store.file_version
     if from_version > _SCHEMA_VERSION:
         raise ValueError(
-            f"jobs.json declares schema version {from_version}, but this ACG "
+            f"jobs.json declares schema version {from_version}, but this AgentCoop "
             f"understands {_SCHEMA_VERSION}. It was written by a newer version — "
-            f"upgrade ACG rather than migrating down."
+            f"upgrade AgentCoop rather than migrating down."
         )
 
     report = MigrationReport(from_version=from_version, to_version=_SCHEMA_VERSION)

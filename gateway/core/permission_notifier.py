@@ -15,7 +15,7 @@ from ..agents.response import AgentResponse
 if TYPE_CHECKING:
     from .connector import Connector
 
-logger = logging.getLogger("agent-chat-gateway.permissions")
+logger = logging.getLogger("coop.permissions")
 
 
 @runtime_checkable

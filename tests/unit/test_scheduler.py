@@ -1262,7 +1262,7 @@ class TestInjectMessageWakesAnIdleRoom(unittest.IsolatedAsyncioTestCase):
         sm._watcher_manager = MagicMock()
         sm._watcher_manager.get_or_create = AsyncMock(return_value=None)
 
-        with self.assertLogs("agent-chat-gateway.core.session_manager",
+        with self.assertLogs("coop.core.session_manager",
                              level=logging.WARNING):
             result = await sm.inject_message("room-1", "hello")
 
@@ -1290,7 +1290,7 @@ class TestInjectMessageWakesAnIdleRoom(unittest.IsolatedAsyncioTestCase):
         sm._connector.room_ref_by_id = AsyncMock(return_value=RoomRef(
             id="room-1", kind=RoomKind.CHANNEL, name="eng-backend"))
 
-        with self.assertLogs("agent-chat-gateway.core.session_manager",
+        with self.assertLogs("coop.core.session_manager",
                              level=logging.WARNING) as logs:
             result = await sm.inject_message("room-1", "hello")
 
@@ -1321,7 +1321,7 @@ class TestAJobWithNoResolvableRoomIsNotFired(unittest.TestCase):
         sm.resolve_handle = MagicMock(return_value="")
         job = ScheduledJob(watcher="rc:general", connector="rc")   # no room_id
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING") as log_ctx:
+        with self.assertLogs("coop.core.scheduler", "WARNING") as log_ctx:
             target = self._scheduler(sm)._resolve_target(job)
 
         self.assertIsNone(target, "an unaddressable job must not be fired")
@@ -1335,7 +1335,7 @@ class TestAJobWithNoResolvableRoomIsNotFired(unittest.TestCase):
         sm.resolve_handle = MagicMock(return_value="")
         job = ScheduledJob(watcher="rc:general", connector="rc")
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING") as log_ctx:
+        with self.assertLogs("coop.core.scheduler", "WARNING") as log_ctx:
             self._scheduler(sm)._resolve_target(job)
 
         self.assertTrue([r for r in log_ctx.output if "schedule migrate" in r])
@@ -1362,7 +1362,7 @@ class TestAJobWithNoResolvableRoomIsNotFired(unittest.TestCase):
 
 
 class TestInjectMessageTimestampFormat(unittest.IsolatedAsyncioTestCase):
-    """agent-chat-gateway#53: scheduler-injected messages must carry a
+    """AgentCoop#53: scheduler-injected messages must carry a
     timestamp RocketChatConnector.format_prompt_prefix() can actually parse
     into ts:/day: — otherwise scheduled tasks (e.g. stock reports) never see
     a day-of-week hint and can misjudge weekday vs. weekend."""
@@ -1449,7 +1449,7 @@ class TestInjectionResolvesOnceAndReportsFailure(unittest.IsolatedAsyncioTestCas
         owner.inject_message = AsyncMock(side_effect=RuntimeError("backend down"))
         scheduler = self._scheduler({"rc-home": owner})
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR") as logs:
+        with self.assertLogs("coop.core.scheduler", "ERROR") as logs:
             delivered = await scheduler._inject(_make_job(), scheduler._resolve_target(_make_job()))
 
         self.assertFalse(delivered)
@@ -1487,7 +1487,7 @@ class TestInjectionResolvesOnceAndReportsFailure(unittest.IsolatedAsyncioTestCas
         stranger.resolve_handle = MagicMock(return_value="")   # never heard of it
         scheduler = self._scheduler({"mm-eng": stranger})
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING") as logs:
+        with self.assertLogs("coop.core.scheduler", "WARNING") as logs:
             delivered = await scheduler._inject(_make_job(connector="gone"), scheduler._resolve_target(_make_job(connector="gone")))
 
         self.assertFalse(delivered)
@@ -1517,7 +1517,7 @@ class TestTheManagerIsFoundByRoomBeforeByHandle(unittest.TestCase):
         job = ScheduledJob(
             watcher="gone:general", connector="retired", room_id="room-mm")
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR"):
+        with self.assertLogs("coop.core.scheduler", "ERROR"):
             self.assertIsNone(_manager_of(scheduler._resolve_target(job)))
 
     def test_the_named_connector_still_wins_when_it_is_configured(self):
@@ -1569,7 +1569,7 @@ class TestAnAmbiguousRoomIsRefusedRatherThanGuessed(unittest.TestCase):
             "alice-bot": _make_sm_mock(room_id="room-shared"),
         })
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR") as cm:
+        with self.assertLogs("coop.core.scheduler", "ERROR") as cm:
             _manager_of(scheduler._resolve_target(self._job()))
 
         logged = "\n".join(cm.output)
@@ -1587,7 +1587,7 @@ class TestAnAmbiguousRoomIsRefusedRatherThanGuessed(unittest.TestCase):
         other = _make_sm_mock(room_id="room-elsewhere")
         scheduler = self._scheduler({"bob": other, "alice-bot": survivor})
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR") as cm:
+        with self.assertLogs("coop.core.scheduler", "ERROR") as cm:
             target = scheduler._resolve_target(self._job())
 
         self.assertIsNone(_manager_of(target))
@@ -1618,7 +1618,7 @@ class TestAnAmbiguousRoomIsRefusedRatherThanGuessed(unittest.TestCase):
         job = ScheduledJob(
             watcher="gone:general", connector="retired", room_id="room-nobody")
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING"):
+        with self.assertLogs("coop.core.scheduler", "WARNING"):
             self.assertIsNone(scheduler._resolve_target(job))
         rc.resolve_handle.assert_not_called()
 
@@ -1631,7 +1631,7 @@ class TestAnAmbiguousRoomIsRefusedRatherThanGuessed(unittest.TestCase):
         scheduler = self._scheduler({"rc": rc})
         job = ScheduledJob(watcher="gone:general", connector="retired")  # no id either
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING"):
+        with self.assertLogs("coop.core.scheduler", "WARNING"):
             self.assertIsNone(scheduler._resolve_target(job))
 
 
@@ -1711,7 +1711,7 @@ class TestAJobWhoseConnectorIsGoneIsCancelled(unittest.IsolatedAsyncioTestCase):
         store, scheduler, job = self._store_and_scheduler(
             {"bob": survivor}, connector="retired", room_id="R-shared")
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "WARNING") as cm:
+        with self.assertLogs("coop.core.scheduler", "WARNING") as cm:
             await scheduler._fire_due_jobs()
 
         kept = store.get(job.id)
@@ -1776,7 +1776,7 @@ class TestOneBadJobCannotKillTheScheduler(unittest.IsolatedAsyncioTestCase):
             cron="* * * * *", last_run=earlier, last_attempted_at=earlier)
         store.cancel = MagicMock(side_effect=OSError("disk full"))
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR"):
+        with self.assertLogs("coop.core.scheduler", "ERROR"):
             await scheduler._catch_up_missed()   # must not raise
 
         self.assertEqual(store.get(job.id).status, JobStatus.ACTIVE, "left for the next slot")
@@ -1786,7 +1786,7 @@ class TestOneBadJobCannotKillTheScheduler(unittest.IsolatedAsyncioTestCase):
             {"rc-home": _make_sm_mock(room_id="R")}, connector="rc-home", room_id="R",
             cron="not a cron", last_run=(datetime.now(UTC) - timedelta(hours=1)).isoformat())
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR"):
+        with self.assertLogs("coop.core.scheduler", "ERROR"):
             await scheduler._catch_up_missed()   # must not raise
 
     async def test_a_failing_purge_does_not_cost_the_ticks_fires(self):
@@ -1794,7 +1794,7 @@ class TestOneBadJobCannotKillTheScheduler(unittest.IsolatedAsyncioTestCase):
             {"rc-home": _make_sm_mock(room_id="R")}, connector="rc-home", room_id="R")
         store.remove_expired_completed = MagicMock(side_effect=OSError("read-only"))
 
-        with self.assertLogs("agent-chat-gateway.core.scheduler", "ERROR"):
+        with self.assertLogs("coop.core.scheduler", "ERROR"):
             await scheduler._tick()
 
         self.assertEqual(store.get(job.id).run_count, 1, "the job still fired")

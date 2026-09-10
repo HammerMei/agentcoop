@@ -88,7 +88,7 @@ class TestAttachmentWorkspaceSetup(unittest.TestCase):
         acg.mkdir()
         (acg / "ROOMKEY").mkdir()
         with self.assertLogs(
-            "agent-chat-gateway.core.attachment_workspace", level="WARNING"
+            "coop.core.attachment_workspace", level="WARNING"
         ) as logs:
             self.workspace.setup("ROOMKEY", "room1", str(self.work))
         self.assertTrue(

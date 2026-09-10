@@ -1,4 +1,4 @@
-"""Interactive setup wizard for agent-chat-gateway."""
+"""Interactive setup wizard for AgentCoop."""
 
 import json
 import shutil
@@ -12,7 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+from .paths import RUNTIME_DIR
+
 CONFIG_FILE = RUNTIME_DIR / "config.yaml"
 ENV_FILE = RUNTIME_DIR / ".env"
 META_FILE = RUNTIME_DIR / "install_meta.json"
@@ -185,12 +186,12 @@ def install_opencode_plugin(
     repo_path: Path | None = None,
     global_opencode_dir: Path | None = None,
 ) -> Path:
-    """Install the ACG role-enforcement plugin into the global opencode config dir.
+    """Install the AgentCoop role-enforcement plugin into the global opencode config dir.
 
     The plugin is installed at the **global** level (``~/.opencode/``) rather
     than inside a specific project directory.  This means it is available for
     every opencode session regardless of working directory, while remaining
-    completely inert when ``ACG_ROLE`` is not set (i.e. normal CLI / web-UI use).
+    completely inert when ``COOP_ROLE`` is not set (i.e. normal CLI / web-UI use).
 
     Installation layout::
 
@@ -202,7 +203,7 @@ def install_opencode_plugin(
     current working directory.
 
     Args:
-        repo_path: Path to the ACG repo root.  Used as a fallback when the plugin
+        repo_path: Path to the AgentCoop repo root.  Used as a fallback when the plugin
             source cannot be found next to this module file (editable install vs
             installed wheel).  Pass ``None`` to rely solely on the module-relative
             path.
@@ -224,7 +225,7 @@ def install_opencode_plugin(
     if not plugin_src.exists():
         raise FileNotFoundError(
             f"opencode plugin source not found: {plugin_src}. "
-            "Make sure you are running from the ACG repository."
+            "Make sure you are running from the AgentCoop repository."
         )
 
     # Install into global opencode dir.
@@ -352,7 +353,7 @@ def _step_opencode_working_dir() -> Path:
     console.print("\n[bold cyan]Step 3b:[/bold cyan] opencode working directory")
     console.print(
         "  opencode runs inside a project directory where it reads its config\n"
-        "  and the ACG role-enforcement plugin will be installed.\n"
+        "  and the AgentCoop role-enforcement plugin will be installed.\n"
         "  Use the directory that contains (or will contain) your project code."
     )
     while True:
@@ -451,8 +452,8 @@ def run_onboard(repo_path: Path | None = None) -> None:
     """Entry point called by CLI. repo_path is stored in install_meta.json."""
     console.print(
         Panel(
-            "[bold]agent-chat-gateway[/bold] setup wizard\n"
-            "This will create your config at [dim]~/.agent-chat-gateway/[/dim]",
+            "[bold]AgentCoop[/bold] setup wizard\n"
+            "This will create your config at [dim]~/.agentcoop/[/dim]",
             title="Welcome",
             border_style="cyan",
         )
@@ -472,7 +473,7 @@ def run_onboard(repo_path: Path | None = None) -> None:
     # it regardless of backend). opencode additionally needs it to find
     # .opencode/opencode.json and the role-enforcement plugin, so it gets an
     # explicit interactive step; claude just needs a cwd to run in, so it
-    # defaults quietly to ~/.agent-chat-gateway/work (created if missing).
+    # defaults quietly to ~/.agentcoop/work (created if missing).
     if agent_type == "opencode":
         working_dir = _step_opencode_working_dir()
     else:
@@ -528,15 +529,15 @@ def run_onboard(repo_path: Path | None = None) -> None:
         Panel(
             "[green]Setup complete![/green]\n\n"
             "Start the gateway:\n"
-            "  [bold]agent-chat-gateway start[/bold]\n\n"
+            "  [bold]coop start[/bold]\n\n"
             "Check status:\n"
-            "  [bold]agent-chat-gateway status[/bold]\n\n"
+            "  [bold]coop status[/bold]\n\n"
             "[dim]── Scheduling (optional) ──────────────────────────────[/dim]\n"
             "Your agent automatically receives the built-in context files\n"
             "(RC rules + scheduling commands) — no config needed.\n\n"
             "You can ask the agent to schedule tasks, or use the CLI:\n"
-            "  [bold]agent-chat-gateway schedule create WATCHER MSG --every 1d --at 09:00[/bold]\n"
-            "  [bold]agent-chat-gateway schedule list[/bold]\n\n"
+            "  [bold]coop schedule create WATCHER MSG --every 1d --at 09:00[/bold]\n"
+            "  [bold]coop schedule list[/bold]\n\n"
             "To set a timezone for scheduled tasks, add to your connector in config.yaml:\n"
             "  [dim]connectors:\n"
             "    - name: rc-main\n"

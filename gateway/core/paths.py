@@ -34,7 +34,7 @@ import logging
 import shutil
 from pathlib import Path
 
-logger = logging.getLogger("agent-chat-gateway.core.paths")
+logger = logging.getLogger("coop.core.paths")
 
 # Hex characters kept from the digest. 32 is 128 bits — far past what collision
 # resistance needs for a per-installation room count, and short enough to stay readable

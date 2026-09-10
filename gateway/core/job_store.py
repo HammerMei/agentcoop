@@ -6,7 +6,7 @@ via the control socket rather than writing directly.
 
 Storage format
 --------------
-  ~/.agent-chat-gateway/data/jobs.json
+  ~/.agentcoop/data/jobs.json
 
   {
     "version": 1,
@@ -32,11 +32,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import get_ident as _thread_ident
 
+from ..paths import RUNTIME_DIR
 from ..schedule_types import JobStatus, ScheduledJob
 
-logger = logging.getLogger("agent-chat-gateway.core.job_store")
+logger = logging.getLogger("coop.core.job_store")
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+
 DATA_DIR = RUNTIME_DIR / "data"
 JOBS_FILE = DATA_DIR / "jobs.json"
 # Bump when a change to jobs.json needs an operator step. Written on every
@@ -45,7 +46,7 @@ JOBS_FILE = DATA_DIR / "jobs.json"
 #
 #   1 → 2  each job records the room it targets (`room_id`), so it survives a
 #          room rename and an `expire`. Filled in by
-#          `agent-chat-gateway schedule migrate`.
+#          `coop schedule migrate`.
 _SCHEMA_VERSION = 2
 
 
@@ -111,8 +112,8 @@ class JobStore:
         """The schema version the loaded file declared.
 
         `_SCHEMA_VERSION` for a file this code wrote or for no file at all
-        (nothing to migrate), lower for one an older ACG wrote, and HIGHER for
-        one a newer ACG wrote — that direction is not an error here; it is what
+        (nothing to migrate), lower for one an older AgentCoop wrote, and HIGHER for
+        one a newer AgentCoop wrote — that direction is not an error here; it is what
         `_announce_version` warns about and what `migrate` refuses.
 
         It is what the file said when it was LOADED. A save does not move it (see
@@ -187,21 +188,21 @@ class JobStore:
         a migration nobody runs.
 
         A file NEWER than this code is the more dangerous direction and gets a
-        warning of its own: an older ACG reading it will drop whatever fields it
+        warning of its own: an older AgentCoop reading it will drop whatever fields it
         does not know on the next save.
         """
         if self._file_version > _SCHEMA_VERSION:
             logger.warning(
-                "%s declares schema version %d but this ACG understands %d — it "
+                "%s declares schema version %d but this AgentCoop understands %d — it "
                 "was written by a newer version. Saving from here will DROP any "
                 "field this version does not know. Upgrade, or move the file "
                 "aside.", self._file, self._file_version, _SCHEMA_VERSION,
             )
         elif self._file_version < _SCHEMA_VERSION:
             logger.warning(
-                "%s is at schema version %d; this ACG uses %d. Scheduled jobs "
+                "%s is at schema version %d; this AgentCoop uses %d. Scheduled jobs "
                 "keep working, with the behaviour of the older version. Run "
-                "'agent-chat-gateway schedule migrate' to bring them up to date "
+                "'coop schedule migrate' to bring them up to date "
                 "— do it before renaming any rooms, since the migration reads "
                 "each job's watcher name to find its room.",
                 self._file, self._file_version, _SCHEMA_VERSION,
@@ -216,7 +217,7 @@ class JobStore:
                 "%s declares schema version %d, but at least one scheduled job "
                 "has no recorded room. Such a job cannot bring its watcher back "
                 "once the room's record is reclaimed — it fails at every slot. "
-                "Run 'agent-chat-gateway schedule migrate' to record the rooms; "
+                "Run 'coop schedule migrate' to record the rooms; "
                 "it is safe to re-run.",
                 self._file, self._file_version,
             )
@@ -276,7 +277,7 @@ class JobStore:
             # * `self._file_version` stamps a NEWER file with its own version while
             #   writing content this code shaped — `to_dict` has already dropped the
             #   fields it does not know, so the file would claim a version whose
-            #   fields it no longer contains, and a future ACG would skip the
+            #   fields it no longer contains, and a future AgentCoop would skip the
             #   migrations that restore them.
             #
             # The floor is honest in both: never claim more than this code wrote, and

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .config import ToolRule
 
-logger = logging.getLogger("agent-chat-gateway.permissions.tool_match")
+logger = logging.getLogger("coop.permissions.tool_match")
 
 # Maps lowercase tool names to their primary parameter field in Claude's tool_input.
 _CLAUDE_PARAM_FIELD: dict[str, str] = {

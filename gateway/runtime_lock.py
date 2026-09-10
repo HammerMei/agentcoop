@@ -14,9 +14,9 @@ Why a separate module?
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+from .paths import RUNTIME_DIR
+
 LOCK_FILE = RUNTIME_DIR / "gateway.pid"
 
 

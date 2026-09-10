@@ -1,5 +1,8 @@
 # =============================================================================
-# ACG Docker Compose — example based on docker_env/ layout
+# AgentCoop Docker Compose — example based on docker_env/ layout
+#
+# INTERNAL TESTING ONLY. This setup exists for AgentCoop's E2E/CI runs and is
+# not a supported production install — use install.sh on the host instead.
 #
 # Directory structure:
 #   your-deploy-dir/
@@ -29,30 +32,30 @@
 # =============================================================================
 
 services:
-  acg:
-    image: ghcr.io/hammermei/agent-chat-gateway:latest
-    container_name: acg
+  coop:
+    image: ghcr.io/hammermei/agentcoop:latest
+    container_name: coop
     restart: unless-stopped
 
     volumes:
-      # ── ACG config ────────────────────────────────────────────────────────
+      # ── AgentCoop config ────────────────────────────────────────────────────────
       # config.yaml (RC credentials go directly in it — chmod 600) —
       # symlinked into runtime dir
-      - ./config:/root/.agent-chat-gateway/config
+      - ./config:/root/.agentcoop/config
 
       # ── Agent working directories ─────────────────────────────────────────
       # Files created by agents are visible locally under ./agents/
-      - ./agents:/root/.agent-chat-gateway/work
+      - ./agents:/root/.agentcoop/work
 
       # ── Context files ─────────────────────────────────────────────────────
       # Injected into every agent session. Defaults restored if empty.
-      - ./contexts:/root/.agent-chat-gateway/contexts
+      - ./contexts:/root/.agentcoop/contexts
 
       # ── Persistent runtime data ───────────────────────────────────────────
       # Survives container recreates (upgrades). Currently holds jobs.json
       # for scheduled jobs; add future persistent files here too.
       # Directory mount avoids the EBUSY issue of single-file bind-mounts.
-      - ./data:/root/.agent-chat-gateway/data
+      - ./data:/root/.agentcoop/data
 
       # ── OpenCode config (uncomment if using OpenCode backend) ─────────────
       # - ${HOME}/.config/opencode:/root/.config/opencode

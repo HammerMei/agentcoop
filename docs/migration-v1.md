@@ -1,4 +1,60 @@
-# Migrating to watcher rules (dynamic watchers)
+# Migrating to AgentCoop v1
+
+v1.0.0 is a clean break from the v0 line (agent-chat-gateway 0.x) in two ways,
+and both are handled by reinstalling rather than by migrating anything in place:
+
+1. **The product, command, environment variables and runtime directory are
+   renamed** — AgentCoop, `coop`, `COOP_*`, `~/.agentcoop`. Nothing in
+   `~/.agent-chat-gateway` is read by v1.
+2. **Watchers are rules, created per room at runtime** — `config.yaml` has to be
+   rewritten, not renamed. See *Migrating to watcher rules* below.
+
+There is no automatic migration for either. The v0 line stays installable:
+`v0.5.2` is its last release, and its install script and image keep working
+under the old names.
+
+## Removing an agent-chat-gateway (v0) installation
+
+Do this before installing v1, so the two do not both connect to your chat
+platform with the same bot account.
+
+```bash
+# 1. Stop the old daemon. If `agent-chat-gateway stop` only prints the rename
+#    notice (the install already pulled v1), stop it by its pid file instead:
+agent-chat-gateway stop || kill "$(cat ~/.agent-chat-gateway/gateway.pid)"
+
+# 2. Remove what the old installer created
+rm -rf ~/.agent-chat-gateway                         # repo clone, config, state, logs, jobs
+rm -f ~/.local/bin/agent-chat-gateway ~/.local/bin/acg-provision
+# If you cloned the repo yourself and ran install.sh from it, the clone is
+# wherever you put it (install_meta.json's repo_path) — remove or keep as you like.
+
+# 3. OpenCode only: the role-enforcement plugin the v0 wizard copied to
+#    ~/.opencode/plugins/ reads the OLD ACG_ROLE variable. With it in place,
+#    v1's owner sessions would get no approval prompts for write tools — silently.
+#    Remove it; the v1 wizard installs the new copy.
+rm -f ~/.opencode/plugins/role-enforcement.ts
+
+# 4. Install AgentCoop and run its setup wizard
+curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
+```
+
+Before step 2, keep whatever you want to carry over by hand: your old
+`config.yaml` (as a reference while rewriting it in the new shape), agent
+working directories, and any context files under `~/.agent-chat-gateway/contexts/`
+you had edited. Session state is not worth keeping — a v1 watcher starts a fresh
+agent session regardless.
+
+If a v0 install has already run `agent-chat-gateway upgrade` and pulled v1 code
+into its repo, the old command prints this same guidance and exits. To stay on
+v0 instead: `cd ~/.agent-chat-gateway/repo && git checkout v0.5.2 && uv sync`.
+
+Anything that read the old environment variables — hooks, scripts, an
+`opencode.json` — needs the new names: `COOP_ROLE`, `COOP_ALLOWED_TOOLS`,
+`COOP_APPROVAL_TOOLS`, `COOP_CONFIG`, `COOP_ADMIN_CONFIG`. The old `ACG_*`
+names are not set by v1.
+
+## Migrating to watcher rules (dynamic watchers)
 
 The static watcher shape — a `room:` key, or `rooms:` as a list — has been
 removed. `watcher_rules:` entries are now **rules**: they declare which rooms an
@@ -19,7 +75,7 @@ keys are: ... 'watcher_rules', 'watcher_templates'.
 
 Renaming the key is not the whole job, though — the entries under it changed
 shape as well, and a leftover `room:` inside one is reported the same way
-(`unknown key(s) 'room'`, with `rooms` in the list of valid keys). `agent-chat-gateway config
+(`unknown key(s) 'room'`, with `rooms` in the list of valid keys). `coop config
 validate` reports every entry that needs rewriting in one pass.
 
 **This is not a 1:1 rename.** Read *What changes underneath* before editing —
@@ -86,7 +142,7 @@ Field notes:
   a DM has no room name for a pattern to match. `direct: true` claims 1:1
   DMs (the connector's `owners`/`guests` lists still gate who can talk);
   `group_direct: true` claims multi-party DMs, where mentions are required.
-- Rules match top-down; the first rule that claims a room wins. `agent-chat-gateway config
+- Rules match top-down; the first rule that claims a room wins. `coop config
   validate` warns about rules an earlier rule shadows completely.
 - `session_id:` was removed separately and stays removed. To carry context
   into a new session, have the agent summarise the session to a file and list
@@ -109,7 +165,7 @@ Field notes:
    gateway was down across the upgrade boundary are not replayed.
 3. **Scheduled jobs name watchers.** Jobs targeting old static watcher names
    point at nothing after the prune — recreate them against the new derived
-   names (`agent-chat-gateway list` shows them once the rooms have spoken).
+   names (`coop list` shows them once the rooms have spoken).
 4. **A paused room becomes active** unless re-expressed. Pause acts on a
    record, and the static record is pruned. To keep the bot out of a room
    durably, put the room in the rule's `rooms.except_for:` — declarative, and
@@ -130,7 +186,7 @@ Field notes:
    and connector came first in the file, which is a binding nobody wrote down,
    and reordering those blocks silently re-pointed rules that relied on it.
 3. Rewrite each entry under it as a rule (above).
-4. `agent-chat-gateway config validate` — fix every error; read the shadowing warnings.
+4. `coop config validate` — fix every error; read the shadowing warnings.
 5. If any old session's content matters, export it via a summary file first.
 6. Restart the gateway. Expect one `Pruning static-era watcher record`
    log line per old record — that is the clean break, not a fault.
@@ -139,7 +195,7 @@ Field notes:
    removes the records, NOT the jobs, and an orphaned job re-fires forever
    against a watcher that no longer exists. Then recreate the jobs against
    the new watcher names.
-8. `agent-chat-gateway schedule migrate` — records the room each remaining job
+8. `coop schedule migrate` — records the room each remaining job
    targets, so a later room rename cannot orphan it. **Before you rename any
    rooms**: the migration finds a job's room through its watcher name. Step 7's
    recreated jobs already have it; this is for anything that survived.
@@ -155,7 +211,7 @@ not exist there — each watcher reads `failed`, loudly, until it expires.
 When you migrate servers, do one of:
 
 - **rename the connector** — the old `state.<name>.json` is then reported by
-  `agent-chat-gateway config validate` as belonging to no configured connector, and you can
+  `coop config validate` as belonging to no configured connector, and you can
   delete it deliberately; or
 - **delete the state file** for that connector before the first start against
   the new server.
@@ -188,7 +244,7 @@ If you want the clean name, expire the old record and let the room's next
 message recreate it:
 
 ```bash
-agent-chat-gateway expire 'mm-e2e:dm:%40test_user'   # quoted for legibility, not necessity
+coop expire 'mm-e2e:dm:%40test_user'   # quoted for legibility, not necessity
 ```
 
 Accepted losses, the same ones the rest of this document takes: the session is

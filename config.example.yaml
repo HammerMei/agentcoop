@@ -1,16 +1,16 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/gateway/schema/config.schema.json
-# agent-chat-gateway — example configuration
+# yaml-language-server: $schema=https://raw.githubusercontent.com/HammerMei/agentcoop/main/gateway/schema/config.schema.json
+# AgentCoop — example configuration
 # Copy this file to config.yaml and adjust to your setup.
 #
 # Secrets (passwords, tokens) go directly in this file as plain values below —
 # config.yaml is chmod'd 0600 automatically (by the config TUI on every save,
-# and by `agent-chat-gateway start`), so this is safe as long as you don't
+# and by `coop start`), so this is safe as long as you don't
 # commit your filled-in copy to version control.
 #
 # $VAR / ${VAR} is NOT expanded — a value that happens to look like one is
 # used exactly as written, like any other string. (If you're upgrading from
 # an older setup that used a `.env` file with $VAR references, the next
-# `agent-chat-gateway start` — or opening `agent-chat-gateway config` —
+# `coop start` — or opening `coop config` —
 # migrates those into literal values here automatically, one-time.)
 #
 # ── Format notes (v0.3+) ──────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ tool_presets:
 
 connectors:
   # ── Voice Gateway (Siri / iOS Shortcuts) ─────────────────────────────────
-  # Exposes a plain-text HTTP endpoint so any ACG-connected agent can be
+  # Exposes a plain-text HTTP endpoint so any AgentCoop-connected agent can be
   # reached via Siri. iOS Shortcut: Dictate → POST /ask → Speak Text.
   #
   # Security: set 'secret' to a strong random token and configure your router
@@ -81,7 +81,7 @@ connectors:
     attachments:
       max_file_size_mb: 10           # files larger than this are skipped (0 = no limit)
       download_timeout: 30           # seconds per file download
-      # cache_dir_global: ~/.agent-chat-gateway/attachments  # optional: override download cache location
+      # cache_dir_global: ~/.agentcoop/attachments  # optional: override download cache location
     reply_in_thread: false           # true = start a new thread for every top-level reply
     permission_reply_in_thread: true # false = post permission notifications at room level
 
@@ -89,7 +89,7 @@ connectors:
     # IANA timezone for this connector.  Used to format message timestamps in
     # the agent prompt header and as the default timezone for scheduled tasks
     # created against this connector's watchers.
-    # Falls back to the ACG server's local timezone when omitted.
+    # Falls back to the gateway's local timezone when omitted.
     # Examples: "America/Los_Angeles", "Asia/Taipei", "Europe/London", "UTC"
     # timezone: "America/Los_Angeles"
 
@@ -105,7 +105,7 @@ connectors:
     # filter_sender: true
 
     # ── Agent-to-agent loop protection ───────────────────────────────────────
-    # Enables controlled agent-to-agent communication when two ACG bots share a room.
+    # Enables controlled agent-to-agent communication when two AgentCoop bots share a room.
     # Without this, bots responding to each other create infinite loops.
     #
     # How it works (three layers):
@@ -125,7 +125,7 @@ connectors:
     #   - After ttl_seconds of inactivity (TTL GC)
     #
     # agent_chain:
-    #   agent_usernames:               # RC usernames of other ACG bots this bot may receive messages from
+    #   agent_usernames:               # RC usernames of other AgentCoop bots this bot may receive messages from
     #     - laomei-bot                 # messages from these senders bypass the allow-list check
     #     - xiaomei-bot                # and are tracked against their own per-sender turn budget
     #   max_turns: 5                   # max turns per agent per room/thread before force-drop (default: 5)
@@ -133,7 +133,7 @@ connectors:
 
     # Built-in context files are injected automatically — no config needed:
     #   contexts/rc-gateway-context.md  — RC message format, RBAC rules, injection protection
-    #   contexts/tool-index-context.md  — short index for lazy-loaded ACG instruction docs
+    #   contexts/tool-index-context.md  — short index for lazy-loaded AgentCoop instruction docs
     #   contexts/scheduling-context.md + fetch-history-context.md are injected instead
     #                                      when an agent sets lazy_instruction_loading: false
     #
@@ -147,7 +147,7 @@ agents:
   my-agent:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work  # required: directory where the agent runs and creates files
+    working_directory: ~/.agentcoop/work  # required: directory where the agent runs and creates files
     new_session_args: []             # extra flags passed only on session creation
                                      # e.g. ["--agent", "my-agent-name"] to load a custom agent
     session_prefix: agent-chat       # prefix added to Claude session titles
@@ -177,10 +177,10 @@ agents:
     owner_allowed_tools:
       # ── Built-in gateway commands (auto-included — no config needed) ────
       # These are ALWAYS auto-approved for owners, regardless of what you list here:
-      #   agent-chat-gateway send ...      — send messages / attach files to RC rooms
-      #   agent-chat-gateway schedule ...  — create/list/delete/pause/resume scheduled jobs
-      #   agent-chat-gateway fetch-history ... — read filtered channel history
-      #   agent-chat-gateway instructions ...  — read bundled tool instructions
+      #   coop send ...      — send messages / attach files to RC rooms
+      #   coop schedule ...  — create/list/delete/pause/resume scheduled jobs
+      #   coop fetch-history ... — read filtered channel history
+      #   coop instructions ...  — read bundled tool instructions
 
       # ── Read-only built-in tools: preset defined above, safe, never need approval ──
       - readonly-builtins
@@ -217,7 +217,7 @@ agents:
         params: "https?://[^/]*\\.wikipedia\\.org/.*"  # guests: Wikipedia only
       - tool: "mcp__rocketchat__get_.*"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"     # agent-initiated file/message send to RC
+        params: "coop\\s+send\\s+.*"     # agent-initiated file/message send to RC
 
     timeout: 360                     # seconds to wait for agent response; must be > permissions.timeout
     permissions:
@@ -253,13 +253,13 @@ agents:
   #     - tool: "webfetch"
   #       params: "https?://[^/]*\\.github\\.com/.*"
   #     - tool: "bash"
-  #       params: "agent-chat-gateway\\s+send\\s+.*"  # agent-initiated file/message send to RC
+  #       params: "coop\\s+send\\s+.*"  # agent-initiated file/message send to RC
   #   guest_allowed_tools:
   #     - tool: "read"
   #     - tool: "glob"
   #     - tool: "grep"
   #     - tool: "bash"
-  #       params: "agent-chat-gateway\\s+send\\s+.*"  # agent-initiated file/message send to RC
+  #       params: "coop\\s+send\\s+.*"  # agent-initiated file/message send to RC
   #
   #   timeout: 360
   #   permissions:
@@ -277,11 +277,11 @@ watcher_rules:
   # a further `session_expire_days`.
   #
   # CLI controls:
-  #   agent-chat-gateway list                  — show watcher records and their state
-  #   agent-chat-gateway pause  <watcher-name> — stop processing messages temporarily
-  #   agent-chat-gateway resume <watcher-name> — re-enable a paused watcher
-  #   agent-chat-gateway reset  <watcher-name> — clear runtime state, start a fresh session
-  #   agent-chat-gateway expire <watcher-name> — reclaim a room's record and session now
+  #   coop list                  — show watcher records and their state
+  #   coop pause  <watcher-name> — stop processing messages temporarily
+  #   coop resume <watcher-name> — re-enable a paused watcher
+  #   coop reset  <watcher-name> — clear runtime state, start a fresh session
+  #   coop expire <watcher-name> — reclaim a room's record and session now
   #
   # name (required):
   #   The RULE's identity — rules are not auto-named. Each created watcher gets
@@ -348,7 +348,7 @@ watcher_rules:
 #   standard:
 #     type: claude
 #     command: claude
-#     working_directory: ~/.agent-chat-gateway/work
+#     working_directory: ~/.agentcoop/work
 #     owner_allowed_tools: [readonly-builtins]
 #     permissions: {enabled: true, timeout: 300}
 #
@@ -399,22 +399,22 @@ watcher_rules:
 # so this entire section can be omitted if you do not use scheduling.
 #
 # CLI usage:
-#   agent-chat-gateway schedule create WATCHER MESSAGE --every 1d --at 09:00
-#   agent-chat-gateway schedule list
-#   agent-chat-gateway schedule delete JOB_ID
-#   agent-chat-gateway schedule pause JOB_ID
-#   agent-chat-gateway schedule resume JOB_ID
+#   coop schedule create WATCHER MESSAGE --every 1d --at 09:00
+#   coop schedule list
+#   coop schedule delete JOB_ID
+#   coop schedule pause JOB_ID
+#   coop schedule resume JOB_ID
 #
-# Jobs are stored in ~/.agent-chat-gateway/data/jobs.json.
+# Jobs are stored in ~/.agentcoop/data/jobs.json.
 # The daemon must be running for schedule commands to work (they use the control socket).
 
 # scheduler:
 #   completed_job_ttl_days: 7         # How long completed jobs are kept in data/jobs.json before purge.
 #                                     # 0 = delete immediately when a job completes.
-#                                     # Use "agent-chat-gateway schedule list --all" to see
+#                                     # Use "coop schedule list --all" to see
 #                                     # completed jobs. (The installed command is
-#                                     # `agent-chat-gateway`; there is no `acg` binary.)
+#                                     # `coop`; there is no `acg` binary.)
 #
 # Note: timezone is now configured per-connector (see "timezone:" under each connector above).
 # When --tz is not supplied to "schedule create", the watcher's connector timezone is used,
-# falling back to the ACG server's local timezone.
+# falling back to the gateway's local timezone.

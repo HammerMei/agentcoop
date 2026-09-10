@@ -1,4 +1,4 @@
-"""CLI entry point for agent-chat-gateway."""
+"""CLI entry point for AgentCoop."""
 
 import argparse
 import asyncio
@@ -9,19 +9,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-RUNTIME_DIR = Path.home() / ".agent-chat-gateway"
+from .paths import RUNTIME_DIR
+
 CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 
-# Default config: check ACG_CONFIG env var first, then ~/.agent-chat-gateway/config.yaml.
-DEFAULT_CONFIG = os.environ.get(
-    "ACG_CONFIG",
-    str(Path.home() / ".agent-chat-gateway" / "config.yaml"),
-)
+# Default config: the COOP_CONFIG env var first, then ~/.agentcoop/config.yaml.
+DEFAULT_CONFIG = os.environ.get("COOP_CONFIG", str(RUNTIME_DIR / "config.yaml"))
 
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="agent-chat-gateway",
+        prog="coop",
         description="Standalone service bridging Rocket.Chat rooms to agent sessions",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
@@ -30,7 +28,7 @@ def main():
     start_p = sub.add_parser("start", help="Start the gateway service")
     start_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
 
     # stop
@@ -40,7 +38,7 @@ def main():
     restart_p = sub.add_parser("restart", help="Restart the gateway service")
     restart_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
 
     # status
@@ -138,11 +136,11 @@ def main():
     onboard_p.add_argument(
         "--repo-path",
         default=None,
-        help="Path to the ACG repo (stored in install metadata)",
+        help="Path to the AgentCoop repo (stored in install metadata)",
     )
 
     # upgrade
-    sub.add_parser("upgrade", help="Upgrade ACG to the latest version")
+    sub.add_parser("upgrade", help="Upgrade AgentCoop to the latest version")
 
     # send
     send_p = sub.add_parser("send", help="Send a message to a room")
@@ -174,7 +172,7 @@ def main():
         help="Fetch channel history on-demand (for agent mid-session use)",
     )
     fh_p.add_argument("--watcher", required=True, metavar="NAME",
-                      help="Watcher name (from ACG Session Identity context)")
+                      help="Watcher name (from Coop Session Identity context)")
     fh_p.add_argument("--count", type=int, default=50, metavar="N",
                       help="Max messages to fetch (default: 50; server cap: max_fetch_count)")
     fh_p.add_argument("--before", default=None, metavar="TS",
@@ -187,7 +185,7 @@ def main():
     # instructions
     instructions_p = sub.add_parser(
         "instructions",
-        help="Print bundled ACG instruction docs by name",
+        help="Print bundled AgentCoop instruction docs by name",
     )
     instructions_p.add_argument(
         "name",
@@ -212,7 +210,7 @@ def main():
     # was fixed for --config only, missed here, then caught in review.)
     config_p.add_argument(
         "--config", dest="config_path_for_tui", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
     config_p.add_argument(
         "--lint", dest="lint_for_tui", action="store_true",
@@ -227,7 +225,7 @@ def main():
     )
     config_validate_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
     config_validate_p.add_argument(
         "--lint", action="store_true",
@@ -246,7 +244,7 @@ def main():
     )
     config_reload_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
     config_reload_p.add_argument(
         "--dry-run", action="store_true",
@@ -265,7 +263,7 @@ def main():
     )
     config_show_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
     config_show_p.add_argument(
         "--json", action="store_true",
@@ -278,7 +276,7 @@ def main():
     )
     config_migrate_env_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $ACG_CONFIG or ~/.agent-chat-gateway/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
     )
 
     # schedule (sub-subcommands)
@@ -873,7 +871,7 @@ def _run_config_reload(args) -> None:
         plan.dry_run = False
         plan.error = ("the daemon is not running, so there is nothing to apply to — the plan "
                       "above is what the next start executes. Start it with: "
-                      "agent-chat-gateway start")
+                      "coop start")
         if args.json:
             # Refused, with the plan body kept: `ok: false` plus `changes` and
             # `watchers` is what text mode shows too (plan, then the error).
@@ -945,7 +943,7 @@ def _run_config_show(args) -> None:
             print(f"Active:  {active['digest']} (loaded {active['loaded_at']})")
             if not in_sync:
                 print("⚠ The running daemon's configuration differs from the file — "
-                      "run 'agent-chat-gateway config reload' to apply it.")
+                      "run 'coop config reload' to apply it.")
         print()
         for path, value in flatten_config(config):
             print(f"{path}: {value}")
@@ -1098,7 +1096,7 @@ def _run_schedule(args) -> None:
     """Handle 'schedule' subcommands."""
     if not hasattr(args, "schedule_cmd") or not args.schedule_cmd:
         print(
-            "Usage: agent-chat-gateway schedule "
+            "Usage: coop schedule "
             "{create,list,delete,pause,resume,migrate}"
         )
         sys.exit(1)
@@ -1832,7 +1830,7 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
 
     running, pid = is_running()
     if not running:
-        print("Error: Gateway is not running. Start it with: agent-chat-gateway start", file=sys.stderr)
+        print("Error: Gateway is not running. Start it with: coop start", file=sys.stderr)
         sys.exit(1)
 
     if not CONTROL_SOCK.exists():
@@ -1848,7 +1846,7 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
         # the daemon took the request and may well still be working on it
         # (a long reload). Neither "nothing changed" nor "done": exit 2.
         print(f"[ERROR] No response from the daemon within {timeout:.0f}s (pid={pid}). "
-              f"It may still be working on the request — check 'agent-chat-gateway "
+              f"It may still be working on the request — check 'coop "
               f"status' and the log before running it again.", file=sys.stderr)
         sys.exit(2)
     except OSError as exc:

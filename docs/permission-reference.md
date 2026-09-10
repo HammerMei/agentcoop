@@ -1,6 +1,6 @@
 # Permission & RBAC Reference
 
-Comprehensive guide to the agent-chat-gateway's permission and RBAC system.
+Comprehensive guide to AgentCoop's permission and RBAC system.
 
 ## Overview
 
@@ -26,15 +26,15 @@ Roles are determined per session and passed via environment variables:
 
 | Role | Usage | Determined By |
 |------|-------|---------------|
-| OWNER | Full agent capabilities | `ACG_ROLE=owner` environment variable |
-| GUEST | Read-only tools only | `ACG_ROLE=guest` environment variable |
+| OWNER | Full agent capabilities | `COOP_ROLE=owner` environment variable |
+| GUEST | Read-only tools only | `COOP_ROLE=guest` environment variable |
 | ANONYMOUS | Not supported | (fallback if unmapped) |
 
 **Fail-closed default:** If a session has no role mapping, it defaults to **GUEST** (least privilege). This ensures that startup-order issues or state gaps never silently grant elevated permissions.
 
 ### Prompt Prefix Injection (Server-Trusted)
 
-The gateway injects role information into the agent's prompt via the `ACG_ROLE` environment variable. This is server-controlled and trusted:
+The gateway injects role information into the agent's prompt via the `COOP_ROLE` environment variable. This is server-controlled and trusted:
 
 - Claude Code and OpenCode both receive this via `gateway/core/message_processor.py`
 - The agent cannot override or spoof its role

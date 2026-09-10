@@ -407,7 +407,7 @@ class TestHistoryHandoffSentSeparatelyFromHeader(unittest.IsolatedAsyncioTestCas
         agent.ensure_durable_instructions.assert_awaited_once()
         sent_kwargs = agent.send.call_args.kwargs
         self.assertIn("hello", sent_kwargs["prompt"])
-        self.assertNotIn("ACG Session Identity", sent_kwargs["prompt"])
+        self.assertNotIn("Coop Session Identity", sent_kwargs["prompt"])
 
     async def test_no_history_means_agent_send_not_called(self):
         """When fetch_room_history returns no usable messages, agent.send()

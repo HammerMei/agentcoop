@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .config import MattermostConfig
     from .rest import MattermostREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.normalize")
+logger = logging.getLogger("coop.connectors.mattermost.normalize")
 
 
 def bare_handle(display: str) -> str:
@@ -136,7 +136,7 @@ class FilterResult:
     sender: str = ""
     msg_ts: str = ""
     reason: str = ""  # debug only
-    is_agent_chain: bool = False   # True when sender is a known ACG agent
+    is_agent_chain: bool = False   # True when sender is a known AgentCoop agent
     agent_chain_turn: int = 0      # current turn (1-based, after increment)
     # Names the increment rather than counting it — the same field, for the same reason,
     # as the Rocket.Chat result. `agent_chain_turn` is the live count and moves in both

@@ -11,7 +11,7 @@ import logging
 from .connector import Connector
 from .state import WatcherState, load_state, save_state
 
-logger = logging.getLogger("agent-chat-gateway.core.state_store")
+logger = logging.getLogger("coop.core.state_store")
 
 
 class StateStore:

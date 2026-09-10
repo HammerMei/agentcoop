@@ -243,11 +243,11 @@ class TestAgentTurnRunner(unittest.IsolatedAsyncioTestCase):
             room_id="room_1",
             thread_id=None,
             file_paths=["/tmp/a.txt"],
-            role_env={"ACG_ROLE": "owner"},
+            role_env={"COOP_ROLE": "owner"},
         )
 
         self.assertEqual(captured.get("attachments"), ["/tmp/a.txt"])
-        self.assertEqual(captured.get("env"), {"ACG_ROLE": "owner"})
+        self.assertEqual(captured.get("env"), {"COOP_ROLE": "owner"})
 
     async def test_connector_send_failure_logged_not_recursive(self):
         """Connector send_text failure is logged, not recursively retried."""
@@ -754,7 +754,7 @@ class TestAScheduledTurnThatFallsSilentIsLoud(unittest.IsolatedAsyncioTestCase):
 
         runner, connector = _make_runner(_MockAgent(AgentResponse(text=AGENT_CHAIN_TERMINATION_TOKEN)))
 
-        with self.assertLogs("agent-chat-gateway.core.turn_runner", "WARNING") as logs:
+        with self.assertLogs("coop.core.turn_runner", "WARNING") as logs:
             terminated = await self._run(runner, is_scheduled=True)
 
         self.assertFalse(terminated, "not an agent chain — the caller's accounting is unchanged")
@@ -773,7 +773,7 @@ class TestAScheduledTurnThatFallsSilentIsLoud(unittest.IsolatedAsyncioTestCase):
 
         runner, connector = _make_runner(_MockAgent(AgentResponse(text=AGENT_CHAIN_TERMINATION_TOKEN)))
 
-        with self.assertLogs("agent-chat-gateway.core.turn_runner", "INFO") as logs:
+        with self.assertLogs("coop.core.turn_runner", "INFO") as logs:
             await self._run(runner, is_scheduled=False)
 
         self.assertFalse([r for r in logs.records if r.levelno >= logging.WARNING], logs.output)
@@ -789,7 +789,7 @@ class TestAScheduledTurnThatFallsSilentIsLoud(unittest.IsolatedAsyncioTestCase):
         runner, connector = _make_runner(
             _MockAgent(AgentResponse(text=f"CPU cooler: keeps the chip alive.\n\n{AGENT_CHAIN_TERMINATION_TOKEN}")))
 
-        with self.assertLogs("agent-chat-gateway.core.turn_runner", "INFO") as logs:
+        with self.assertLogs("coop.core.turn_runner", "INFO") as logs:
             await self._run(runner, is_scheduled=True)
 
         self.assertFalse([r for r in logs.records if r.levelno >= logging.WARNING], logs.output)

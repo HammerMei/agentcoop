@@ -662,7 +662,7 @@ class TestReconnectRestoresTheStream(unittest.IsolatedAsyncioTestCase):
         client.subscribe_all = AsyncMock(return_value=False)
         client._subscribe_with_confirmation = AsyncMock(return_value="sub-1")
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await client._recover("Reconnect", try_stream=True)
 
 
@@ -683,7 +683,7 @@ class TestStreamIntentSurvivesFailure(unittest.IsolatedAsyncioTestCase):
         client._subscribe_with_confirmation = AsyncMock(return_value="s")
         client.subscribe_all = AsyncMock(return_value=False)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await client._recover("Reconnect", try_stream=True)
         self.assertTrue(client._wants_stream, "intent must outlive a failed attempt")
 
@@ -737,7 +737,7 @@ class TestStreamIntentSurvivesFailure(unittest.IsolatedAsyncioTestCase):
         client.subscribe_all = AsyncMock(return_value=False)
         client._subscribe_with_confirmation = AsyncMock(return_value="s")
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await client._recover("Reconnect", try_stream=True)
 
         client._subscribe_with_confirmation.assert_awaited()
@@ -850,7 +850,7 @@ class TestTheStreamIsLostWhileTheSocketStaysUp(unittest.IsolatedAsyncioTestCase)
         client = self._connected_client()
         client._callbacks = {"r1": AsyncMock(), "r2": AsyncMock()}
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             sent = await self._feed(
                 client, {"msg": "nosub", "id": "stream-1", "error": {"message": "gone"}}
             )
@@ -866,7 +866,7 @@ class TestTheStreamIsLostWhileTheSocketStaysUp(unittest.IsolatedAsyncioTestCase)
 
     async def test_the_stream_stops_claiming_to_be_live(self):
         client = self._connected_client()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await self._feed(
                 client, {"msg": "nosub", "id": "stream-1", "error": {"message": "gone"}}
             )
@@ -877,7 +877,7 @@ class TestTheStreamIsLostWhileTheSocketStaysUp(unittest.IsolatedAsyncioTestCase)
 
     async def test_the_intent_to_have_a_stream_survives_losing_it(self):
         client = self._connected_client()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await self._feed(
                 client, {"msg": "nosub", "id": "stream-1", "error": {"message": "gone"}}
             )
@@ -899,7 +899,7 @@ class TestTheStreamIsLostWhileTheSocketStaysUp(unittest.IsolatedAsyncioTestCase)
         replayed = AsyncMock()
         client.register_reconnect_callback(replayed)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await self._feed(
                 client, {"msg": "nosub", "id": "stream-1", "error": {"message": "gone"}}
             )
@@ -1024,7 +1024,7 @@ class TestTheOutageBoundaryIsAnnouncedBeforeDeliveryReturns(unittest.IsolatedAsy
         replayed = AsyncMock()
         client.register_reconnect_callback(replayed)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "WARNING"):
             await client._recover("Reconnect", try_stream=True)
 
         replayed.assert_awaited_once()
@@ -1077,7 +1077,7 @@ class TestAWatcherAddedDuringTheRestoreIsNotDeliveredTwice(unittest.IsolatedAsyn
         client.subscribe_all = AsyncMock(return_value=False)
         client._subscribe_with_confirmation = AsyncMock(return_value="s")
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await client._recover("Reconnect", try_stream=True)
 
         client._subscribe_with_confirmation.assert_awaited()
@@ -1127,7 +1127,7 @@ class TestAConfirmationRevokedBeforeItTookEffect(unittest.IsolatedAsyncioTestCas
         return await task, client, sent
 
     async def test_a_stream_terminated_right_after_ready_is_not_recorded_as_live(self):
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "WARNING"):
             ok, client, _sent = await self._run([
                 lambda sid: {"msg": "ready", "subs": [sid]},
                 lambda sid: {"msg": "nosub", "id": sid, "error": {"message": "stopped"}},
@@ -1160,7 +1160,7 @@ class TestAConfirmationRevokedBeforeItTookEffect(unittest.IsolatedAsyncioTestCas
 
     async def test_a_later_attempt_is_not_poisoned_by_the_revoked_one(self):
         """The revocation is consumed by the attempt it belongs to."""
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "WARNING"):
             first, client, _ = await self._run([
                 lambda sid: {"msg": "ready", "subs": [sid]},
                 lambda sid: {"msg": "nosub", "id": sid, "error": {"message": "stopped"}},
@@ -1250,7 +1250,7 @@ class TestSharedStreamBookkeepingHasAnOwner(unittest.IsolatedAsyncioTestCase):
         client._pending_stream_sub_id = "newer-attempt"
         client._revoked_stream_sub_id = "newer-attempt"
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "WARNING"):
             self.assertFalse(await task)
 
         self.assertEqual(client._pending_stream_sub_id, "newer-attempt")
@@ -1405,7 +1405,7 @@ class TestTheStreamFallbackDoesNotRaceTheRecoveryItReplaces(unittest.IsolatedAsy
         client._recovery_task = displaced
         await first_replay_started.wait()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             client._on_stream_lost("server stopped it")
         fallback = client._recovery_task
 
@@ -1432,7 +1432,7 @@ class TestTheStreamFallbackDoesNotRaceTheRecoveryItReplaces(unittest.IsolatedAsy
         replayed = AsyncMock()
         client.register_reconnect_callback(replayed)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             client._on_stream_lost("server stopped it")
         await client._recovery_task
 
@@ -1449,7 +1449,7 @@ class TestTheStreamFallbackDoesNotRaceTheRecoveryItReplaces(unittest.IsolatedAsy
         await finished
         client._recovery_task = finished
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "ERROR"):
             client._on_stream_lost("server stopped it")
         await client._recovery_task
 
@@ -1505,7 +1505,7 @@ class TestOneRecoveryAtATime(unittest.IsolatedAsyncioTestCase):
         fut = client._pending_subs.get(sub_id)
         fut.set_result(True)                     # ...then the old confirmation lands
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat.ws", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat.ws", "WARNING"):
             self.assertFalse(await task)
 
         self.assertFalse(

@@ -1,6 +1,6 @@
 """ConfigToolApp — the config TUI's root Textual application.
 
-Reached via `agent-chat-gateway config` (gateway/cli.py's `_run_config`).
+Reached via `coop config` (gateway/cli.py's `_run_config`).
 See docs/design/config-tool.md for the full M1–M3 design; this is Phase 1:
 read-only overview + detail screens, plus the $EDITOR escape hatch.
 """
@@ -24,7 +24,7 @@ class ConfigToolApp(App):
     (`self.editable_config`), or `self.load_error` if the file doesn't
     currently parse."""
 
-    TITLE = "agent-chat-gateway config"
+    TITLE = "coop config"
 
     def __init__(self, config_path: str, lint: bool = False):
         super().__init__()
@@ -109,7 +109,7 @@ class ConfigToolApp(App):
     # ── Shared, non-action helpers (called from OverviewScreen's actions) ───
 
     def run_validate(self) -> ValidationResult:
-        """Run the exact same check `agent-chat-gateway config validate` uses — single
+        """Run the exact same check `coop config validate` uses — single
         source of truth for what "valid" means, per docs/design/config-tool.md."""
         return validate_config(self.config_path, lint=self.lint)
 

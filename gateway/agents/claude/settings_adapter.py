@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .adapter import ClaudeBackend
 
-logger = logging.getLogger("agent-chat-gateway.agents.claude.settings")
+logger = logging.getLogger("coop.agents.claude.settings")
 
 _HOST = "127.0.0.1"
 

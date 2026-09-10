@@ -2,14 +2,14 @@
 
 ## Overview
 
-The scheduler lets ACG proactively trigger tasks on a fixed cadence or at a specific time — without waiting for a human to send a message. You can use it to:
+The scheduler lets AgentCoop proactively trigger tasks on a fixed cadence or at a specific time — without waiting for a human to send a message. You can use it to:
 
 - Have the AI remind you of something in 5 minutes
 - Run a daily standup prompt every weekday morning
 - Send a weekly summary every Friday afternoon
 - Fire a one-shot task at a precise datetime, then forget it
 
-Jobs are owned by a watcher. When a job fires, ACG injects a message directly into that watcher's agent session — bypassing the normal self-message filter — and the agent responds as if a user sent the message.
+Jobs are owned by a watcher. When a job fires, AgentCoop injects a message directly into that watcher's agent session — bypassing the normal self-message filter — and the agent responds as if a user sent the message.
 
 The scheduler polls every 60 seconds, so jobs fire within one minute of their scheduled time.
 
@@ -17,14 +17,14 @@ The scheduler polls every 60 seconds, so jobs fire within one minute of their sc
 
 ## Teaching the Agent to Schedule
 
-No configuration is required. ACG automatically injects scheduling context into every agent session at startup via `contexts/scheduling-context.md`. The agent already knows how to run `agent-chat-gateway schedule create` commands.
+No configuration is required. AgentCoop automatically injects scheduling context into every agent session at startup via `contexts/scheduling-context.md`. The agent already knows how to run `coop schedule create` commands.
 
 **Example interaction:**
 
 > **You:** Remind me to review the deployment logs in 15 minutes.
 >
 > **Agent:** Sure! I'll set a reminder for 15 minutes from now.
-> *(runs: `agent-chat-gateway schedule create rc:general "Reminder: review the deployment logs" --every 15m --times 1`)*
+> *(runs: `coop schedule create rc:general "Reminder: review the deployment logs" --every 15m --times 1`)*
 >
 > **Agent:** Done — you'll get a reminder in 15 minutes. Job ID: `acg-3a7f1c90`.
 
@@ -37,7 +37,7 @@ The agent creates the job itself using the CLI. From your side, all you do is as
 ### Basic syntax
 
 ```bash
-agent-chat-gateway schedule create WATCHER MESSAGE [OPTIONS]
+coop schedule create WATCHER MESSAGE [OPTIONS]
 ```
 
 `WATCHER` is the name of the watcher (chat room binding) that will receive the injected message.
@@ -59,7 +59,7 @@ daemon logs a WARNING naming the room when that happens.
 | `--every INTERVAL` | Recurring interval: any `Nm` (1–59 minutes), any `Nh` (1–23 hours), `1d`, `1w` |
 | `--starting TIME` | Time anchor / start time. With `--every`: sets the first run and (for `1d`/`1w`) pins the cron time-of-day. Without `--every`: one-shot specific datetime. Accepts smart partial inputs: `"09:00"`, `"Apr 15 09:00"`, `"04-15 09:00"`, `"Mon 09:00"`, `"2026-05-01 09:00"`. |
 | `--times N` | Max number of runs. `0` means run forever (default). `1` means run once then mark completed. |
-| `--tz TIMEZONE` | IANA timezone, e.g. `"America/New_York"`, `"Europe/Berlin"`, `"UTC"`. The `--starting` time is interpreted in this timezone; if omitted, a `--starting` time is read in the ACG server's local timezone. The connector's `timezone` setting applies only to schedules with no `--starting`. Only relevant for daily/weekly schedules — omit for sub-hourly intervals. |
+| `--tz TIMEZONE` | IANA timezone, e.g. `"America/New_York"`, `"Europe/Berlin"`, `"UTC"`. The `--starting` time is interpreted in this timezone; if omitted, a `--starting` time is read in the gateway's local timezone. The connector's `timezone` setting applies only to schedules with no `--starting`. Only relevant for daily/weekly schedules — omit for sub-hourly intervals. |
 
 ### Smart date inference for `--starting`
 
@@ -73,31 +73,31 @@ You do **not** need to type full dates in most cases:
 | `"Mon 09:00"` | Next Monday at 09:00 |
 | `"2026-05-01 09:00"` | Explicit full datetime (for cross-year scheduling) |
 
-If the resolved time is already in the past, ACG prints a warning and automatically advances to the next sensible occurrence (tomorrow for `HH:MM`, next year for `MM-DD` or `Mon DD`, etc.).
+If the resolved time is already in the past, AgentCoop prints a warning and automatically advances to the next sensible occurrence (tomorrow for `HH:MM`, next year for `MM-DD` or `Mon DD`, etc.).
 
 ### Examples
 
 ```bash
 # One-shot reminder in 5 minutes
-agent-chat-gateway schedule create rc:general "Reminder: check the oven" --every 5m --times 1
+coop schedule create rc:general "Reminder: check the oven" --every 5m --times 1
 
 # Daily standup at 09:00 every day
-agent-chat-gateway schedule create rc:general "Run the daily standup" --every 1d --starting "09:00" --tz "Asia/Taipei"
+coop schedule create rc:general "Run the daily standup" --every 1d --starting "09:00" --tz "Asia/Taipei"
 
 # Weekly report every Friday — infer "this Friday" automatically
-agent-chat-gateway schedule create rc:ops "Generate weekly ops summary" --every 1w --starting "Fri 17:00" --tz "America/New_York"
+coop schedule create rc:ops "Generate weekly ops summary" --every 1w --starting "Fri 17:00" --tz "America/New_York"
 
 # One-shot at a specific datetime
-agent-chat-gateway schedule create rc:general "Review Q2 roadmap" --starting "2026-04-10 15:30" --tz "Asia/Taipei"
+coop schedule create rc:general "Review Q2 roadmap" --starting "2026-04-10 15:30" --tz "Asia/Taipei"
 
 # Health check every 30 minutes, forever
-agent-chat-gateway schedule create rc:ops "Check server health and report status" --every 30m
+coop schedule create rc:ops "Check server health and report status" --every 30m
 
 # Run exactly 3 times, every hour
-agent-chat-gateway schedule create rc:general "Hourly check-in" --every 1h --times 3
+coop schedule create rc:general "Hourly check-in" --every 1h --times 3
 
 # Start firing every minute, 5 times, beginning at 14:00
-agent-chat-gateway schedule create rc:general "Pulse check" --every 1m --times 5 --starting "14:00"
+coop schedule create rc:general "Pulse check" --every 1m --times 5 --starting "14:00"
 ```
 
 ---
@@ -109,7 +109,7 @@ agent-chat-gateway schedule create rc:general "Pulse check" --every 1m --times 5
 Use `--every` with `--times 1`. This fires once after the interval and then marks the job completed.
 
 ```bash
-agent-chat-gateway schedule create rc:general "Reminder: stand up and stretch" --every 15m --times 1
+coop schedule create rc:general "Reminder: stand up and stretch" --every 15m --times 1
 ```
 
 Or ask the agent directly:
@@ -118,21 +118,21 @@ Or ask the agent directly:
 ### Daily recurring task at a fixed time
 
 ```bash
-agent-chat-gateway schedule create rc:general "Good morning! Summarize yesterday's GitHub activity." \
+coop schedule create rc:general "Good morning! Summarize yesterday's GitHub activity." \
   --every 1d --starting "09:00" --tz "Asia/Taipei"
 ```
 
 ### Weekly report
 
 ```bash
-agent-chat-gateway schedule create rc:ops "Generate weekly infrastructure cost report and post summary." \
+coop schedule create rc:ops "Generate weekly infrastructure cost report and post summary." \
   --every 1w --starting "Fri 16:00" --tz "America/New_York"
 ```
 
 ### One-shot at a specific future datetime
 
 ```bash
-agent-chat-gateway schedule create rc:general "It's launch day — post the release announcement." \
+coop schedule create rc:general "It's launch day — post the release announcement." \
   --starting "2026-04-15 10:00" --tz "Europe/Berlin"
 ```
 
@@ -174,7 +174,7 @@ watcher_rules:
 ```
 
 ```bash
-agent-chat-gateway schedule create headless:cron "Check disk usage and log anything over 80%." --every 1h
+coop schedule create headless:cron "Check disk usage and log anything over 80%." --every 1h
 ```
 
 The watcher is `headless:cron` — connector name, colon, room — not the rule
@@ -195,7 +195,7 @@ a human sees it, bind the watcher to a real connector instead.
 ### List all jobs
 
 ```bash
-agent-chat-gateway schedule list
+coop schedule list
 ```
 
 Output:
@@ -213,19 +213,19 @@ acg-b8c2a409    rc:general            completed   * * * * *         1/1         
 ### Filter by connector
 
 ```bash
-agent-chat-gateway schedule list --connector rc-home
+coop schedule list --connector rc-home
 ```
 
 ### Show all jobs including completed
 
 ```bash
-agent-chat-gateway schedule list --all
+coop schedule list --all
 ```
 
 ### Pause a job
 
 ```bash
-agent-chat-gateway schedule pause acg-bb47e7f4
+coop schedule pause acg-bb47e7f4
 ```
 
 Paused jobs do not fire until resumed. The `NEXT RUN` column keeps the time the job would have fired; it is not consulted while paused.
@@ -262,13 +262,13 @@ it fails at every slot instead, logging each time:
 ### Resume a paused job
 
 ```bash
-agent-chat-gateway schedule resume acg-bb47e7f4
+coop schedule resume acg-bb47e7f4
 ```
 
 ### After upgrading: `schedule migrate`
 
 ```bash
-agent-chat-gateway schedule migrate
+coop schedule migrate
 ```
 
 Each job records the room it targets, so it keeps working when the room is
@@ -297,7 +297,7 @@ the jobs it fixed keep their room ids, and the ones it could not are unchanged.
 ### Delete a job
 
 ```bash
-agent-chat-gateway schedule delete acg-bb47e7f4
+coop schedule delete acg-bb47e7f4
 ```
 
 If the bot is **removed from a room**, that room's pending jobs are cancelled —
@@ -318,7 +318,7 @@ before the next slot and the job fires as before; `schedule resume` on the
 cancelled job while its connector is still absent only gets it cancelled again
 at the next slot.
 
-`agent-chat-gateway expire` does **not** cancel them. It clears a session and reclaims a
+`coop expire` does **not** cancel them. It clears a session and reclaims a
 record; it does not stop a rule watching the room (that is a rules edit, or
 removing the bot). So the room is still there, the job still records its id, and
 the job brings the watcher back on its next run.
@@ -331,7 +331,7 @@ Deletion is permanent. Completed jobs can also be deleted to clean up the list.
 
 ### Owners
 
-Owners have `agent-chat-gateway send`, `agent-chat-gateway schedule`, and `date` auto-approved. No configuration is needed. When the agent runs a schedule command on your behalf, it is never blocked waiting for your approval.
+Owners have `coop send`, `coop schedule`, and `date` auto-approved. No configuration is needed. When the agent runs a schedule command on your behalf, it is never blocked waiting for your approval.
 
 ### Guests
 
@@ -345,7 +345,7 @@ agents:
     guest_allowed_tools:
       # Let guests ask the agent to run schedule commands
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+schedule\\s+.*"
+        params: "coop\\s+schedule\\s+.*"
       # Let the agent use date to compute relative times (used in --starting values)
       - tool: "Bash"
         params: "date(\\s+.*)?"
@@ -359,12 +359,12 @@ Without these entries, the agent will pause and ask an owner to approve each `sc
 
 ## Catch-Up Behavior on Restart
 
-When ACG restarts (e.g., after a system reboot or a config change), any job that was due while the daemon was down is fired immediately on startup. This means:
+When AgentCoop restarts (e.g., after a system reboot or a config change), any job that was due while the daemon was down is fired immediately on startup. This means:
 
-- A daily job that was supposed to run at 09:00 while ACG was offline will fire as soon as ACG comes back up.
+- A daily job that was supposed to run at 09:00 while AgentCoop was offline will fire as soon as AgentCoop comes back up.
 - If multiple jobs were missed, all of them fire in sequence at startup.
 
-This is intentional — no missed reminders, no silent skips. If you want to avoid catch-up fires for a specific job, pause it before stopping ACG.
+This is intentional — no missed reminders, no silent skips. If you want to avoid catch-up fires for a specific job, pause it before stopping AgentCoop.
 
 ---
 
@@ -373,7 +373,7 @@ This is intentional — no missed reminders, no silent skips. If you want to avo
 All job state is persisted in:
 
 ```
-~/.agent-chat-gateway/data/jobs.json
+~/.agentcoop/data/jobs.json
 ```
 
 Each job record contains:
@@ -391,15 +391,15 @@ Each job record contains:
 | `status` | `active`, `paused`, `completed`, or `cancelled` |
 | `cancelled_at` / `cancel_reason` | Set when the gateway cancelled the job (bot removed from the room, connector gone from the config); cleared by `schedule resume` |
 
-You can inspect or back up `data/jobs.json` directly. Do not edit it while ACG is running — restart ACG after any manual edits.
+You can inspect or back up `data/jobs.json` directly. Do not edit it while AgentCoop is running — restart AgentCoop after any manual edits.
 
-> **Docker users:** mount `./data:/root/.agent-chat-gateway/data` as a directory volume to persist jobs across container recreates (upgrades).
+> **Docker users:** mount `./data:/root/.agentcoop/data` as a directory volume to persist jobs across container recreates (upgrades).
 
 ---
 
 ## Timezone Handling
 
-All times you specify with `--starting` are interpreted in the timezone given by `--tz`. If `--tz` is omitted, a `--starting` time is read in the **ACG server's local timezone**. The connector's `timezone` setting is used only for schedules with no `--starting` (a bare `--every 1d` fires at 09:00 in the connector's zone).
+All times you specify with `--starting` are interpreted in the timezone given by `--tz`. If `--tz` is omitted, a `--starting` time is read in the **AgentCoop server's local timezone**. The connector's `timezone` setting is used only for schedules with no `--starting` (a bare `--every 1d` fires at 09:00 in the connector's zone).
 
 Set a connector's default timezone in `config.yaml`:
 
@@ -413,10 +413,10 @@ connectors:
 
 ```bash
 # Fires at 09:00 Taipei time every day
-agent-chat-gateway schedule create rc:general "Morning briefing" --every 1d --starting "09:00" --tz "Asia/Taipei"
+coop schedule create rc:general "Morning briefing" --every 1d --starting "09:00" --tz "Asia/Taipei"
 
-# Fires at 09:00 in the ACG server's local timezone every day (no --tz)
-agent-chat-gateway schedule create rc:general "Morning briefing" --every 1d --starting "09:00"
+# Fires at 09:00 in the gateway's local timezone every day (no --tz)
+coop schedule create rc:general "Morning briefing" --every 1d --starting "09:00"
 ```
 
 `NEXT RUN` in `schedule list` is always displayed in UTC regardless of the job's configured timezone.

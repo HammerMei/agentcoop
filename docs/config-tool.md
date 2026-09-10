@@ -10,18 +10,18 @@ validated against a temp file before it ever touches your real
 ## Launching
 
 ```bash
-agent-chat-gateway config
+coop config
 ```
 
 ```bash
-# Edit a config file other than the default (~/.agent-chat-gateway/config.yaml
-# or $ACG_CONFIG)
-agent-chat-gateway config --config /path/to/config.yaml
+# Edit a config file other than the default (~/.agentcoop/config.yaml
+# or $COOP_CONFIG)
+coop config --config /path/to/config.yaml
 
 # Also flag values that just restate a built-in default, or duplicate a
 # value already inherited from a template — useful for cleaning up a config
 # that's grown noisy over time
-agent-chat-gateway config --lint
+coop config --lint
 ```
 
 Two related, non-interactive commands live under the same `config`
@@ -29,13 +29,13 @@ subcommand:
 
 ```bash
 # Validate config.yaml without starting the daemon or opening the TUI
-agent-chat-gateway config validate [--lint]
+coop config validate [--lint]
 
 # One-time: fold .env secrets into config.yaml as literal values, then
 # remove .env (also runs automatically the next time you start the daemon
 # or open the TUI, if it detects a .env-backed config — this lets you do it
 # as a manual step or a dry run instead)
-agent-chat-gateway config migrate-env
+coop config migrate-env
 ```
 
 ## Layout
@@ -150,9 +150,9 @@ message — see [docs/user-guide.md](user-guide.md) for how matching works.
   sticky-bound to the settings it was created with — keep running with the
   *old* rule's settings; edits to the renamed rule never reach them. Idle
   ones age out through their (frozen) TTLs; to move a busy room onto the
-  new rule now, `agent-chat-gateway expire` it — the next message in that room then
+  new rule now, `coop expire` it — the next message in that room then
   rematches against the current rules and builds a fresh watcher.
-  (`agent-chat-gateway reset` is *not* the lever here: it clears the session but rebuilds the
+  (`coop reset` is *not* the lever here: it clears the session but rebuilds the
   watcher from the same persisted record, so the room stays on the old
   rule's frozen settings.)
 - **Deleting** a rule warns you with what it strands: how many persisted
@@ -165,10 +165,10 @@ message — see [docs/user-guide.md](user-guide.md) for how matching works.
   alive — so a job firing more often than `session_idle_days` (15) runs
   indefinitely, while still listing as active. Only a job whose interval exceeds
   that lets the room go idle and then expire, and stop. To stop one now, remove
-  the job with `agent-chat-gateway schedule delete <job_id>`, or expire the watcher. See
+  the job with `coop schedule delete <job_id>`, or expire the watcher. See
   `docs/scheduling.md` for the full rules.
 - This tab edits `config.yaml` only. To see or act on the *live* sessions a
-  rule has created, use the CLI: `agent-chat-gateway list`, `agent-chat-gateway pause/resume/reset/expire`.
+  rule has created, use the CLI: `coop list`, `coop pause/resume/reset/expire`.
 - Known limitation: while some rule in the file is broken (its row shows
   ERROR), moving or deleting any row *above* it is refused, quoting that
   broken rule's own error — a broken rule's error message is
@@ -216,7 +216,7 @@ by an agent is blocked.
 ## Saving Does Not Reload
 
 Saving writes `config.yaml` and validates it; the running daemon keeps the
-configuration it loaded. Apply the change with `agent-chat-gateway config
+configuration it loaded. Apply the change with `coop config
 reload` (`--dry-run` first to see what it will do), or `restart`. `status`
 and `config show` tell you whether the file and the daemon agree.
 

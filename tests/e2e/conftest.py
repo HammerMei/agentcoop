@@ -3,8 +3,8 @@
 Session-scoped:
     rc_setup     — runs setup.py; verifies RC is reachable
     mm_setup     — runs mm_setup.py; verifies Mattermost is reachable
-    acg          — waits for ACG Docker container to be ready
-    mm_connected — asserts the mm-e2e CONNECTOR itself came up inside ACG
+    acg          — waits for AgentCoop Docker container to be ready
+    mm_connected — asserts the mm-e2e CONNECTOR itself came up inside AgentCoop
 
 Also session-scoped (all of them, to stay under Rocket.Chat's login rate
 limit and to avoid re-bootstrapping per test):
@@ -16,7 +16,7 @@ limit and to avoid re-bootstrapping per test):
     mm_bot_client  — MMClient logged in as the bot (see its docstring for why)
     mm_room        — parameterized: "dm" or "channel", both → Claude
 
-Both platforms live in one ACG container with one connector each, and MM's
+Both platforms live in one AgentCoop container with one connector each, and MM's
 boot failures split in a way worth knowing before reading a red suite:
 
 * An unresolvable **team** or an unusable identity is *fatal to the whole
@@ -50,7 +50,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 import mm_setup as _mm
 from acg_container import (
-    CONTAINER as ACG_CONTAINER,
+    CONTAINER as COOP_CONTAINER,
 )
 from acg_container import (
     MM_CONNECTOR_NAME,
@@ -72,8 +72,8 @@ BOT_USERNAME = "acg_bot"
 # Seconds to wait for the daemon to answer `status`. It does NOT cover the
 # agent warm-up, which runs afterwards on its own 120s-per-agent budget in
 # `_warmup_agents` — the comment here used to claim it did.
-ACG_READY_TIMEOUT = 180
-ACG_READY_INTERVAL = 5
+COOP_READY_TIMEOUT = 180
+COOP_READY_INTERVAL = 5
 
 # Short, and it has to stay short: this fixture runs inside the per-test
 # pytest-timeout budget (--timeout=180 in the Makefile and both workflows),
@@ -106,27 +106,27 @@ def rc_setup() -> dict[str, Any]:
 
 @pytest.fixture(scope="session")
 def acg(rc_setup: dict[str, Any]) -> None:
-    """Wait for the ACG Docker container to be ready, then warm up agents.
+    """Wait for the AgentCoop Docker container to be ready, then warm up agents.
 
     Expects the container to already be started (by Makefile / CI).
-    Polls `docker exec acg-e2e agent-chat-gateway status` until it succeeds
+    Polls `docker exec acg-e2e coop status` until it succeeds
     or times out.
 
-    After ACG reports ready, sends a warm-up ping to both the DM (OpenCode)
+    After AgentCoop reports ready, sends a warm-up ping to both the DM (OpenCode)
     and the team channel (Claude Code).  OpenCode starts its subprocess lazily
     on the first request, so without this warm-up the first real test can time
     out waiting for the cold-start initialisation to complete.
     """
-    print(f"\n[acg] Waiting for ACG container '{ACG_CONTAINER}' ...", flush=True)
-    _wait_for_acg(timeout=ACG_READY_TIMEOUT, interval=ACG_READY_INTERVAL)
-    print("[acg] ACG is ready.", flush=True)
+    print(f"\n[acg] Waiting for AgentCoop container '{COOP_CONTAINER}' ...", flush=True)
+    _wait_for_acg(timeout=COOP_READY_TIMEOUT, interval=COOP_READY_INTERVAL)
+    print("[acg] AgentCoop is ready.", flush=True)
 
     # ── Warm-up: trigger both agents so their subprocesses are initialised ────
     _warmup_agents(rc_setup)
 
     yield
     # Do NOT stop the container here — Makefile / CI handles lifecycle.
-    # This lets tests be re-run quickly without restarting ACG.
+    # This lets tests be re-run quickly without restarting AgentCoop.
 
 
 def _warmup_agents(rc_setup: dict[str, Any]) -> None:
@@ -185,7 +185,7 @@ def _warmup_agents(rc_setup: dict[str, Any]) -> None:
 
 
 def _wait_for_acg(timeout: float, interval: float) -> None:
-    """Poll docker exec until agent-chat-gateway status returns 0.
+    """Poll docker exec until coop status returns 0.
 
     "Not there at all" and "there but still starting" get different
     treatment. Waiting the full timeout for a container that does not exist
@@ -198,10 +198,10 @@ def _wait_for_acg(timeout: float, interval: float) -> None:
     """
     if container_missing():
         pytest.fail(
-            f"Container '{ACG_CONTAINER}' does not exist — the stack is not up.\n"
+            f"Container '{COOP_CONTAINER}' does not exist — the stack is not up.\n"
             "Run 'make e2e-up' first (it starts MongoDB + Rocket.Chat and "
             "Postgres + Mattermost, bootstraps the accounts on BOTH, then "
-            "starts ACG). 'make e2e-test' only runs the suite; it does not "
+            "starts AgentCoop). 'make e2e-test' only runs the suite; it does not "
             "bring anything up.\n"
             "If e2e-up itself failed partway, 'make e2e-dump' writes the full "
             "container logs to ./e2e-logs."
@@ -211,7 +211,7 @@ def _wait_for_acg(timeout: float, interval: float) -> None:
     last_output = ""
     while time.monotonic() < deadline:
         result = subprocess.run(
-            ["docker", "exec", ACG_CONTAINER, "agent-chat-gateway", "status"],
+            ["docker", "exec", COOP_CONTAINER, "coop", "status"],
             capture_output=True,
             text=True,
         )
@@ -222,20 +222,20 @@ def _wait_for_acg(timeout: float, interval: float) -> None:
         # is the same actionable case as never having existed.
         if container_missing():
             pytest.fail(
-                f"Container '{ACG_CONTAINER}' disappeared while waiting for it "
+                f"Container '{COOP_CONTAINER}' disappeared while waiting for it "
                 "to become ready — it likely crashed on startup. "
                 "'make e2e-dump' writes the full logs to ./e2e-logs."
             )
         time.sleep(interval)
 
-    # On timeout, dump ACG logs for debugging
+    # On timeout, dump AgentCoop logs for debugging
     logs = subprocess.run(
-        ["docker", "logs", "--tail", "50", ACG_CONTAINER],
+        ["docker", "logs", "--tail", "50", COOP_CONTAINER],
         capture_output=True,
         text=True,
     ).stdout
     pytest.fail(
-        f"ACG did not become ready within {timeout}s.\n"
+        f"AgentCoop did not become ready within {timeout}s.\n"
         f"Last status output: {last_output}\n"
         f"Container logs (last 50 lines):\n{logs}"
     )
@@ -264,7 +264,7 @@ def mm_setup() -> dict[str, Any]:
 
 @pytest.fixture(scope="session")
 def mm_connected(acg: None, mm_setup: dict[str, Any]) -> None:
-    """Fail fast unless the mm-e2e connector came up in THIS boot of ACG.
+    """Fail fast unless the mm-e2e connector came up in THIS boot of AgentCoop.
 
     Rewritten rather than patched a third time. Two rounds of review found a
     defect in each previous version — a stale marker accepted from an earlier
@@ -304,10 +304,10 @@ def mm_connected(acg: None, mm_setup: dict[str, Any]) -> None:
     if pid is None:
         pytest.fail(
             "The gateway is not running inside "
-            f"'{ACG_CONTAINER}' — this is not a Mattermost problem.\n"
-            "'agent-chat-gateway status' exits 0 even when it reports 'not "
+            f"'{COOP_CONTAINER}' — this is not a Mattermost problem.\n"
+            "'coop status' exits 0 even when it reports 'not "
             "running', so the readiness wait upstream does not catch it. "
-            f"'docker logs {ACG_CONTAINER}' will show a startup that never "
+            f"'docker logs {COOP_CONTAINER}' will show a startup that never "
             "finished; 'make e2e-dump' collects everything."
         )
 
@@ -336,7 +336,7 @@ def mm_connected(acg: None, mm_setup: dict[str, Any]) -> None:
             if ready
             else "It has not reported its connectors at all, so startup is "
             "still in progress or wedged. Most likely the MM bootstrap did not "
-            "run before ACG started — 'make e2e-up' does both in order; "
+            "run before AgentCoop started — 'make e2e-up' does both in order; "
             "starting the container by hand does not.\n"
         )
         + "Mattermost-related log lines from this boot:\n  "

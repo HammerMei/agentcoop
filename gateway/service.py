@@ -73,7 +73,7 @@ from .reload_plan import (
     plan_persisted_records,
 )
 
-logger = logging.getLogger("agent-chat-gateway.service")
+logger = logging.getLogger("coop.service")
 
 # What a lifecycle verb or a room wake is told while a reload applies (#144).
 RELOAD_IN_PROGRESS = "a config reload is in progress — retry when it finishes"
@@ -115,7 +115,7 @@ def _build_agent_backend(agent_cfg: AgentConfig) -> AgentBackend:
             command=agent_cfg.command,
             new_session_args=agent_cfg.new_session_args,
             timeout=agent_cfg.timeout,
-            sidecar_env={"ACG_ROLE": "owner"},
+            sidecar_env={"COOP_ROLE": "owner"},
             sidecar_cwd=agent_cfg.working_directory or None,
             broker_config=broker_config,
         )
@@ -1682,7 +1682,7 @@ def _write_startup_signal(fd: int, errors: list[str], *, fatal: bool = False) ->
         # 'ok' line and report failure, which is the right outcome when we
         # cannot write the startup signal.
         import logging as _logging
-        _logging.getLogger("agent-chat-gateway.service").warning(
+        _logging.getLogger("coop.service").warning(
             "Failed to write startup signal to handshake pipe (fd=%d): %s", fd, exc
         )
     finally:

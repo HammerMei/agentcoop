@@ -10,7 +10,7 @@ from .config import WatcherConfig
 
 
 def build_system_header(wc: WatcherConfig, agent_username: str) -> str:
-    """Build the ACG identity + multi-agent addressing header.
+    """Build the AgentCoop identity + multi-agent addressing header.
 
     Pure — no I/O, no agent calls. This is protocol-invariant content that
     must survive Claude Code's context compaction, so it is delivered via
@@ -27,7 +27,7 @@ def build_system_header(wc: WatcherConfig, agent_username: str) -> str:
         always present.
     """
     header = (
-        f"## ACG Session Identity\n"
+        f"## Coop Session Identity\n"
         f"- **Watcher name:** `{wc.name}`\n"
         f"- **Room:** `{wc.room}`\n"
         f"- **Connector:** `{wc.connector}`\n"

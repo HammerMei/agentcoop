@@ -5,7 +5,7 @@ Tests two variants:
   test_schedule_fires[opencode]  → watcher rc-e2e:dm:test_user   → DM with test_user
 
 Flow:
-  1. Create a 1-minute one-shot job via ``docker exec acg-e2e agent-chat-gateway
+  1. Create a 1-minute one-shot job via ``docker exec acg-e2e coop
      schedule create``.
   2. Wait up to 90 s for the agent to post the distinctive token in the bound RC room.
   3. Assert the token appeared (proves scheduler fired and agent handled it).
@@ -31,7 +31,7 @@ BOT_USERNAME = "acg_bot"
 # The connector name in tests/e2e/acg-config/config.yaml. Watcher handles are
 # `<connector>:<room label>`, so this is half of every watcher name below.
 CONNECTOR_NAME = "rc-e2e"
-ACG_CONTAINER = "acg-e2e"
+COOP_CONTAINER = "acg-e2e"
 
 # The scheduler polls every 60 s; allow 90 s for the job to fire + agent to reply.
 SCHEDULE_FIRE_TIMEOUT = 90
@@ -41,9 +41,9 @@ SCHEDULE_FIRE_TIMEOUT = 90
 
 
 def _docker_exec(*cmd: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Run a command inside the ACG E2E Docker container and return the result."""
+    """Run a command inside the AgentCoop E2E Docker container and return the result."""
     return subprocess.run(
-        ["docker", "exec", ACG_CONTAINER, *cmd],
+        ["docker", "exec", COOP_CONTAINER, *cmd],
         capture_output=True,
         text=True,
         check=check,
@@ -85,7 +85,7 @@ def schedule_room(
     up exactly this DM and this channel before any test runs.
 
     Returned dict keys:
-        watcher:    ACG watcher name to target when creating the job
+        watcher:    AgentCoop watcher name to target when creating the job
         room_id:    RC room ``_id`` to poll for the bot reply
         room_type:  ``"channel"`` or ``"dm"`` (for ``poll_for_message``)
         agent:      ``"claude"`` or ``"opencode"``
@@ -143,7 +143,7 @@ def test_schedule_fires(
     before_ts = int(time.time() * 1000)
 
     create_result = _docker_exec(
-        "agent-chat-gateway",
+        "coop",
         "schedule",
         "create",
         watcher,
@@ -191,7 +191,7 @@ def test_schedule_fires(
     except Exception as exc:
         # Fetch the job list for debugging context before failing.
         list_result = _docker_exec(
-            "agent-chat-gateway", "schedule", "list", "--all", check=False
+            "coop", "schedule", "list", "--all", check=False
         )
         pytest.fail(
             f"Timed out waiting for scheduled job to fire (job_id={job_id}).\n"
@@ -205,7 +205,7 @@ def test_schedule_fires(
         )
 
     # ── 3. Verify job is marked completed ─────────────────────────────────────
-    list_result = _docker_exec("agent-chat-gateway", "schedule", "list", "--all")
+    list_result = _docker_exec("coop", "schedule", "list", "--all")
     assert list_result.returncode == 0, (
         f"'schedule list --all' failed:\n{list_result.stderr}"
     )
@@ -225,4 +225,4 @@ def test_schedule_fires(
     )
 
     # ── 4. Clean up ────────────────────────────────────────────────────────────
-    _docker_exec("agent-chat-gateway", "schedule", "delete", job_id, check=False)
+    _docker_exec("coop", "schedule", "delete", job_id, check=False)

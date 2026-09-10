@@ -7,9 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.0]
+
+The first release under the new name. Everything below the *Renamed* section
+is the dynamic-watcher cutover that had accumulated on `main` since v0.5.2.
+Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
+`docs/migration-v1.md`.
+
+### Renamed
+
+- **agent-chat-gateway is now AgentCoop.** The project outgrew "a gateway from
+  chat to an agent" and became a middleware where several agents collaborate
+  with humans and with each other; the name follows. Short form: Coop.
+  - The command is **`coop`** (`coop start`, `coop list`, …); the provisioning
+    CLI is **`coop-provision`**. There is no alias. Running the old
+    `agent-chat-gateway` command after an upgrade prints what happened and how
+    to either reinstall or stay on v0.5.2 — it does nothing else.
+  - The runtime directory is **`~/.agentcoop`**. `~/.agent-chat-gateway` is
+    not read, moved or mentioned by v1; remove it by hand
+    (`docs/migration-v1.md`).
+  - Environment variables are **`COOP_ROLE`, `COOP_ALLOWED_TOOLS`,
+    `COOP_APPROVAL_TOOLS`, `COOP_CONFIG`, `COOP_ADMIN_CONFIG`**. The `ACG_*`
+    names are gone; hooks and scripts that read them need updating.
+  - The agent-facing session header is `## Coop Session Identity`.
+  - Logger names are `coop.*`; the Docker image is `ghcr.io/hammermei/agentcoop`
+    (the old `agent-chat-gateway` image stays frozen at v0.5.2 and is not
+    deleted); the repository is `HammerMei/agentcoop` (GitHub redirects the old
+    URLs).
+  - The Python package is still `gateway`, and "the gateway" is still the name
+    of the daemon process — `docs/architecture.md` defines the two names.
+- **Docker is for internal testing only.** The compose example and image are
+  kept for AgentCoop's own E2E/CI runs and are no longer offered as an install
+  option; the supported install is `install.sh` on the host.
 
 ### Removed
+
+- **PyPI publishing.** AgentCoop is installed from git by `install.sh`; the
+  PyPI package `agent-chat-gateway` stops at 0.5.2 and nothing is published
+  under the new name.
+- **The Homebrew branch of `upgrade`**, which no install could reach (there has
+  never been a tap).
 
 - **BREAKING: `online_notification` / `offline_notification` are removed**
   from watcher rules and templates (decided 2026-08-02 with the dynamic-watcher
@@ -27,12 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateway creates each room's watcher on the room's first message (Rocket.Chat,
   Mattermost) or eagerly at startup for connectors with no inbound stream
   (voice, script, whose rules must name literal rooms). Rules match top-down;
-  the first rule that claims a room wins, and `agent-chat-gateway config validate` warns about
+  the first rule that claims a room wins, and `coop config validate` warns about
   rules an earlier rule shadows. Each created watcher is named
   `<connector>:<room>`, which is what `list` shows and the operator verbs act
   on. **The static shape — a `room:` key, or `rooms:` as a list — is a hard
   load error** naming the migration guide; see
-  `docs/migration-dynamic-watchers.md`, and note the upgrade **resets every
+  `docs/migration-v1.md`, and note the upgrade **resets every
   existing watcher session**: static-era state records are pruned at the first
   post-rewrite start (logged per record), and each room begins a fresh session
   on its first message.
@@ -55,13 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fire resolves through that id, not through the watcher's name — a name is a
   pure function of `(connector, room)` and moves when the room does. Jobs written
   before this keep working by resolving their name; **run
-  `agent-chat-gateway schedule migrate` to record their room ids**, before
+  `coop schedule migrate` to record their room ids**, before
   renaming any rooms, since the migration finds each room through its job's
   watcher name. The daemon warns at startup while anything is unmigrated. The
   command is version-aware and safe to re-run, and it never guesses: a job whose
   room cannot be identified is reported and left alone.
 - **Operator verbs act on records, and there is a new one**:
-  `agent-chat-gateway expire <watcher>` clears a room's session and reclaims its record and
+  `coop expire <watcher>` clears a room's session and reclaims its record and
   files now (it overrides pause, audibly — the audit line names the room). It
   does NOT cancel the room's scheduled jobs: expire does not stop a rule
   watching a room, so the job records the room's id and brings the watcher back
@@ -91,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `user_removed`. A **periodic membership reconciliation** (daily) backstops a
   missed removal event for paused and idle records, which nothing else ever
   touches; an unanswerable membership probe keeps everything (fail = keep).
-- **`docs/migration-dynamic-watchers.md`** — the rewrite procedure, the field
+- **`docs/migration-v1.md`** — the rewrite procedure, the field
   notes (a DM entry cannot be named; `direct: true` replaces `room: "@user"`),
   and the accepted losses, stated as such.
 - **Two connectors may no longer run as one bot account.** Each connector
@@ -213,7 +250,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adapter had no `reclaim_durable_instructions`, so every expired OpenCode
   watcher left its `system-prompts/<key>.md` behind. The file is now removed,
   as `ClaudeBackend` already did.
-- **`agent-chat-gateway schedule migrate` no longer hides work done at an unchanged version.**
+- **`coop schedule migrate` no longer hides work done at an unchanged version.**
   A version-2 jobs file with a live job lacking a room id re-runs the 1→2 step;
   the CLI keyed "nothing to do" on the versions matching and hid the steps,
   outcomes and jobs needing attention. It now says "nothing to do" only when

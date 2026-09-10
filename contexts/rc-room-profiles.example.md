@@ -62,7 +62,7 @@ personalize your tone, language, and response style for each person in the room.
 
 4. Restart the gateway or reset the watcher to load the new context:
    ```bash
-   agent-chat-gateway reset general
+   coop reset general
    ```
 
 ---

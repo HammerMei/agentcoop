@@ -25,7 +25,7 @@ from .connector import Connector, IncomingMessage, RoomCapacity, UserRole
 from .message_processor import MessageProcessor
 from .permission import PermissionRegistry
 
-logger = logging.getLogger("agent-chat-gateway.core.dispatch")
+logger = logging.getLogger("coop.core.dispatch")
 
 
 class RoomAlreadyRoutedError(RuntimeError):

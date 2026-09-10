@@ -253,7 +253,7 @@ class TestTsMsToIsoLocal(unittest.TestCase):
 class TestWeekdayAbbrev(unittest.TestCase):
     """weekday_abbrev — display-only day-of-week label for the ``day:`` header field.
 
-    See agent-chat-gateway#53: agents infer weekday from a bare date
+    See AgentCoop#53: agents infer weekday from a bare date
     unreliably, so the gateway precomputes it instead.
     """
 

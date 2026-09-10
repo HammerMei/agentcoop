@@ -463,7 +463,7 @@ class TestValidationDetailsModal:
     error(s)") — the actual message text (e.g. "Agent 'x': working_directory
     is required") was computed by validate_config() but never surfaced
     anywhere, leaving no way to find out what to fix short of running
-    `agent-chat-gateway config validate` in a separate terminal. 'v' opens a
+    `coop config validate` in a separate terminal. 'v' opens a
     MessageModal with the full text; the banner only advertises it (in the
     banner text itself, per the user's own request — not a permanent
     footer entry) when there's actually something to view."""

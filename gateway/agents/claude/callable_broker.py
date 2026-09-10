@@ -29,7 +29,7 @@ from typing import Awaitable, Callable
 
 from ._http_utils import build_error_response, build_http_response, read_http_body
 
-logger = logging.getLogger("agent-chat-gateway.permissions.callable")
+logger = logging.getLogger("coop.permissions.callable")
 
 _HOST = "127.0.0.1"
 

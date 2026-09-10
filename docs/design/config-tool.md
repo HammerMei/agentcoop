@@ -13,7 +13,7 @@ auto-migration for any config still using `.env` — see decision 6's
 tool-list/preset editor is not yet built. Phase 3 is designed below but not
 yet started. The
 v0.2 format simplification (`connector_defaults`/`agent_defaults`/
-`watcher_defaults`, `tool_presets`, watcher `rooms:`) plus `agent-chat-gateway config
+`watcher_defaults`, `tool_presets`, watcher `rooms:`) plus `coop config
 validate` and the JSON Schema (see `docs/migration-0.2.md`) are prerequisites
 and have landed. A `description:` field (free-text, informational-only,
 ignored at runtime) was added to connectors/agents/watchers/`*_defaults`
@@ -46,7 +46,7 @@ below).
 > - The **Sessions tab** of dynamic-watcher-design §5.5 is deferred (owner
 >   decision 2026-08-18): the config tool operates on `config.yaml` only —
 >   it never talks to the control socket; runtime observability and the
->   pause/resume/reset/expire verbs stay in the CLI (`agent-chat-gateway list` etc.).
+>   pause/resume/reset/expire verbs stay in the CLI (`coop list` etc.).
 >
 > The Phase 3 sections below are kept as the design record of the static-era
 > tool; where they contradict this block, this block wins.
@@ -70,7 +70,7 @@ below).
 > implementation as it was actually built at the time — kept as an accurate
 > record of that phase, not a description of the current screen.
 
-Reached via `agent-chat-gateway config` (no subcommand). `agent-chat-gateway
+Reached via `coop config` (no subcommand). `coop
 config validate` stays a separate, scriptable command backed by
 `gateway/config_validate.py` — never touched by anything below.
 
@@ -88,11 +88,11 @@ allow-lists is a real attack surface (CSRF from any local browser tab, other
 local users) — directly against the OpenClaw-style principle this project
 already follows of not trusting user-controlled/network-reachable surfaces
 with config that grants tool access. It also needs port-forwarding to be
-usable when ACG runs on a remote server reached over SSH, which is the
+usable when AgentCoop runs on a remote server reached over SSH, which is the
 common deployment shape for this project.
 
 **Rejected as the primary interface: plain CLI subcommands**
-(`agent-chat-gateway config add-connector`, etc.). These don't give an overview of what's
+(`coop config add-connector`, etc.). These don't give an overview of what's
 already configured, and a growing flag surface per subcommand doesn't
 converge into "one tool."
 
@@ -253,7 +253,7 @@ per-row status lookups.
    its original position. Restricts the file to 0600 after every write.
    `.env` resolves the same way `gateway/config.py`'s loader itself resolves
    it — `EditableConfig.path.parent / ".env"` (`load_dotenv(path.parent /
-   ".env")`), NOT `onboard.py`'s hardcoded `~/.agent-chat-gateway/` — since a
+   ".env")`), NOT `onboard.py`'s hardcoded `~/.agentcoop/` — since a
    config file can live anywhere. The toggle UI + connector-form wiring
    (choosing the env var name, writing the `${VAR}` placeholder into the
    entry) lands with connector create/edit, the writer's first real caller.
@@ -325,7 +325,7 @@ Max stack depth 3 (Overview → detail → modal).
 `gateway/config_validate.py`'s `ValidationResult` gained `findings:
 list[Finding]` (`severity`, `entity_kind`, `entity_name`, `field`, `message`)
 alongside the existing flat string lists, which remain untouched
-(`agent-chat-gateway config validate`'s CLI output is byte-identical — regression-tested). Honest
+(`coop config validate`'s CLI output is byte-identical — regression-tested). Honest
 boundary, as designed: `_check_connectors`/`_lint_config` findings are
 per-entity (often per-field); a `GatewayConfig.from_file` load failure is
 inherently global (`entity_kind="global"`, `entity_name=None`) — the Overview
@@ -346,7 +346,7 @@ originally showed only a bare count (`✗ 1 error(s)`) — `result.errors`/
 displayed anywhere, so a `GatewayConfig.from_file` failure with
 `entity_kind="global"` (e.g. a required field like `working_directory`
 removed by hand-editing the raw config) gave the user no way to find out
-what to fix short of running `agent-chat-gateway config validate`
+what to fix short of running `coop config validate`
 separately — user-reported. `action_view_validation_details()` opens a
 `MessageModal` with the full text of all three lists, and the banner
 itself grows a `(press 'v' to view details)` hint only when there's
@@ -646,11 +646,11 @@ Phase 2 first cleared the Phase 1 code review's deferred items 7–10
     `gateway/daemon.py` `start_daemon()` (becomes a permanent no-op once
     `.env` is gone — this is what makes it actual enforcement rather than
     a nag someone can ignore forever) and standalone via
-    `agent-chat-gateway config migrate-env` for a manual/dry run. A
+    `coop config migrate-env` for a manual/dry run. A
     successful migration is reported on BOTH the log and the console — the
     startup handshake pipe gained an `info:` line type alongside the
     existing `error:`/`ok`, specifically so this isn't a silent operation.
-  - `docker/entrypoint.acg.sh`: Mode 1 (volume mount) now keys off
+  - `docker/entrypoint.coop.sh`: Mode 1 (volume mount) now keys off
     `config.yaml` alone, not `config.yaml` + `.env` — otherwise a container
     restart after the first migration would misdetect as Mode 2 and demand
     `-e RC_URL=...` again or hard-fail. Mode 2 (env-var quick start) writes
@@ -673,14 +673,14 @@ Phase 2 first cleared the Phase 1 code review's deferred items 7–10
        `migrate_env_to_config()`'s `cfg.save()` only did it as a side
        effect of an actual migration, so a hand-written `config.yaml` with
        no `.env` (exactly the path the docs now recommend) was never
-       protected by `agent-chat-gateway start` at all, contradicting the
+       protected by `coop start` at all, contradicting the
        documented guarantee. Fixed with a new `gateway/daemon.py`
        `_harden_config_permissions()`, called unconditionally in
        `start_daemon()` regardless of whether migration ran.
-    2. **The `agent-chat-gateway config migrate-env` CLI command didn't
+    2. **The `coop config migrate-env` CLI command didn't
        resolve the config path** before use, unlike `start_daemon()`'s
        automatic trigger — so in Docker's Mode 1 (symlinked bind-mount),
-       running it manually (exactly what `docker/entrypoint.acg.sh`'s own
+       running it manually (exactly what `docker/entrypoint.coop.sh`'s own
        comments recommend) silently "migrated" the container-local symlinks
        only, left the real host files untouched, and reported false
        success. This turned what the module docstring called a "known,
@@ -821,7 +821,7 @@ Phase 2 first cleared the Phase 1 code review's deferred items 7–10
   removed from `GatewayConfig.from_file()` entirely — not just deprecated,
   gone.** User's own framing, continuing the same thread that produced the
   "remove `.env`, enforce migration" decision above: with `.env` migration
-  now enforced at both `agent-chat-gateway start` and the config TUI's
+  now enforced at both `coop start` and the config TUI's
   launch (see below), the TUI's `_resolve_secret_display()` machinery
   (resolve a `${VAR}` for display, added earlier this same document to
   solve "how do you change a password behind a placeholder") existed ONLY
@@ -831,9 +831,9 @@ Phase 2 first cleared the Phase 1 code review's deferred items 7–10
   - **Audited before cutting, not assumed:** is there any REAL usage of
     `$VAR` resolved from an AMBIENT (non-`.env`) source — a systemd unit's
     `Environment=`, a Kubernetes manifest, a bare `RC_PASSWORD=xxx
-    agent-chat-gateway start` invocation? Exhaustive repo search: no
+    coop start` invocation? Exhaustive repo search: no
     systemd unit or K8s manifest exists anywhere in this project;
-    `docker/entrypoint.acg.sh`'s own env-var quick-start mode (Mode 2)
+    `docker/entrypoint.coop.sh`'s own env-var quick-start mode (Mode 2)
     deliberately resolves credentials itself and writes LITERAL values
     into the generated config.yaml, specifically avoiding `${VAR}`-in-
     config.yaml; every doc mentioning `$VAR` already framed it as
@@ -861,7 +861,7 @@ Phase 2 first cleared the Phase 1 code review's deferred items 7–10
       caller, still needing to resolve a legacy `.env`-backed value into
       its literal form at migration time.
     - The config TUI's launch (`gateway/configtool/__init__.py`'s
-      `run_app()`) now runs the SAME migration `agent-chat-gateway start`
+      `run_app()`) now runs the SAME migration `coop start`
       runs, before ever constructing `ConfigToolApp` — closing the one
       remaining gap where opening the TUI directly (without ever running
       `start`) could still show a pre-migration `${VAR}`-referencing

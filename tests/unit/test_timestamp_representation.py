@@ -7,7 +7,7 @@ wanted the other one; Rocket.Chat's bound normalizer tolerated both and
 Mattermost's raised, so the same value worked on one connector and, on the
 other, raised into a blanket `except` that logged "starting without history".
 
-The rule: **every timestamp crossing an ACG interface is epoch milliseconds as
+The rule: **every timestamp crossing an AgentCoop interface is epoch milliseconds as
 a string.** ISO appears at two edges only — what an operator types into the
 control socket, and the `ts` field of the dicts `fetch_room_history` hands an
 agent to read.
@@ -123,7 +123,7 @@ class TestBothConnectorsAgreeOnTheRepresentation(unittest.IsolatedAsyncioTestCas
 
 
 class TestTheAgentFacingHalfStaysISO(unittest.IsolatedAsyncioTestCase):
-    """The deliberate asymmetry: bounds are compared by ACG, the returned `ts`
+    """The deliberate asymmetry: bounds are compared by AgentCoop, the returned `ts`
     is read by an agent."""
 
     async def test_returned_messages_carry_iso_timestamps(self):

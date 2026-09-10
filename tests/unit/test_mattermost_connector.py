@@ -45,7 +45,7 @@ def _make_connector(**config_overrides) -> MattermostConnector:
     connector._rest.bot_user_id = "bot-id-1"
 
     # Replay asks for a *page* so it can tell an empty window from a page the server
-    # filled with system posts before ACG filtered them. Derived from whatever a test
+    # filled with system posts before AgentCoop filtered them. Derived from whatever a test
     # sets on `get_room_history`, so a test that does not care about that distinction
     # keeps expressing itself in messages — and one that does care sets the page mock
     # directly and overrides this.
@@ -270,7 +270,7 @@ class TestSendTextAndMedia(unittest.IsolatedAsyncioTestCase):
 
 class TestSendToRoom(unittest.IsolatedAsyncioTestCase):
     """Regression tests for a bug found post-review: send_to_room() (the
-    CLI `agent-chat-gateway send <room> --attach ...` path, per
+    CLI `coop send <room> --attach ...` path, per
     mm-gateway-context.md) discarded upload_file()'s returned file_ids and
     called post_message() without them — the uploaded file never got linked
     to any post and rendered as an invisible orphan in the channel."""
@@ -755,7 +755,7 @@ class TestFetchRoomHistoryTimestampWiring(unittest.IsolatedAsyncioTestCase):
     async def test_epoch_ms_bounds_reach_rest_unchanged(self):
         """Inverted from "ISO converted to epoch-ms" (§5.2).
 
-        The bounds are epoch milliseconds, like every timestamp inside ACG, and
+        The bounds are epoch milliseconds, like every timestamp inside AgentCoop, and
         that is what this REST client wants natively — so nothing converts. The
         old conversion *raised* on an epoch-ms value, and the caller's blanket
         `except` turned that into "starting without history": the same bound
@@ -1103,7 +1103,7 @@ class TestRoutingUntrackedChannels(unittest.IsolatedAsyncioTestCase):
         connector._ROUTE_RETRY_DELAYS = ()
         connector.register_router(AsyncMock(side_effect=RuntimeError("boom")))
 
-        with self.assertLogs("agent-chat-gateway.connectors.mattermost", "WARNING"):
+        with self.assertLogs("coop.connectors.mattermost", "WARNING"):
             await connector._on_posted_event(self._event())
             await self._drain(connector)
         self.assertEqual(connector._pending_routes, {})
@@ -1344,7 +1344,7 @@ class TestRoutingUntrackedChannels(unittest.IsolatedAsyncioTestCase):
         connector = await self._connector()
         connector._ROUTE_RETRY_DELAYS = ()
         connector.register_router(AsyncMock(side_effect=RuntimeError("boom")))
-        with self.assertLogs("agent-chat-gateway.connectors.mattermost", "WARNING"):
+        with self.assertLogs("coop.connectors.mattermost", "WARNING"):
             await connector._on_posted_event(self._event())
             await self._drain(connector)
 
@@ -1755,7 +1755,7 @@ class TestARejectedPostStaysReachableAcrossReconnects(unittest.IsolatedAsyncioTe
 
     Mattermost gets the hand-back half of `core.replay_window` and not the outage half:
     one connection resumes every channel at once, so there is no staggered-resubscribe
-    race to capture a window for. This mark exists purely because ACG refuses messages
+    race to capture a window for. This mark exists purely because AgentCoop refuses messages
     when its own queues are full.
     """
 
@@ -1838,7 +1838,7 @@ class TestARejectedPostStaysReachableAcrossReconnects(unittest.IsolatedAsyncioTe
 
         connector._on_posted_event = _dispatch
 
-        with self.assertLogs("agent-chat-gateway.connectors.mattermost", "INFO"):
+        with self.assertLogs("coop.connectors.mattermost", "INFO"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(
@@ -1862,7 +1862,7 @@ class TestEveryWayOfNotDeliveringGivesTheTurnBack(unittest.IsolatedAsyncioTestCa
     """The same surface as Rocket.Chat's twin, enumerated for the same reason.
 
     Review found one un-released path on Rocket.Chat; sweeping both connectors found three
-    more there and three here. The budget belongs to ACG, not to either platform, so the
+    more there and three here. The budget belongs to AgentCoop, not to either platform, so the
     rule is the same on both — and the enumeration is what stops the next one being found
     in a review round instead of locally.
     """
@@ -2182,7 +2182,7 @@ class TestAParkedChannelWakeStaysRecoverable(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAPageOfSystemPostsIsNotAnEmptyWindow(unittest.IsolatedAsyncioTestCase):
-    """`per_page` is applied before ACG filters system posts out.
+    """`per_page` is applied before AgentCoop filters system posts out.
 
     So an empty filtered list can mean "the newest 200 entries are all joins, and every
     user post you are looking for is behind them". Reporting the outage as read there
@@ -2211,7 +2211,7 @@ class TestAPageOfSystemPostsIsNotAnEmptyWindow(unittest.IsolatedAsyncioTestCase)
         connector._rest.get_room_history_page = AsyncMock(
             return_value=self._page([], raw_count=200))
 
-        with self.assertLogs("agent-chat-gateway.connectors.mattermost", "WARNING"):
+        with self.assertLogs("coop.connectors.mattermost", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(
@@ -2239,7 +2239,7 @@ class TestAPageOfSystemPostsIsNotAnEmptyWindow(unittest.IsolatedAsyncioTestCase)
         connector._rest.get_room_history_page = AsyncMock(
             return_value=self._page(posts, raw_count=200))
 
-        with self.assertLogs("agent-chat-gateway.connectors.mattermost", "WARNING") as cm:
+        with self.assertLogs("coop.connectors.mattermost", "WARNING") as cm:
             await connector._on_ws_reconnect()
 
         self.assertTrue(any("maximum" in m for m in cm.output))

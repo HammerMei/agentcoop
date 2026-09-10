@@ -105,7 +105,7 @@ class TestProcessorEnvBehaviour(unittest.IsolatedAsyncioTestCase):
     """MessageProcessor respects the backend's supports_per_message_env flag."""
 
     async def test_env_passed_when_backend_supports_it(self):
-        """Default backend (supports_per_message_env=True) gets ACG_ROLE in env."""
+        """Default backend (supports_per_message_env=True) gets COOP_ROLE in env."""
         agent = _EnvAwareBackend(supports_env=True)
         proc = _make_processor(agent)
         proc.start()
@@ -117,10 +117,10 @@ class TestProcessorEnvBehaviour(unittest.IsolatedAsyncioTestCase):
             await proc.stop()
 
         self.assertIsNotNone(agent.last_env)
-        self.assertEqual(agent.last_env.get("ACG_ROLE"), "owner")
+        self.assertEqual(agent.last_env.get("COOP_ROLE"), "owner")
 
     async def test_env_none_when_backend_does_not_support_it(self):
-        """Backend with supports_per_message_env=False gets env=None (no ACG_ROLE)."""
+        """Backend with supports_per_message_env=False gets env=None (no COOP_ROLE)."""
         agent = _EnvAwareBackend(supports_env=False)
         proc = _make_processor(agent)
         proc.start()
@@ -133,7 +133,7 @@ class TestProcessorEnvBehaviour(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(agent.last_env)
 
     async def test_guest_role_env_when_supported(self):
-        """Guest messages get ACG_ROLE=guest when backend supports env."""
+        """Guest messages get COOP_ROLE=guest when backend supports env."""
         agent = _EnvAwareBackend(supports_env=True)
         proc = _make_processor(agent)
         proc.start()
@@ -144,7 +144,7 @@ class TestProcessorEnvBehaviour(unittest.IsolatedAsyncioTestCase):
             await proc.stop()
 
         self.assertIsNotNone(agent.last_env)
-        self.assertEqual(agent.last_env.get("ACG_ROLE"), "guest")
+        self.assertEqual(agent.last_env.get("COOP_ROLE"), "guest")
 
 
 if __name__ == "__main__":

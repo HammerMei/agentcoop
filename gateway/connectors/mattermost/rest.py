@@ -12,7 +12,7 @@ import httpx
 
 from ...core.connector import HistoryPage
 
-logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.rest")
+logger = logging.getLogger("coop.connectors.mattermost.rest")
 
 
 class RoomNotFoundError(Exception):
@@ -436,7 +436,7 @@ class MattermostREST:
         """The filtered chronological list, for callers that do not need the page shape.
 
         The history handoff wants posts; only replay has to tell "an empty window" from
-        "a page the server filled with system posts before ACG could filter them".
+        "a page the server filled with system posts before AgentCoop could filter them".
         """
         page = await self.get_room_history_page(
             channel_id, count=count, before_ts=before_ts, after_ts=after_ts)

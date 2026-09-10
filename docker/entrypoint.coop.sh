@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
 # =============================================================================
-# ACG Docker Entrypoint
+# AgentCoop Docker Entrypoint
 #
 # ── Volume mounts ─────────────────────────────────────────────────────────────
 #
-#   ~/.agent-chat-gateway/config/     ONLY config.yaml + .env
+#   ~/.agentcoop/config/     ONLY config.yaml + .env
 #                                      Entrypoint symlinks them one level up.
 #                                      Safe to bind-mount — does NOT overwrite
 #                                      the runtime directory.
 #
-#   ~/.agent-chat-gateway/work/        Agent working directory
-#   ~/.agent-chat-gateway/contexts/    Custom context files (defaults if empty)
+#   ~/.agentcoop/work/        Agent working directory
+#   ~/.agentcoop/contexts/    Custom context files (defaults if empty)
 #   ~/.claude/                         Claude Code config & credentials
 #   ~/.config/opencode/                OpenCode config & API key
 #
-# ⚠️  Do NOT bind-mount ~/.agent-chat-gateway directly — it contains
+# ⚠️  Do NOT bind-mount ~/.agentcoop directly — it contains
 #     install_meta.json and contexts required at runtime.
 #
 # ── Config modes ─────────────────────────────────────────────────────────────
 #
 # Mode 1: Volume mount (recommended)
-#   Mount a local dir to ~/.agent-chat-gateway/config/ — no env vars needed:
+#   Mount a local dir to ~/.agentcoop/config/ — no env vars needed:
 #
 #     docker run \
-#       -v ./acg-config:/root/.agent-chat-gateway/config \
+#       -v ./acg-config:/root/.agentcoop/config \
 #       -v ~/.claude:/root/.claude \
-#       acg:latest
+#       coop:latest
 #
 #   acg-config/ must contain:
 #     └── config.yaml   full gateway config (secrets in plaintext — chmod 600)
@@ -33,7 +33,7 @@
 #   .env is no longer required: if acg-config/ still has one from before this
 #   change, it's picked up on first start, its secret(s) folded into
 #   config.yaml as literal values, and then removed automatically (one-time —
-#   see `agent-chat-gateway config migrate-env` for a manual/dry run).
+#   see `coop config migrate-env` for a manual/dry run).
 #
 #   See docker/docker-compose.example/config/ for a ready-to-copy template.
 #
@@ -44,31 +44,31 @@
 #       -e RC_URL=http://rocketchat:3000 \
 #       -e RC_USERNAME=mybot \
 #       -e RC_PASSWORD=secret \
-#       -e ACG_OWNER_USERS=alice \
+#       -e COOP_OWNER_USERS=alice \
 #       -v ~/.claude:/root/.claude \
-#       acg:latest
+#       coop:latest
 #
 #   Optional env vars (Mode 2 only):
 #     AGENT_TYPE        "claude" (default) or "opencode"
-#     ACG_WATCHER_ROOM  room to watch (default: "@<first_owner>" DM)
+#     COOP_WATCHER_ROOM  room to watch (default: "@<first_owner>" DM)
 #
-# See docker/docker-compose.acg.example.yml for a full example with all mounts.
+# See docker/docker-compose.example/docker-compose.yml for a full example with all mounts.
 # =============================================================================
 set -euo pipefail
 
-RUNTIME_DIR="$HOME/.agent-chat-gateway"
+RUNTIME_DIR="$HOME/.agentcoop"
 
-info()    { printf '\033[0;36m[ACG]\033[0m %s\n' "$*"; }
-success() { printf '\033[0;32m[ACG]\033[0m %s\n' "$*"; }
-warn()    { printf '\033[0;33m[ACG]\033[0m %s\n' "$*"; }
-error()   { printf '\033[0;31m[ACG] Error:\033[0m %s\n' "$*" >&2; exit 1; }
+info()    { printf '\033[0;36m[AgentCoop]\033[0m %s\n' "$*"; }
+success() { printf '\033[0;32m[AgentCoop]\033[0m %s\n' "$*"; }
+warn()    { printf '\033[0;33m[AgentCoop]\033[0m %s\n' "$*"; }
+error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # -----------------------------------------------------------------------------
 # Symlink config files from $RUNTIME_DIR/config (Mode 1)
 # or generate them from env vars (Mode 2)
 #
 # $RUNTIME_DIR/config is the safe bind-mount point — it only holds config.yaml + .env,
-# so mounting it never overwrites the rest of ~/.agent-chat-gateway.
+# so mounting it never overwrites the rest of ~/.agentcoop.
 # -----------------------------------------------------------------------------
 MOUNTED_CONFIG="$RUNTIME_DIR/config/config.yaml"
 MOUNTED_ENV="$RUNTIME_DIR/config/.env"
@@ -100,10 +100,10 @@ else
     : "${RC_URL:?RC_URL is required (or mount config.yaml to $RUNTIME_DIR/config)}"
     : "${RC_USERNAME:?RC_USERNAME is required}"
     : "${RC_PASSWORD:?RC_PASSWORD is required}"
-    : "${ACG_OWNER_USERS:?ACG_OWNER_USERS is required (comma-separated, e.g. alice,bob)}"
+    : "${COOP_OWNER_USERS:?COOP_OWNER_USERS is required (comma-separated, e.g. alice,bob)}"
 
     AGENT_TYPE="${AGENT_TYPE:-claude}"
-    info "Generating config: agent=$AGENT_TYPE, owners=$ACG_OWNER_USERS"
+    info "Generating config: agent=$AGENT_TYPE, owners=$COOP_OWNER_USERS"
 
     # Credentials go straight into config.yaml as plaintext (chmod 600, same
     # as onboard.py's own generator) — no .env, matching the rest of the
@@ -114,19 +114,19 @@ else
     # never text-substitutes RC_URL/USERNAME/PASSWORD into the Python source
     # — a password containing a quote or backslash would otherwise corrupt
     # (or inject into) the script. Read via os.environ instead, same as
-    # ACG_OWNER_USERS/AGENT_TYPE below — plain runtime lookup, no
+    # COOP_OWNER_USERS/AGENT_TYPE below — plain runtime lookup, no
     # interpolation-into-source-text risk.
     "$RUNTIME_DIR/repo/.venv/bin/python3" - << 'PYEOF'
 import os, yaml
 
-owner_users = [u.strip() for u in os.environ["ACG_OWNER_USERS"].split(",") if u.strip()]
+owner_users = [u.strip() for u in os.environ["COOP_OWNER_USERS"].split(",") if u.strip()]
 agent_type  = os.environ.get("AGENT_TYPE", "claude")
-runtime_dir = os.path.expanduser("~/.agent-chat-gateway")
+runtime_dir = os.path.expanduser("~/.agentcoop")
 
-# ACG_WATCHER_ROOM: a channel name to watch. Unset (the default) means the
+# COOP_WATCHER_ROOM: a channel name to watch. Unset (the default) means the
 # rule claims 1:1 DMs instead — a DM has no room name for a pattern to match,
 # so an "@user" value also falls back to the DM opt-in.
-watcher_room = os.environ.get("ACG_WATCHER_ROOM", "")
+watcher_room = os.environ.get("COOP_WATCHER_ROOM", "")
 if watcher_room.startswith("@"):
     watcher_room = ""
 watcher_rooms = (
@@ -196,8 +196,8 @@ with open(config_path, "w") as f:
     yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 os.chmod(config_path, 0o600)  # holds a plaintext secret now — same as .env always was
 
-print(f"[ACG] Written: {config_path}")
-print(f"[ACG]   agent={agent_type}, rooms={watcher_rooms}, owners={owner_users}")
+print(f"[AgentCoop] Written: {config_path}")
+print(f"[AgentCoop]   agent={agent_type}, rooms={watcher_rooms}, owners={owner_users}")
 PYEOF
 
     success "Config generated."
@@ -221,11 +221,11 @@ fi
 # -----------------------------------------------------------------------------
 # Pre-warm opencode
 #
-# First-time opencode startup in Docker can take longer than ACG's 30-second
+# First-time opencode startup in Docker can take longer than AgentCoop's 30-second
 # health check timeout, causing the watcher to be skipped.
 # Fix: actually start `opencode serve`, wait until it's healthy, then stop it.
 # This lets opencode complete any first-time initialization (config creation,
-# DB setup, etc.) before ACG tries to start it for real.
+# DB setup, etc.) before AgentCoop tries to start it for real.
 # -----------------------------------------------------------------------------
 if command -v opencode &>/dev/null; then
     PREWARM_PORT=19999
@@ -251,12 +251,12 @@ if command -v opencode &>/dev/null; then
         sleep 1
     done
 
-    # Stop the prewarm instance so ACG can start its own
+    # Stop the prewarm instance so AgentCoop can start its own
     kill "$OC_PREWARM_PID" 2>/dev/null || true
     wait "$OC_PREWARM_PID" 2>/dev/null || true
 
     if ! $OC_READY; then
-        warn "OpenCode pre-warm timed out — ACG will still try to start it"
+        warn "OpenCode pre-warm timed out — AgentCoop will still try to start it"
         cat /tmp/opencode-prewarm.log >&2 || true
     fi
 else
@@ -266,29 +266,29 @@ fi
 # -----------------------------------------------------------------------------
 # Start the gateway daemon
 # -----------------------------------------------------------------------------
-info "Starting agent-chat-gateway..."
-agent-chat-gateway start
+info "Starting AgentCoop..."
+coop start
 
 # Wait briefly and check status — but do NOT exit on failure.
 # A misconfigured gateway should keep the container alive so the user can
 # inspect logs and fix config without hitting a restart loop.
 sleep 2
-if agent-chat-gateway status; then
+if coop status; then
     success "Gateway is running."
 else
     warn "Gateway failed to start — container will stay alive for inspection."
-    warn "Fix your config, then run: docker exec acg agent-chat-gateway start"
-    warn "Logs: docker logs acg  OR  docker exec acg tail -f $RUNTIME_DIR/gateway.log"
+    warn "Fix your config, then run: docker exec coop coop start"
+    warn "Logs: docker logs coop  OR  docker exec coop tail -f $RUNTIME_DIR/gateway.log"
 fi
 
 # -----------------------------------------------------------------------------
-# Trap SIGTERM/SIGINT — gracefully stop ACG before the container exits
+# Trap SIGTERM/SIGINT — gracefully stop AgentCoop before the container exits
 # This ensures the offline notification is sent to Rocket.Chat on docker stop.
 # -----------------------------------------------------------------------------
 cleanup() {
-    info "Shutdown signal received — stopping ACG..."
-    agent-chat-gateway stop
-    info "ACG stopped."
+    info "Shutdown signal received — stopping AgentCoop..."
+    coop stop
+    info "AgentCoop stopped."
     exit 0
 }
 trap cleanup SIGTERM SIGINT

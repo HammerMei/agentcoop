@@ -87,7 +87,7 @@ def _loaded_config():
     from gateway.config import GatewayConfig
 
     patched = _E2E_CONFIG.read_text().replace(
-        "/root/.agent-chat-gateway/work", tempfile.gettempdir()
+        "/root/.agentcoop/work", tempfile.gettempdir()
     )
     # Cleaned up: `mkdtemp` here leaked one directory per call, four per unit
     # run, forever. The loader only needs the file to exist while it reads.

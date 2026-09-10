@@ -74,7 +74,7 @@ def canonical_origin(url: str) -> str:
       a missed duplicate, which here means two agents in the same room.
     * **An unparseable port is left alone rather than normalised.** `urlsplit().port`
       raises on a non-numeric or out-of-range port, and this function is reached from
-      `agent-chat-gateway config validate`, where a traceback replaces the attributed bad-URL finding
+      `coop config validate`, where a traceback replaces the attributed bad-URL finding
       the operator needs. The malformed string becomes its own origin: it compares
       equal only to an identical mistake, which is the harmless answer.
 
@@ -88,7 +88,7 @@ def canonical_origin(url: str) -> str:
     except ValueError:
         # `urlsplit` itself rejects a bracketed host that is not an IP literal, so the
         # earlier per-field guard was not enough: this function is called from
-        # `agent-chat-gateway config validate`, and *any* string an operator can type must come back as
+        # `coop config validate`, and *any* string an operator can type must come back as
         # a value rather than a traceback. Unparseable text is its own origin — it
         # matches only an identical mistake.
         return url.strip().lower().rstrip("/")

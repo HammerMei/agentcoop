@@ -1,30 +1,33 @@
 #!/usr/bin/env bash
-# agent-chat-gateway installer
+# AgentCoop installer
 # Usage:  bash install.sh [--no-onboard]
-# Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/install.sh | bash
-# Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/install.sh | bash -s -- --no-onboard
+# Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
+# Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash -s -- --no-onboard
 #
 # Flags:
 #   --no-onboard   Skip the interactive setup wizard (for AI agents / automated installs)
+#   --force        Replace a `coop` command already on PATH that is not AgentCoop's
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
 NO_ONBOARD=false
+FORCE=false
 for arg in "$@"; do
   case "$arg" in
     --no-onboard) NO_ONBOARD=true ;;
+    --force) FORCE=true ;;
   esac
 done
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-info()    { printf '\033[0;36m[ACG]\033[0m %s\n' "$*"; }
-success() { printf '\033[0;32m[ACG]\033[0m %s\n' "$*"; }
-warn()    { printf '\033[0;33m[ACG]\033[0m %s\n' "$*" >&2; }
-error()   { printf '\033[0;31m[ACG] Error:\033[0m %s\n' "$*" >&2; exit 1; }
+info()    { printf '\033[0;36m[AgentCoop]\033[0m %s\n' "$*"; }
+success() { printf '\033[0;32m[AgentCoop]\033[0m %s\n' "$*"; }
+warn()    { printf '\033[0;33m[AgentCoop]\033[0m %s\n' "$*" >&2; }
+error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # OS / architecture detection
@@ -88,20 +91,74 @@ if [ -z "$SCRIPT_SOURCE" ] || [ "$SCRIPT_SOURCE" = "/dev/stdin" ] || [ "$SCRIPT_
 fi
 
 if [ "$CURL_PIPE" = true ]; then
-  REPO_DIR="$HOME/.agent-chat-gateway/repo"
-  mkdir -p "$HOME/.agent-chat-gateway"
+  REPO_DIR="$HOME/.agentcoop/repo"
+  mkdir -p "$HOME/.agentcoop"
   info "Running via curl|bash — will clone to $REPO_DIR"
   if [ -d "$REPO_DIR/.git" ]; then
     info "Repo already exists at $REPO_DIR — pulling latest..."
     git -C "$REPO_DIR" pull
   else
-    git clone https://github.com/HammerMei/agent-chat-gateway.git "$REPO_DIR"
+    git clone https://github.com/HammerMei/agentcoop.git "$REPO_DIR"
   fi
 else
   # Running as a local script — use the script's own directory
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_DIR="$SCRIPT_DIR"
   info "Running locally — using repo at $REPO_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# Is `coop` on PATH already someone else's? Decided BEFORE uv sync, so a refusal
+# costs nothing but the clone.
+#
+# `coop` is a short name and at least one other tool (AndrewDryga/coop, a sandbox
+# runner for coding agents) installs a binary by that name into the same
+# directory. link_console_script() would move such a file to a .bak and take the
+# name — correct for a stale copy of OUR script, wrong for someone else's
+# working command. "Ours" is a symlink shaped like the one this installer makes,
+# `<some repo>/.venv/bin/coop` — from THIS repo or an earlier install elsewhere,
+# dangling or not (a moved or deleted repo leaves exactly that, and re-running
+# the installer is how it gets repaired). Anything else at that path belongs to
+# something else. gateway/upgrade.py applies the same test.
+# ---------------------------------------------------------------------------
+is_ours_console_script() {
+  # $1 = a path. 0 = a symlink shaped like AgentCoop's console script.
+  [ -L "$1" ] || return 1
+  case "$(readlink "$1")" in
+    */.venv/bin/coop) return 0 ;;
+  esac
+  return 1
+}
+
+is_foreign_command() {
+  # $1 = path on PATH. 0 = foreign (someone else's), 1 = ours or nothing there.
+  [ -e "$1" ] || [ -L "$1" ] || return 1
+  is_ours_console_script "$1" && return 1
+  return 0
+}
+
+VENV_BIN="$REPO_DIR/.venv/bin/coop"
+COOP_LINK="$HOME/.local/bin/coop"
+if [ "$FORCE" != true ] && is_foreign_command "$COOP_LINK"; then
+  warn "$COOP_LINK already exists and is not AgentCoop's:"
+  warn "  $(ls -l "$COOP_LINK" 2>/dev/null | sed 's/^/  /')"
+  warn "Either keep that command and, after installing, link AgentCoop under another name:"
+  warn "    ln -s $VENV_BIN \$HOME/.local/bin/agentcoop"
+  warn "or re-run the installer with --force to replace it (a regular file is kept as a .bak;"
+  warn "a symlink is replaced outright)."
+  error "Refusing to replace a command that is not ours (use --force)."
+fi
+# A `coop` found EARLIER on PATH than ~/.local/bin (say /usr/local/bin/coop) is a
+# different problem: our link would be created cleanly and then never run,
+# because the shell resolves the other one first. Nothing is clobbered, so this
+# is a warning with the same alternate-name way out, not a refusal.
+SHADOWING_COOP="$(command -v coop 2>/dev/null || true)"
+if [ -n "$SHADOWING_COOP" ] && [ "$SHADOWING_COOP" != "$COOP_LINK" ] \
+   && ! is_ours_console_script "$SHADOWING_COOP"; then
+  warn "Another \`coop\` is on your PATH ahead of ~/.local/bin: $SHADOWING_COOP"
+  warn "After installing, typing \`coop\` will run THAT program, not AgentCoop."
+  warn "Either put ~/.local/bin earlier in PATH, or link AgentCoop under another name:"
+  warn "    ln -s $VENV_BIN \$HOME/.local/bin/agentcoop"
 fi
 
 # ---------------------------------------------------------------------------
@@ -134,7 +191,7 @@ uv sync --project "$REPO_DIR"
 #
 #   Backing up rather than refusing is deliberate. Refusing sounds safer but
 #   leaves a worse state: install_meta.json is written unconditionally further
-#   down, so `agent-chat-gateway upgrade` would manage $REPO_DIR while PATH ran
+#   down, so `coop upgrade` would manage $REPO_DIR while PATH ran
 #   whatever occupied the destination — a repo whose code never executes.
 #   Backing up keeps the managed command working AND loses nothing.
 #
@@ -150,7 +207,7 @@ uv sync --project "$REPO_DIR"
 #   Returns 0 if <link> now points at <target>, 1 otherwise. Every step is
 #   tested inside an `if` because of `set -e`: run bare, a failing mv or ln
 #   would abort the installer outright, and only the CALLER knows whether that
-#   is warranted (fatal for the entrypoint, survivable for acg-provision).
+#   is warranted (fatal for the entrypoint, survivable for coop-provision).
 # ---------------------------------------------------------------------------
 link_console_script() {
   local target="$1" link="$2" bak="" n ts oldtarget=""
@@ -222,21 +279,18 @@ link_console_script() {
   return 1
 }
 
-VENV_BIN="$REPO_DIR/.venv/bin/agent-chat-gateway"
 if [ ! -f "$VENV_BIN" ]; then
   error "Expected binary not found: $VENV_BIN"
 fi
 
 mkdir -p "$HOME/.local/bin"
-# Fatal for the entrypoint: an install whose primary command is not on the PATH
-# it just configured has not succeeded, and install_meta.json written below would
-# describe a repo the user cannot invoke.
-if ! link_console_script "$VENV_BIN" "$HOME/.local/bin/agent-chat-gateway"; then
-  error "Could not install ~/.local/bin/agent-chat-gateway"
+
+if ! link_console_script "$VENV_BIN" "$COOP_LINK"; then
+  error "Could not install ~/.local/bin/coop"
 fi
 
-# acg-provision (RC/MM account & channel provisioning). A first-class command, not
-# an optional extra: it is linked here and kept current by `agent-chat-gateway
+# coop-provision (RC/MM account & channel provisioning). A first-class command, not
+# an optional extra: it is linked here and kept current by `coop
 # upgrade`, and INSTALL.md documents both links together.
 #
 # Deliberately a WARNING rather than error() if absent, which is about INSTALL
@@ -244,11 +298,11 @@ fi
 # start and serve without it, so a missing or unlinkable provisioning CLI must not
 # throw away an install that otherwise succeeded. A missing ENTRYPOINT is fatal
 # because nothing works without that one.
-PROVISION_BIN="$REPO_DIR/.venv/bin/acg-provision"
-PROVISION_LINK="$HOME/.local/bin/acg-provision"
+PROVISION_BIN="$REPO_DIR/.venv/bin/coop-provision"
+PROVISION_LINK="$HOME/.local/bin/coop-provision"
 PROVISION_LINKED=false
 if [ ! -f "$PROVISION_BIN" ]; then
-  warn "acg-provision not found at $PROVISION_BIN — skipping its symlink."
+  warn "coop-provision not found at $PROVISION_BIN — skipping its symlink."
 elif link_console_script "$PROVISION_BIN" "$PROVISION_LINK"; then
   PROVISION_LINKED=true
 else
@@ -271,7 +325,7 @@ case ":$PATH:" in
       if [ -f "$RC" ]; then
         # Only add if not already present
         if ! grep -qF '.local/bin' "$RC" 2>/dev/null; then
-          printf '\n# Added by agent-chat-gateway installer\n%s\n' "$PATH_LINE" >> "$RC"
+          printf '\n# Added by AgentCoop installer\n%s\n' "$PATH_LINE" >> "$RC"
           info "  Added to $RC"
         fi
       fi
@@ -283,7 +337,7 @@ esac
 # ---------------------------------------------------------------------------
 # Ensure runtime dir exists (needed by both context copy and install_meta.json)
 # ---------------------------------------------------------------------------
-RUNTIME_DIR="$HOME/.agent-chat-gateway"
+RUNTIME_DIR="$HOME/.agentcoop"
 mkdir -p "$RUNTIME_DIR"
 
 # ---------------------------------------------------------------------------
@@ -301,26 +355,26 @@ fi
 
 # ---------------------------------------------------------------------------
 # Write install_meta.json — always, regardless of --no-onboard
-# This is required by `agent-chat-gateway upgrade` to locate the repo.
+# This is required by `coop upgrade` to locate the repo.
 # ---------------------------------------------------------------------------
-ACG_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+COOP_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
 cat > "$RUNTIME_DIR/install_meta.json" << EOF
 {
   "method": "git",
   "repo_path": "$REPO_DIR",
-  "version": "$ACG_VERSION"
+  "version": "$COOP_VERSION"
 }
 EOF
-success "Wrote install_meta.json (version=$ACG_VERSION, repo=$REPO_DIR)"
+success "Wrote install_meta.json (version=$COOP_VERSION, repo=$REPO_DIR)"
 
 # ---------------------------------------------------------------------------
 # Run onboard wizard (skipped when --no-onboard is passed)
 # ---------------------------------------------------------------------------
 if [ "$NO_ONBOARD" = true ]; then
   info "Skipping setup wizard (--no-onboard). Configure manually:"
-  info "  1. Create ~/.agent-chat-gateway/.env with RC_URL, RC_USERNAME, RC_PASSWORD"
-  info "  2. Create ~/.agent-chat-gateway/config.yaml"
-  info "  3. Run: agent-chat-gateway start"
+  info "  1. Create ~/.agentcoop/.env with RC_URL, RC_USERNAME, RC_PASSWORD"
+  info "  2. Create ~/.agentcoop/config.yaml"
+  info "  3. Run: coop start"
 else
   info "Launching setup wizard..."
   "$VENV_BIN" onboard --repo-path "$REPO_DIR"
@@ -341,21 +395,21 @@ esac
 printf '\n'
 success "Installation complete!"
 printf '\n'
-printf '  Repository cloned to:    ~/.agent-chat-gateway/repo\n'
-printf '  Executable installed at: ~/.local/bin/agent-chat-gateway\n'
+printf '  Repository cloned to:    ~/.agentcoop/repo\n'
+printf '  Executable installed at: ~/.local/bin/coop\n'
 if [ "$PROVISION_LINKED" = true ]; then
-  printf '  Provisioning CLI:        ~/.local/bin/acg-provision\n'
+  printf '  Provisioning CLI:        ~/.local/bin/coop-provision\n'
 elif [ -f "$PROVISION_BIN" ]; then
   # Built but not linked (destination occupied) — point at the real binary so
   # the command is still discoverable.
   printf '  Provisioning CLI:        %s\n' "$PROVISION_BIN"
 fi
 printf '\n'
-printf '  To use agent-chat-gateway in your current shell, run:\n'
+printf '  To use AgentCoop in your current shell, run:\n'
 printf '    source %s\n' "$SHELL_RC"
 printf '  Or restart your terminal.\n'
 printf '\n'
-printf '  Start the gateway:   agent-chat-gateway start\n'
-printf '  Check status:        agent-chat-gateway status\n'
-printf '  View logs:           tail -f ~/.agent-chat-gateway/gateway.log\n'
+printf '  Start the gateway:   coop start\n'
+printf '  Check status:        coop status\n'
+printf '  View logs:           tail -f ~/.agentcoop/gateway.log\n'
 printf '\n'

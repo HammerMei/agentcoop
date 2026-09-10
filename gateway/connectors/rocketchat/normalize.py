@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .config import RocketChatConfig
     from .rest import RocketChatREST
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat.normalize")
+logger = logging.getLogger("coop.connectors.rocketchat.normalize")
 
 
 @functools.lru_cache(maxsize=8)
@@ -62,7 +62,7 @@ class FilterResult:
     sender: str = ""
     msg_ts: str = ""
     reason: str = ""  # debug only
-    is_agent_chain: bool = False   # True when sender is a known ACG agent
+    is_agent_chain: bool = False   # True when sender is a known AgentCoop agent
     agent_chain_turn: int = 0      # current turn (1-based, after increment)
     # Names the increment rather than counting it. `agent_chain_turn` is the live count
     # and moves in both directions, so it cannot identify a delivery; releasing a turn
@@ -271,7 +271,7 @@ async def normalize_rc_message(
         rest                 : RocketChatREST (for authenticated attachment downloads).
         cache_dir            : Absolute directory path for downloaded attachments.
                                Caller ensures this is unique per watcher.
-        is_agent_chain       : True when the sender is a known ACG agent.
+        is_agent_chain       : True when the sender is a known AgentCoop agent.
         agent_chain_turn     : 1-based current turn number (after increment).
         agent_chain_max_turns: Configured turn budget ceiling.
     """

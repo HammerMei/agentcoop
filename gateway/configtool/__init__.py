@@ -1,7 +1,7 @@
-"""agent-chat-gateway config TUI.
+"""coop config TUI.
 
-Reached via ``agent-chat-gateway config`` (no subcommand) — see
-gateway/cli.py's ``_run_config``. ``agent-chat-gateway config validate``
+Reached via ``coop config`` (no subcommand) — see
+gateway/cli.py's ``_run_config``. ``coop config validate``
 stays a separate, scriptable command backed by gateway/config_validate.py.
 
 Not to be confused with gateway/tools/tui.py, an unrelated interactive REPL
@@ -18,12 +18,12 @@ def run_app(config_path: str, lint: bool = False) -> int:
     """Launch the config TUI. Returns a process exit code.
 
     Guards against a piped/non-interactive invocation (e.g.
-    ``agent-chat-gateway config | cat`` or ``ssh host cmd </dev/null``) —
+    ``coop config | cat`` or ``ssh host cmd </dev/null``) —
     Textual's driver needs a real terminal; without one this would otherwise
     hang rather than fail fast.
 
     Runs the same one-time `.env` -> config.yaml migration
-    (``gateway/config_migrate.py``) that ``agent-chat-gateway start`` runs
+    (``gateway/config_migrate.py``) that ``coop start`` runs
     automatically — the config TUI was, until this was added, the one
     remaining entry point that could show/edit a pre-migration config
     (secrets still behind `${VAR}` and `.env`), which is what used to
@@ -42,8 +42,8 @@ def run_app(config_path: str, lint: bool = False) -> int:
     """
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print(
-            "Error: 'agent-chat-gateway config' requires an interactive terminal.\n"
-            "Use 'agent-chat-gateway config validate' for a non-interactive check.",
+            "Error: 'coop config' requires an interactive terminal.\n"
+            "Use 'coop config validate' for a non-interactive check.",
             file=sys.stderr,
         )
         return 1

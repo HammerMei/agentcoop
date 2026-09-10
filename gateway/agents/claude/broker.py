@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from ...config import ToolRule
     from .adapter import ClaudeBackend
 
-logger = logging.getLogger("agent-chat-gateway.permissions.claude")
+logger = logging.getLogger("coop.permissions.claude")
 
 _HOST = "127.0.0.1"
 

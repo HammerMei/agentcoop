@@ -67,7 +67,7 @@ from .policy import apply_thread_policy
 from .rest import RocketChatREST, RoomNotFoundError, room_type_for
 from .websocket import RCWebSocketClient
 
-logger = logging.getLogger("agent-chat-gateway.connectors.rocketchat")
+logger = logging.getLogger("coop.connectors.rocketchat")
 
 
 class ClassificationUnavailable(Exception):

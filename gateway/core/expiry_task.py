@@ -13,7 +13,7 @@ import logging
 
 from .permission import PermissionNotifier, PermissionRegistry, _format_timeout_msg
 
-logger = logging.getLogger("agent-chat-gateway.permissions.expiry")
+logger = logging.getLogger("coop.permissions.expiry")
 
 _CHECK_INTERVAL = 30  # seconds between expiry sweeps
 

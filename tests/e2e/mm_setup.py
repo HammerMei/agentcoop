@@ -17,7 +17,7 @@ Steps:
      membership preconditions all pass vacuously.
   4. Create the team. Channels are team-scoped (design §6.3), so everything
      below hangs off it.
-  5. Create the bot account ACG logs in as, and the human test account.
+  5. Create the bot account AgentCoop logs in as, and the human test account.
   6. Create the member channel, with bot + test user in it.
   7. Create the "outside" channel — the human test user joins it, the bot
      does NOT. This one exists for design §6.2: a public channel is READABLE

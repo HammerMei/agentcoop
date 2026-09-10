@@ -52,14 +52,14 @@ from .watcher_manager import (
 )
 from .watcher_rule import RoomKind, WatcherRule
 
-logger = logging.getLogger("agent-chat-gateway.core.session_manager")
+logger = logging.getLogger("coop.core.session_manager")
 
 # Why a reclaimed room's scheduled jobs are cancelled, and what the operator can
 # do about it — `(reason, advice)`, one pair per cause, so the AUDIT line names
 # the cause that applied instead of assuming one. `{job_id}` is filled per job.
 JOBS_CANCELLED_BOT_REMOVED = (
     "the bot was removed from the room, so the job could never deliver",
-    "'agent-chat-gateway schedule resume {job_id}' restores it once the bot is back.",
+    "'coop schedule resume {job_id}' restores it once the bot is back.",
 )
 JOBS_CANCELLED_ROOM_UNSERVED = (
     "the room is no longer available to this connector",
@@ -1494,7 +1494,7 @@ class SessionManager:
                 f"which receives no unsolicited messages — nothing would bring "
                 f"an expired watcher back until the daemon restarts or a "
                 f"scheduled job happens to wake it. Use "
-                f"'agent-chat-gateway reset {name}' to clear its session instead."
+                f"'coop reset {name}' to clear its session instead."
             )
         # The destructive verbs join the shutdown barrier (internal review of
         # the barrier close): expire was outside flag+counter, protected only

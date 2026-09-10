@@ -18,12 +18,12 @@ What you expected to happen.
 
 ## Logs
 ```
-# Paste relevant lines from ~/.agent-chat-gateway/gateway.log
+# Paste relevant lines from ~/.agentcoop/gateway.log
 ```
 
 ## Environment
 - OS: [e.g. macOS 14, Ubuntu 22.04]
 - Python version: `python3 --version`
-- agent-chat-gateway version: `agent-chat-gateway status`
+- AgentCoop version: `coop status`
 - Agent backend: [Claude / OpenCode]
 - Connector: [Rocket.Chat version]

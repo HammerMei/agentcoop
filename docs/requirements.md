@@ -1,8 +1,8 @@
-# agent-chat-gateway: Functional Specification
+# AgentCoop: Functional Specification
 
 ## 1. Purpose and Scope
 
-The `agent-chat-gateway` daemon bridges messaging platforms (Rocket.Chat and others) to persistent AI agent sessions. The system accepts user messages from monitored chat rooms or direct messages, forwards eligible messages to a configured agent backend, and posts the agent's response back to the originating chat destination.
+The `coop` daemon bridges messaging platforms (Rocket.Chat and others) to persistent AI agent sessions. The system accepts user messages from monitored chat rooms or direct messages, forwards eligible messages to a configured agent backend, and posts the agent's response back to the originating chat destination.
 
 **Scope:** This specification defines externally observable behavior and user-facing requirements. It intentionally avoids internal architecture and implementation details except where necessary to clarify requirements.
 
@@ -97,7 +97,7 @@ The gateway SHALL:
 
 ### 4.1 Operational Commands
 
-The gateway SHALL support the following commands via the `agent-chat-gateway` CLI:
+The gateway SHALL support the following commands via the `coop` CLI:
 
 | Command | Purpose |
 |---------|---------|

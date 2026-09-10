@@ -1,11 +1,11 @@
 """Standalone argparse entrypoint for the RC/MM admin CLI.
 
 Usage:
-    acg-provision [--config PATH] [--log-file PATH] <profile> create-user <username> <email> <password> [--full-name NAME]
-    acg-provision [--config PATH] [--log-file PATH] <profile> create-channel <name> [--private]
-    acg-provision [--config PATH] [--log-file PATH] <profile> add-to-channel <username> <channel>
-    acg-provision [--config PATH] [--log-file PATH] <profile> delete-user <username>
-    acg-provision [--config PATH] [--log-file PATH] <profile> delete-channel <channel>
+    coop-provision [--config PATH] [--log-file PATH] <profile> create-user <username> <email> <password> [--full-name NAME]
+    coop-provision [--config PATH] [--log-file PATH] <profile> create-channel <name> [--private]
+    coop-provision [--config PATH] [--log-file PATH] <profile> add-to-channel <username> <channel>
+    coop-provision [--config PATH] [--log-file PATH] <profile> delete-user <username>
+    coop-provision [--config PATH] [--log-file PATH] <profile> delete-channel <channel>
 
 Not wired into gateway/cli.py — see gateway/admin/__init__.py for why.
 
@@ -21,7 +21,7 @@ API failures (httpx.HTTPStatusError, e.g. a 400 from creating a user whose
 email already exists) print a short, platform-specific message extracted
 from the response body (see gateway/admin/_errors.py) rather than httpx's
 own generic "Client error '400 Bad Request' for url '...'" — the full raw
-response body is preserved in --log-file (default: ./acg-provision.log) for
+response body is preserved in --log-file (default: ./coop-provision.log) for
 troubleshooting.
 """
 
@@ -40,9 +40,9 @@ from gateway.admin.base import ChannelAlreadyExistsError, UserAlreadyExistsError
 from gateway.admin.config import AdminConfigError, get_profile, load_profiles
 from gateway.admin.factory import admin_factory
 
-DEFAULT_LOG_FILE = "acg-provision.log"
+DEFAULT_LOG_FILE = "coop-provision.log"
 
-_error_logger = logging.getLogger("agent-chat-gateway.admin.errors")
+_error_logger = logging.getLogger("coop.admin.errors")
 
 
 def _has_file_handler_for(logger: logging.Logger, target: str) -> bool:
@@ -64,11 +64,11 @@ def _configure_error_log(path: str) -> None:
        ``propagate`` is turned off so this doesn't ALSO get written via
        handler 2 below (same file, would otherwise double the line).
 
-    2. On the "agent-chat-gateway" umbrella logger — this is the actual fix
+    2. On the "coop" umbrella logger — this is the actual fix
        for what prompted this function to exist: RocketChatREST/
        MattermostREST's shared ``_request()`` calls ``logger.error()``
        itself on every non-2xx response, on loggers named
-       "agent-chat-gateway.connectors.<platform>.rest". With NO handler
+       "coop.connectors.<platform>.rest". With NO handler
        configured anywhere in that hierarchy, Python's logging module falls
        back to its "handler of last resort" and prints the raw log record
        (including the full JSON body) straight to stderr — which is exactly
@@ -77,7 +77,7 @@ def _configure_error_log(path: str) -> None:
        was never going to catch this, since a genuine creation failure like
        "email already exists" is deliberately NOT one of those suppressed
        calls. Attaching a WARNING+ handler here (a common ancestor of every
-       "agent-chat-gateway.*" logger this CLI touches) means a handler is
+       "coop.*" logger this CLI touches) means a handler is
        always found during that walk, so the "no handler" fallback never
        triggers — the detail lands in the file instead of leaking to the
        console a second time, redundant with the friendly message _run()
@@ -130,7 +130,7 @@ def _configure_error_log(path: str) -> None:
             handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
             _error_logger.addHandler(handler)
 
-        umbrella_logger = logging.getLogger("agent-chat-gateway")
+        umbrella_logger = logging.getLogger("coop")
         if not _has_file_handler_for(umbrella_logger, target):
             umbrella_handler = logging.FileHandler(path)
             umbrella_handler.setLevel(logging.WARNING)
@@ -145,12 +145,12 @@ def _configure_error_log(path: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="acg-provision",
+        prog="coop-provision",
         description="Standalone admin CLI for Rocket.Chat / Mattermost user & channel provisioning.",
     )
     parser.add_argument(
         "--config",
-        help="Path to the profiles YAML file (default: ./admin-profiles.yaml, or $ACG_ADMIN_CONFIG)",
+        help="Path to the profiles YAML file (default: ./admin-profiles.yaml, or $COOP_ADMIN_CONFIG)",
     )
     parser.add_argument(
         "--log-file", default=DEFAULT_LOG_FILE,
@@ -328,7 +328,7 @@ def main() -> None:
         #
         # Re-signalling (rather than exiting with a chosen code) keeps the
         # process dying *by* SIGINT, which is what a shell needs to abort a
-        # seed loop like `for f in ...; do acg-provision ...; done`. Returning a
+        # seed loop like `for f in ...; do coop-provision ...; done`. Returning a
         # plain exit code here would silently make such loops run to
         # completion after a Ctrl-C.
         print("Error: interrupted", file=sys.stderr)

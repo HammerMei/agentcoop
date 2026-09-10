@@ -1,6 +1,6 @@
 [project]
-name = "agent-chat-gateway"
-version = "0.5.1"
+name = "agentcoop"
+version = "1.0.0"
 description = "Daemon that bridges chat platforms (Rocket.Chat and more) to AI agent backends (Claude, OpenCode)"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -32,15 +32,17 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/HammerMei/agent-chat-gateway"
-Repository = "https://github.com/HammerMei/agent-chat-gateway"
-Issues = "https://github.com/HammerMei/agent-chat-gateway/issues"
-Changelog = "https://github.com/HammerMei/agent-chat-gateway/releases"
+Homepage = "https://github.com/HammerMei/agentcoop"
+Repository = "https://github.com/HammerMei/agentcoop"
+Issues = "https://github.com/HammerMei/agentcoop/issues"
+Changelog = "https://github.com/HammerMei/agentcoop/releases"
 
 [project.scripts]
-agent-chat-gateway = "gateway.cli:main"
+coop = "gateway.cli:main"
+coop-provision = "gateway.admin.cli:main"
 gateway-tui = "gateway.tools.tui:main"
-acg-provision = "gateway.admin.cli:main"
+# Not an alias: prints why the old name no longer works and exits 1 (#154).
+agent-chat-gateway = "gateway.tombstone:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["gateway"]

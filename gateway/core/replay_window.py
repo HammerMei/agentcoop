@@ -1,13 +1,13 @@
 """The mark that keeps a message the gateway could not take reachable later.
 
-**This is ACG's own bookkeeping, not a platform behaviour.** Both connectors apply
+**This is AgentCoop's own bookkeeping, not a platform behaviour.** Both connectors apply
 backpressure: when every processor queue is full, a message is refused and reported as
 still owed. Refusing it is only honest if something remembers where to look for it, because
 the per-message dedup id is forgotten precisely so a later replay can bring it back — and
 the ordinary watermark cannot serve, since the next *accepted* message moves it past the
 refused one for good.
 
-So this module is shared for the reason ACG shares anything: the question is ACG's, and
+So this module is shared for the reason AgentCoop shares anything: the question is AgentCoop's, and
 asking it twice is how it ends up answered once. It is deliberately **not** an attempt to
 make the connectors behave alike. Everything platform-specific stays with the platform:
 
@@ -38,7 +38,7 @@ from .adapter_utils import ts_to_float
 def just_before(ts: str) -> str:
     """The largest timestamp strictly below `ts`, as a replay lower bound.
 
-    Shared because both platforms hand ACG epoch milliseconds as a string — Rocket.Chat
+    Shared because both platforms hand AgentCoop epoch milliseconds as a string — Rocket.Chat
     from `ts.$date`, Mattermost from `create_at` — so "one millisecond below" is an exact
     value on both rather than an epsilon.
 

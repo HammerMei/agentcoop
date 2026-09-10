@@ -10,7 +10,7 @@ rather than hidden:
 
 * **Channels are scoped to a team.** Every channel lookup takes a `team_id`,
   because a channel name is unique only within a team (design §6.3) — which
-  is exactly why an ACG connector is scoped to one team.
+  is exactly why an AgentCoop connector is scoped to one team.
 * **DMs belong to no team** and are created from the two user ids, not from a
   username.
 * Auth is a bearer token from the login response's ``Token`` header, not the

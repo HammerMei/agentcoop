@@ -6,7 +6,7 @@ Runs twice via e2e_room fixture:
 
 The agent is instructed to:
   1. Create a text file with known content.
-  2. Send it using the agent-chat-gateway send CLI command.
+  2. Send it using the coop send CLI command.
 
 Success criterion: a message with a file attachment appears in the room
 from the bot account.
@@ -54,7 +54,7 @@ def test_agent_sends_file(
         e2e_room["mention_prefix"]
         + f"Please create a text file named 'agent_output.txt' with the content "
         f"'hello from agent' and then send it to the room {room_ref} using the "
-        f"agent-chat-gateway send command with the --attach flag."
+        f"coop send command with the --attach flag."
     )
     test_client.post_message(e2e_room["id"], prompt)
 

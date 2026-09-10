@@ -117,8 +117,8 @@ class TestAgentSessionOptions(unittest.IsolatedAsyncioTestCase):
     async def test_env_forwarded_to_send(self):
         backend = MockAgentBackend()
         async with AgentSession(backend, "/tmp") as session:
-            await session.send("hi", env={"ACG_ROLE": "owner"})
-        self.assertEqual(backend.sent_messages[0]["env"], {"ACG_ROLE": "owner"})
+            await session.send("hi", env={"COOP_ROLE": "owner"})
+        self.assertEqual(backend.sent_messages[0]["env"], {"COOP_ROLE": "owner"})
 
     async def test_no_attachments_by_default(self):
         backend = MockAgentBackend()

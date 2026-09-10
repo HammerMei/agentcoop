@@ -30,7 +30,7 @@ from gateway.admin.config import AdminProfile
 from gateway.connectors.mattermost.rest import MattermostREST, RoomNotFoundError
 from gateway.connectors.mattermost.rest import logger as _mm_rest_logger
 
-logger = logging.getLogger("agent-chat-gateway.admin.mattermost")
+logger = logging.getLogger("coop.admin.mattermost")
 
 
 def _fmt(exc: Exception | None) -> str:

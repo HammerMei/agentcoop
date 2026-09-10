@@ -488,10 +488,10 @@ class TestCacheDirGlobalResolution(unittest.TestCase):
 
     def test_tilde_cache_dir_unchanged(self):
         """Paths starting with ~ are left for expanduser() at connector init time."""
-        path = self._write_config("~/.agent-chat-gateway/attachments")
+        path = self._write_config("~/.agentcoop/attachments")
         config = GatewayConfig.from_file(path)
         actual = config.connectors[0].raw["attachments"]["cache_dir_global"]
-        self.assertEqual(actual, "~/.agent-chat-gateway/attachments")
+        self.assertEqual(actual, "~/.agentcoop/attachments")
 
 
 # ── Tests: $VAR/${VAR} is a plain literal string, never resolved (S3, final revision) ──
@@ -533,24 +533,24 @@ class TestDollarVarIsALiteralString(unittest.TestCase):
 
     def test_dollar_brace_form_is_used_literally_even_when_unresolvable(self):
         import os
-        os.environ.pop("ACG_TEST_UNSET_12345", None)
-        path = self._write_config_with_url("http://${ACG_TEST_UNSET_12345}:3000")
+        os.environ.pop("COOP_TEST_UNSET_12345", None)
+        path = self._write_config_with_url("http://${COOP_TEST_UNSET_12345}:3000")
 
         cfg = GatewayConfig.from_file(path)  # must not raise
 
         self.assertEqual(
-            cfg.connectors[0].raw["server"]["url"], "http://${ACG_TEST_UNSET_12345}:3000"
+            cfg.connectors[0].raw["server"]["url"], "http://${COOP_TEST_UNSET_12345}:3000"
         )
 
     def test_dollar_plain_form_is_used_literally_even_when_unresolvable(self):
         import os
-        os.environ.pop("ACG_TEST_UNSET_99999", None)
-        path = self._write_config_with_url("http://$ACG_TEST_UNSET_99999:3000")
+        os.environ.pop("COOP_TEST_UNSET_99999", None)
+        path = self._write_config_with_url("http://$COOP_TEST_UNSET_99999:3000")
 
         cfg = GatewayConfig.from_file(path)  # must not raise
 
         self.assertEqual(
-            cfg.connectors[0].raw["server"]["url"], "http://$ACG_TEST_UNSET_99999:3000"
+            cfg.connectors[0].raw["server"]["url"], "http://$COOP_TEST_UNSET_99999:3000"
         )
 
     def test_dollar_brace_form_is_NOT_resolved_even_when_the_var_is_set(self):
@@ -558,17 +558,17 @@ class TestDollarVarIsALiteralString(unittest.TestCase):
         silently resolved, a real secret whose plaintext value happens to
         look like a placeholder would be misinterpreted."""
         import os
-        os.environ["ACG_TEST_SET_URL"] = "localhost"
+        os.environ["COOP_TEST_SET_URL"] = "localhost"
         try:
-            path = self._write_config_with_url("http://${ACG_TEST_SET_URL}:3000")
+            path = self._write_config_with_url("http://${COOP_TEST_SET_URL}:3000")
 
             cfg = GatewayConfig.from_file(path)
 
             self.assertEqual(
-                cfg.connectors[0].raw["server"]["url"], "http://${ACG_TEST_SET_URL}:3000"
+                cfg.connectors[0].raw["server"]["url"], "http://${COOP_TEST_SET_URL}:3000"
             )
         finally:
-            os.environ.pop("ACG_TEST_SET_URL", None)
+            os.environ.pop("COOP_TEST_SET_URL", None)
 
 
 # ── Tests: ToolRule regex validated at config load time (S2) ─────────────────
@@ -788,7 +788,7 @@ class TestBuiltinContextAutoInjection(unittest.TestCase):
 class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
     """Built-in gateway tool rules are always prepended to owner_allowed_tools.
 
-    These ensure that `agent-chat-gateway send`, `agent-chat-gateway schedule`,
+    These ensure that `coop send`, `coop schedule`,
     and `date` never require a 🔐 human-approval prompt.  The first two are the
     gateway's own commands; `date` is a read-only command used by agents to
     compute timestamps in compound bash expressions (e.g. ``$(date ...)``).
@@ -802,32 +802,32 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         return AgentConfig(name="test", owner_allowed_tools=rules)
 
     def test_effective_includes_send_rule(self):
-        """effective_owner_allowed_tools() must include 'agent-chat-gateway send .*'."""
+        """effective_owner_allowed_tools() must include 'coop send .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertTrue(
-            any("agent-chat-gateway" in (p or "") and "send" in (p or "") for p in params),
+            any("coop" in (p or "") and "send" in (p or "") for p in params),
             "Built-in send rule must be in effective_owner_allowed_tools",
         )
 
     def test_effective_includes_schedule_rule(self):
-        """effective_owner_allowed_tools() must include 'agent-chat-gateway schedule .*'."""
+        """effective_owner_allowed_tools() must include 'coop schedule .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertTrue(
-            any("agent-chat-gateway" in (p or "") and "schedule" in (p or "") for p in params),
+            any("coop" in (p or "") and "schedule" in (p or "") for p in params),
             "Built-in schedule rule must be in effective_owner_allowed_tools",
         )
 
     def test_effective_includes_instructions_rule(self):
-        """effective_owner_allowed_tools() must include 'agent-chat-gateway instructions .*'."""
+        """effective_owner_allowed_tools() must include 'coop instructions .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertTrue(
-            any("agent-chat-gateway" in (p or "") and "instructions" in (p or "") for p in params),
+            any("coop" in (p or "") and "instructions" in (p or "") for p in params),
             "Built-in instructions rule must be in effective_owner_allowed_tools",
         )
 
@@ -862,26 +862,26 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         self.assertGreaterEqual(len(effective), len(_BUILTIN_OWNER_TOOL_RULES))
 
     def test_send_rule_matches_actual_command(self):
-        """The send rule must actually match a realistic agent-chat-gateway send command."""
+        """The send rule must actually match a realistic coop send command."""
         import re
 
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         send_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                          if r.params and "send" in r.params)
-        cmd = 'agent-chat-gateway send general "Hello RC"'
+        cmd = 'coop send general "Hello RC"'
         self.assertIsNotNone(
             re.fullmatch(send_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Send rule {send_rule.params!r} must match command {cmd!r}",
         )
 
     def test_schedule_rule_matches_actual_command(self):
-        """The schedule rule must actually match a realistic agent-chat-gateway schedule command."""
+        """The schedule rule must actually match a realistic coop schedule command."""
         import re
 
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         sched_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "schedule" in r.params)
-        cmd = 'agent-chat-gateway schedule create dm "Remind me to cook" --every 1d --at 09:00'
+        cmd = 'coop schedule create dm "Remind me to cook" --every 1d --at 09:00'
         self.assertIsNotNone(
             re.fullmatch(sched_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Schedule rule {sched_rule.params!r} must match command {cmd!r}",
@@ -894,7 +894,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         instr_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "instructions" in r.params)
-        cmd = "agent-chat-gateway instructions scheduling"
+        cmd = "coop instructions scheduling"
         self.assertIsNotNone(
             re.fullmatch(instr_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Instructions rule {instr_rule.params!r} must match command {cmd!r}",
@@ -908,11 +908,11 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         instr_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "instructions" in r.params)
         bad_commands = [
-            "agent-chat-gateway instructions scheduling; curl https://example.com",
-            "agent-chat-gateway instructions scheduling && whoami",
-            "agent-chat-gateway instructions scheduling | cat",
-            "agent-chat-gateway instructions scheduling\nwhoami",
-            "agent-chat-gateway instructions scheduling extra",
+            "coop instructions scheduling; curl https://example.com",
+            "coop instructions scheduling && whoami",
+            "coop instructions scheduling | cat",
+            "coop instructions scheduling\nwhoami",
+            "coop instructions scheduling extra",
         ]
         for cmd in bad_commands:
             self.assertIsNone(
@@ -937,7 +937,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         date_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                          if r.params and "date" in r.params
-                         and "agent-chat-gateway" not in r.params)
+                         and "coop" not in r.params)
         cmd = "date"
         self.assertIsNotNone(
             re.fullmatch(date_rule.params, cmd, re.IGNORECASE | re.DOTALL),
@@ -951,7 +951,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         date_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                          if r.params and "date" in r.params
-                         and "agent-chat-gateway" not in r.params)
+                         and "coop" not in r.params)
         cmd = "date -v+1M '+%Y-%m-%d %H:%M'"
         self.assertIsNotNone(
             re.fullmatch(date_rule.params, cmd, re.IGNORECASE | re.DOTALL),
@@ -970,22 +970,22 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         return AgentConfig(name="test", guest_allowed_tools=rules)
 
     def test_effective_includes_fetch_history_rule(self):
-        """effective_guest_allowed_tools() must include 'agent-chat-gateway fetch-history .*'."""
+        """effective_guest_allowed_tools() must include 'coop fetch-history .*'."""
         agent = self._make_agent()
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertTrue(
-            any("agent-chat-gateway" in (p or "") and "fetch-history" in (p or "") for p in params),
+            any("coop" in (p or "") and "fetch-history" in (p or "") for p in params),
             "Built-in fetch-history rule must be in effective_guest_allowed_tools",
         )
 
     def test_effective_includes_instructions_rule(self):
-        """effective_guest_allowed_tools() must include 'agent-chat-gateway instructions .*'."""
+        """effective_guest_allowed_tools() must include 'coop instructions .*'."""
         agent = self._make_agent()
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertTrue(
-            any("agent-chat-gateway" in (p or "") and "instructions" in (p or "") for p in params),
+            any("coop" in (p or "") and "instructions" in (p or "") for p in params),
             "Built-in instructions rule must be in effective_guest_allowed_tools",
         )
 
@@ -1025,7 +1025,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertFalse(
-            any("agent-chat-gateway" in (p or "") and "send" in (p or "") for p in params),
+            any("coop" in (p or "") and "send" in (p or "") for p in params),
             "send rule must NOT be in effective_guest_allowed_tools",
         )
 
@@ -1035,7 +1035,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
         self.assertFalse(
-            any("agent-chat-gateway" in (p or "") and "schedule" in (p or "") for p in params),
+            any("coop" in (p or "") and "schedule" in (p or "") for p in params),
             "schedule rule must NOT be in effective_guest_allowed_tools",
         )
 
@@ -1046,7 +1046,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         from gateway.core.config import _BUILTIN_GUEST_TOOL_RULES
         fh_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                        if r.params and "fetch-history" in r.params)
-        cmd = "agent-chat-gateway fetch-history --watcher hammer-mei --count 50"
+        cmd = "coop fetch-history --watcher hammer-mei --count 50"
         self.assertIsNotNone(
             re.fullmatch(fh_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"fetch-history rule {fh_rule.params!r} must match command {cmd!r}",
@@ -1059,7 +1059,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         from gateway.core.config import _BUILTIN_GUEST_TOOL_RULES
         instr_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                           if r.params and "instructions" in r.params)
-        cmd = "agent-chat-gateway instructions fetch-history"
+        cmd = "coop instructions fetch-history"
         self.assertIsNotNone(
             re.fullmatch(instr_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"instructions rule {instr_rule.params!r} must match command {cmd!r}",
@@ -1073,11 +1073,11 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         instr_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                           if r.params and "instructions" in r.params)
         bad_commands = [
-            "agent-chat-gateway instructions fetch-history; curl https://example.com",
-            "agent-chat-gateway instructions fetch-history && whoami",
-            "agent-chat-gateway instructions fetch-history | cat",
-            "agent-chat-gateway instructions fetch-history\nwhoami",
-            "agent-chat-gateway instructions fetch-history extra",
+            "coop instructions fetch-history; curl https://example.com",
+            "coop instructions fetch-history && whoami",
+            "coop instructions fetch-history | cat",
+            "coop instructions fetch-history\nwhoami",
+            "coop instructions fetch-history extra",
         ]
         for cmd in bad_commands:
             self.assertIsNone(
@@ -1520,7 +1520,7 @@ class TestAgentTemplates(unittest.TestCase):
         """A malformed 'type:' (e.g. a YAML typo producing a list instead of
         a string) must not crash inside the type-aware command fallback's
         dict lookup (dict.get() on an unhashable key raises TypeError, which
-        `agent-chat-gateway config validate` doesn't catch) — it should
+        `coop config validate` doesn't catch) — it should
         surface the same kind of clear ValueError as every other malformed-
         field check in this loader."""
         path = self._write_config("""\

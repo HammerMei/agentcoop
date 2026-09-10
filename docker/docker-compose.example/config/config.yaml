@@ -1,4 +1,4 @@
-# agent-chat-gateway config — Docker example
+# coop config — Docker example
 # Based on docker_env/config/config.yaml
 #
 # Place this file at: ./config/config.yaml
@@ -25,7 +25,7 @@ connectors:
     reply_in_thread: false
     permission_reply_in_thread: true
     context_inject_files:
-      - /root/.agent-chat-gateway/contexts/rc-gateway-context.md
+      - /root/.agentcoop/contexts/rc-gateway-context.md
 
 agents:
   # ── Claude Code backend ──────────────────────────────────────────────────
@@ -35,7 +35,7 @@ agents:
     new_session_args: []
     session_prefix: agent-chat
     context_inject_files: []
-    working_directory: /root/.agent-chat-gateway/work/claude_agent
+    working_directory: /root/.agentcoop/work/claude_agent
     owner_allowed_tools:
       - tool: "Read"
       - tool: "Glob"
@@ -46,7 +46,7 @@ agents:
       - tool: "Bash"
         params: "git (log|diff|status|show)( .*)?"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
     guest_allowed_tools:
       - tool: "Read"
       - tool: "Grep"
@@ -55,7 +55,7 @@ agents:
       - tool: "WebFetch"
         params: "https?://.*"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
     timeout: 360
     permissions:
       enabled: true
@@ -69,7 +69,7 @@ agents:
     new_session_args: []
     session_prefix: agent-chat
     context_inject_files: []
-    working_directory: /root/.agent-chat-gateway/work/opencode_agent
+    working_directory: /root/.agentcoop/work/opencode_agent
     owner_allowed_tools:
       - tool: "read"           # opencode uses lowercase tool names
       - tool: "glob"
@@ -80,7 +80,7 @@ agents:
       - tool: "bash"
         params: "git (log|diff|status|show)( .*)?"
       - tool: "bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
     guest_allowed_tools:
       - tool: "read"
       - tool: "grep"
@@ -89,7 +89,7 @@ agents:
       - tool: "webfetch"
         params: "https?://.*"
       - tool: "bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
     timeout: 360
     permissions:
       enabled: true
@@ -106,7 +106,7 @@ watcher_rules:
     context_inject_files: []
 
   # Channel rule — Claude agent. The watcher is created on the room's first
-  # message and shows up in `agent-chat-gateway list` as "rocketchat:general".
+  # message and shows up in `coop list` as "rocketchat:general".
   - name: room
     connector: rocketchat
     rooms:

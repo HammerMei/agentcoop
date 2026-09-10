@@ -15,7 +15,7 @@ connectors:
   reply_in_thread: false
   permission_reply_in_thread: false
   context_inject_files: []
-# One ACG, one connector per platform. `server.url` uses the compose service
+# One AgentCoop, one connector per platform. `server.url` uses the compose service
 # name because this resolves from INSIDE the container; the host-side test
 # clients use localhost:8065.
 - name: mm-e2e
@@ -39,7 +39,7 @@ agent_templates:
   e2e-default:
     new_session_args: []
     context_inject_files: []
-    working_directory: /root/.agent-chat-gateway/work
+    working_directory: /root/.agentcoop/work
     guest_allowed_tools: []
     timeout: 180
     permissions:

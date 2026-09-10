@@ -14,7 +14,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
-logger = logging.getLogger("agent-chat-gateway.stop")
+logger = logging.getLogger("coop.stop")
 
 STOP_ATTEMPTS = 3
 STOP_RETRY_DELAY = 2.0  # seconds between attempts
