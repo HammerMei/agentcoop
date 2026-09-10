@@ -1,16 +1,17 @@
 # =============================================================================
-# agent-chat-gateway — ACG Docker Image
+# INTERNAL TESTING ONLY — built for AgentCoop's E2E/CI runs, not a supported production install (see docker/README.md).
+# AgentCoop — AgentCoop Docker Image
 #
-# Includes: Python 3.12, uv, Claude Code (npm), OpenCode, ACG installed
+# Includes: Python 3.12, uv, Claude Code (npm), OpenCode, AgentCoop installed
 #
 # Build (from repo root):
-#   docker build -f docker/Dockerfile.acg -t acg:latest .
+#   docker build -f docker/Dockerfile.coop -t coop:latest .
 #
 # Run:
 #   docker run -e RC_URL=... -e RC_USERNAME=... -e RC_PASSWORD=... \
-#              -e ACG_OWNER_USERS=alice \
+#              -e COOP_OWNER_USERS=alice \
 #              -e ANTHROPIC_API_KEY=sk-ant-... \
-#              acg:latest
+#              coop:latest
 # =============================================================================
 
 # Agent version build args — pass at build time to pin specific versions.
@@ -74,44 +75,44 @@ RUN if [ "$OPENCODE_VERSION" = "latest" ]; then \
     fi
 
 # -----------------------------------------------------------------------------
-# Install ACG — mirrors the real curl | bash install flow exactly:
-#   repo → ~/.agent-chat-gateway/repo  (same as curl | bash)
+# Install AgentCoop — mirrors the real curl | bash install flow exactly:
+#   repo → ~/.agentcoop/repo  (same as curl | bash)
 #
 # Benefits:
-#   1. install_meta.json points to ~/.agent-chat-gateway/repo — upgrade works
+#   1. install_meta.json points to ~/.agentcoop/repo — upgrade works
 #   2. Docker build validates install.sh in the same path as real installs
-#   3. `agent-chat-gateway upgrade` can be run inside the container
+#   3. `coop upgrade` can be run inside the container
 # -----------------------------------------------------------------------------
-COPY . /root/.agent-chat-gateway/repo
-RUN bash /root/.agent-chat-gateway/repo/install.sh --no-onboard
+COPY . /root/.agentcoop/repo
+RUN bash /root/.agentcoop/repo/install.sh --no-onboard
 
 # -----------------------------------------------------------------------------
 # Pre-create all mountable directories
 #
 # Volume mount points:
 #
-#   ~/.agent-chat-gateway/config/   — ONLY config.yaml + .env (safe to bind-mount;
+#   ~/.agentcoop/config/   — ONLY config.yaml + .env (safe to bind-mount;
 #                                      entrypoint symlinks them one level up)
-#   ~/.agent-chat-gateway/work/      — agent working directory (inspectable locally)
-#   ~/.agent-chat-gateway/contexts/  — custom context files (defaults restored if empty)
+#   ~/.agentcoop/work/      — agent working directory (inspectable locally)
+#   ~/.agentcoop/contexts/  — custom context files (defaults restored if empty)
 #   ~/.claude/                       — Claude Code config & auth (settings.json, CLAUDE.md)
 #   ~/.config/opencode/              — OpenCode config & API key (config.json)
 #
-# NOTE: do NOT bind-mount ~/.agent-chat-gateway directly — it contains
+# NOTE: do NOT bind-mount ~/.agentcoop directly — it contains
 # install_meta.json and contexts required at runtime.
 # -----------------------------------------------------------------------------
 RUN mkdir -p \
-    /root/.agent-chat-gateway/config \
-    /root/.agent-chat-gateway/work \
-    /root/.agent-chat-gateway/logs \
-    /root/.agent-chat-gateway/data \
+    /root/.agentcoop/config \
+    /root/.agentcoop/work \
+    /root/.agentcoop/logs \
+    /root/.agentcoop/data \
     /root/.claude \
     /root/.config/opencode
 
 # -----------------------------------------------------------------------------
 # Entrypoint — generates config.yaml + .env from env vars, starts daemon
 # -----------------------------------------------------------------------------
-COPY docker/entrypoint.acg.sh /entrypoint.sh
+COPY docker/entrypoint.coop.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

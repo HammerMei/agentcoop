@@ -464,7 +464,7 @@ class TestTheVersionOnlyMovesWhenAMigrationRuns(_MigrateCase):
     async def test_a_save_does_not_stamp_a_newer_file_with_its_own_version(self):
         """The other direction, and the one the first fix introduced: writing
         `self._file_version` would claim version N while `to_dict` had already
-        dropped the fields version N carries — a future ACG would then skip the
+        dropped the fields version N carries — a future AgentCoop would then skip the
         migrations that restore them."""
         self._write_file(_SCHEMA_VERSION + 5, [self._job()])
         store = self._store()

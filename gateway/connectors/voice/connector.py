@@ -6,7 +6,7 @@ plain-text agent replies.  Designed to slot directly into an iOS Shortcut:
     Dictate Text  →  POST /ask/<room>  →  Agent  →  Speak Text
 
 The ``<room>`` path segment maps directly to the watcher's ``room:`` field in
-config.yaml, consistent with how all other ACG connectors use the room concept.
+config.yaml, consistent with how all other AgentCoop connectors use the room concept.
 
     POST /ask/laomei   →  room "laomei"  →  watcher → laomei agent
     POST /ask/xiaomei  →  room "xiaomei" →  watcher → xiaomei agent
@@ -106,7 +106,7 @@ class VoiceConnector(Connector):
     ``start_inbound()`` gets a bound port that refuses every connection.
 
     Endpoint: ``POST /ask/<room>``
-        The ``<room>`` segment is the ACG room name — matches the ``room:``
+        The ``<room>`` segment is the AgentCoop room name — matches the ``room:``
         field in the watcher config exactly.
     """
 

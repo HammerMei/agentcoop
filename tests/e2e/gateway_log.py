@@ -1,4 +1,4 @@
-"""Reading ACG's own log file — the parts worth testing without a stack.
+"""Reading AgentCoop's own log file — the parts worth testing without a stack.
 
 This module exists because of an import collision, and the collision is the
 reason it is a plain module rather than more code in `conftest.py`.

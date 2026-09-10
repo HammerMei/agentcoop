@@ -391,7 +391,7 @@ class TestBootRunsTheSweepsEvaluation(unittest.IsolatedAsyncioTestCase):
             bad.watcher_name: bad, good.watcher_name: good})
 
         with self.assertLogs(
-            "agent-chat-gateway.state", level="WARNING"
+            "coop.state", level="WARNING"
         ) as captured:
             await mgr._evaluate_lifecycle_at_boot()
 
@@ -524,7 +524,7 @@ class TestBootValidatesRoomScope(unittest.IsolatedAsyncioTestCase):
         mgr._connector.room_ref_by_id = AsyncMock(return_value=None)
         mgr._cancel_jobs = MagicMock()
 
-        with self.assertLogs("agent-chat-gateway.core.session_manager", level="WARNING") as logs:
+        with self.assertLogs("coop.core.session_manager", level="WARNING") as logs:
             await mgr._evaluate_lifecycle_at_boot()
 
         mgr._watcher_manager.get_or_create.assert_not_awaited()

@@ -15,7 +15,7 @@ We currently support only the latest version on the `main` branch.
 
 If you discover a security vulnerability, please report it privately via:
 
-- **GitHub Security Advisories:** [Report a vulnerability](https://github.com/HammerMei/agent-chat-gateway/security/advisories/new)
+- **GitHub Security Advisories:** [Report a vulnerability](https://github.com/HammerMei/agentcoop/security/advisories/new)
 
 Include as much detail as possible:
 - Description of the vulnerability
@@ -27,7 +27,7 @@ You will receive a response within **72 hours**. We ask that you give us reasona
 
 ## Security Considerations
 
-`agent-chat-gateway` runs AI agents with access to tools (Bash, file I/O, web fetch, etc.) on your infrastructure. Please review:
+`coop` runs AI agents with access to tools (Bash, file I/O, web fetch, etc.) on your infrastructure. Please review:
 
 - **[Permission & RBAC Reference](docs/permission-reference.md)** — How role-based access control and tool approval work
 - **Tool allow-lists** — Configure `owner_allowed_tools` and `guest_allowed_tools` to limit blast radius

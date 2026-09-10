@@ -174,7 +174,7 @@ class TestRuleChanges(_ReloadCase):
         session = (await self._rows())["script:script"]["session_id"]
         self._rewrite(self._text(rules=[]))
 
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             result = await self._reload()
 
         self.assertEqual([(w["action"], w["reason"], w["session_id"]) for w in result["watchers"]],
@@ -271,7 +271,7 @@ class TestAgentChanges(_ReloadCase):
         self._rewrite(self._text(agents={"default": {
             "type": "claude", "working_directory": str(other)}}))
 
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             result = await self._reload()
 
         self.assertEqual(result["exit_code"], 0, result)
@@ -638,7 +638,7 @@ class TestConnectorChanges(_ReloadCase):
         self.assertTrue((self.runtime / "state.second.json").exists())
         self._rewrite(self._text())
 
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             result = await self._reload()
 
         self.assertEqual(result["changes"]["connectors"]["removed"], ["second"])

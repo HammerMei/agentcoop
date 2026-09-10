@@ -1,4 +1,4 @@
-"""Upgrade logic for agent-chat-gateway."""
+"""Upgrade logic for AgentCoop."""
 
 import json
 import subprocess
@@ -16,7 +16,7 @@ console = Console()
 
 
 def load_install_meta(meta_file: Path | None = None) -> dict:
-    """Load ~/.agent-chat-gateway/install_meta.json. Returns {} if missing."""
+    """Load ~/.agentcoop/install_meta.json. Returns {} if missing."""
     path = meta_file or META_FILE
     try:
         return json.loads(path.read_text())
@@ -178,12 +178,12 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
     install.sh creates these at install time, but do_git_upgrade only runs
     `git pull` + `uv sync` — so a console script introduced in a LATER release
     lands in .venv/bin and never becomes reachable on the PATH the installer
-    configured. That is not hypothetical: acg-provision shipped after install.sh
+    configured. That is not hypothetical: coop-provision shipped after install.sh
     already existed, so every user who installed before it and upgraded through
-    this flow would end up with .venv/bin/acg-provision and no ~/.local/bin
+    this flow would end up with .venv/bin/coop-provision and no ~/.local/bin
     entry, leaving the command missing until they manually re-ran the installer.
 
-    Gated on ~/.local/bin/agent-chat-gateway already being present, because that
+    Gated on ~/.local/bin/coop already being present, because that
     symlink is install.sh's own fingerprint: its presence means this machine
     opted into that layout. Without the guard, a pipx / distro-package /
     manual-venv install would suddenly acquire symlinks it never asked for.
@@ -224,7 +224,7 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
     upgrade that just succeeded, so failures warn and continue.
     """
     local_bin = Path.home() / ".local" / "bin"
-    fingerprint = local_bin / "agent-chat-gateway"
+    fingerprint = local_bin / "coop"
     # `or is_symlink()` is load-bearing: exists() FOLLOWS symlinks, so an
     # installer symlink whose target has gone away (the repo or venv was moved)
     # reads as False. Gating on exists() alone bailed out in exactly the case
@@ -279,7 +279,7 @@ def _ensure_local_bin_symlinks(repo_path: Path) -> None:
             # pipe (on_broken_pipe(), reached from _check_buffer's BrokenPipeError
             # handler). SystemExit is a BaseException, so `except (OSError,
             # RuntimeError)` below does NOT catch it and the rollback never runs.
-            # With a print between rename() and symlink_to(), `agent-chat-gateway
+            # With a print between rename() and symlink_to(), `AgentCoop
             # upgrade | head -4` left the user's own wrapper in a .bak with NOTHING
             # on PATH, silently — SystemExit(1) prints nothing at all. Reproduced
             # end to end on 3.12 and 3.13.
@@ -583,51 +583,6 @@ def _read_current_version(repo_path: Path) -> str:
     return "unknown"
 
 
-def _is_pip_installed() -> bool:
-    """Return True if the package is installed as a regular pip/PyPI package."""
-    try:
-        import importlib.metadata
-
-        importlib.metadata.version("agentcoop")
-        # Confirm it's not a local editable install (editable installs have a direct_url.json
-        # with "editable": true, or a .pth file pointing to a local path)
-        dist = importlib.metadata.distribution("agentcoop")
-        direct_url_text = None
-        for f in dist.files or []:
-            if f.name == "direct_url.json":
-                try:
-                    direct_url_text = f.read_text()
-                except Exception:
-                    pass
-                break
-        if direct_url_text:
-            import json as _json
-
-            info = _json.loads(direct_url_text)
-            # Editable or local directory installs are not "pip from PyPI"
-            if info.get("dir_info", {}).get("editable") or "url" not in info:
-                return False
-            if info["url"].startswith("file://"):
-                return False
-        return True
-    except Exception:
-        return False
-
-
-def _do_pip_upgrade() -> None:
-    """Upgrade via pip install --upgrade."""
-    console.print("  Detected install method: [bold]pip (PyPI)[/bold]")
-    console.print("  Running [bold]pip install --upgrade agentcoop[/bold] ...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "agentcoop"],
-        check=False,
-    )
-    if result.returncode != 0:
-        console.print("[red]Error:[/red] pip upgrade failed.")
-        sys.exit(1)
-    console.print("[green]Upgrade complete![/green]")
-
-
 def _restart_daemon_in_fresh_interpreter() -> int:
     """Start the daemon from a NEW interpreter, so it runs the code just pulled.
 
@@ -635,11 +590,11 @@ def _restart_daemon_in_fresh_interpreter() -> int:
     inherits every module this process has already imported — which is the
     PRE-upgrade release, because the CLI imports `.daemon` → `.service` → the
     whole runtime before `run_upgrade` ever runs. `git pull` changed the files
-    on disk; nothing re-imported them. So `agent-chat-gateway upgrade` used to report success
+    on disk; nothing re-imported them. So `coop upgrade` used to report success
     and restart a daemon running the old code, and it stayed old until someone
     happened to `stop`/`start` by hand. Measured on a live deployment: two
     consecutive upgrades, both restarted daemons whose command line still read
-    `agent-chat-gateway upgrade` — the fork — and neither ran the pulled code.
+    `coop upgrade` — the fork — and neither ran the pulled code.
     The mix is worse than "old": a module first imported lazily AFTER the fork
     loads from disk and is new, so one process ran two releases at once.
 
@@ -658,14 +613,14 @@ def _restart_daemon_in_fresh_interpreter() -> int:
 
 def run_upgrade() -> None:
     """Entry point called by CLI."""
-    console.print("[bold cyan]agent-chat-gateway upgrade[/bold cyan]")
+    console.print("[bold cyan]coop upgrade[/bold cyan]")
 
     meta = load_install_meta()
     if not meta:
-        # No install_meta.json — check if installed via pip before giving up
-        if _is_pip_installed():
-            _do_pip_upgrade()
-            return
+        # No pip fallback: AgentCoop is not published to PyPI (the old
+        # `agent-chat-gateway` package stops at 0.5.2, and the `agentcoop` name
+        # there belongs to someone else), so `pip install --upgrade` could only
+        # ever fail or install a stranger's package. install.sh is the one path.
         console.print(
             "[yellow]Warning:[/yellow] install_meta.json not found.\n"
             "Cannot determine install method. Please upgrade manually:\n"
@@ -714,13 +669,13 @@ def run_upgrade() -> None:
                 console.print(
                     f"[red]Error:[/red] the daemon did not start after the upgrade "
                     f"(exit {rc}). The code is upgraded; start it with "
-                    f"'agent-chat-gateway start' and check the log."
+                    f"'coop start' and check the log."
                 )
                 sys.exit(rc)
 
         console.print(
             f"\n[green]Upgrade complete![/green] {old_version} → {new_version}\n"
-            "Changelog: https://github.com/HammerMei/agent-chat-gateway/releases"
+            "Changelog: https://github.com/HammerMei/agentcoop/releases"
         )
         return
 

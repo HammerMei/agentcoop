@@ -266,7 +266,7 @@ class TestASchedulerLeavesADegradedConnectorsJobsAlone(unittest.IsolatedAsyncioT
                            cron="0 9 * * *", timezone="UTC", times=0, status=JobStatus.ACTIVE,
                            created_at="2026-09-05T00:00:00+00:00",
                            next_run="2026-09-05T09:00:00+00:00")
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             out = await scheduler._fire_once(job, datetime.now(UTC))
         # `_fire_once` works on a copy stamped with the attempt; what matters is
         # that the slot was skipped: same next_run, still active, nothing cancelled.

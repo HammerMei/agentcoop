@@ -1,5 +1,5 @@
 """Unit tests for gateway/config_validate.py — the standalone (no-daemon)
-config validation used by `agent-chat-gateway config validate`.
+config validation used by `coop config validate`.
 
 CLI-level coverage (argument parsing, output formatting, exit codes) lives in
 tests/integration/test_cli.py::TestCLIConfigValidate. These tests exercise

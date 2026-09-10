@@ -34,7 +34,7 @@ class TestLoadInstallMeta:
         meta_file = tmp_path / "install_meta.json"
         expected = {
             "method": "git",
-            "repo_path": "/home/user/agent-chat-gateway",
+            "repo_path": "/home/user/agentcoop",
             "version": "0.1.0",
             "installed_at": "2026-03-27",
         }
@@ -43,7 +43,7 @@ class TestLoadInstallMeta:
         result = load_install_meta(meta_file)
 
         assert result["method"] == "git"
-        assert result["repo_path"] == "/home/user/agent-chat-gateway"
+        assert result["repo_path"] == "/home/user/agentcoop"
         assert result["version"] == "0.1.0"
         assert result["installed_at"] == "2026-03-27"
 
@@ -114,45 +114,24 @@ class TestRunUpgrade:
 
         assert exc_info.value.code == 1
 
-    def test_run_upgrade_brew(self, tmp_path: Path):
-        """Calls brew upgrade for brew install method."""
+    def test_run_upgrade_brew_is_an_unknown_method(self, tmp_path: Path):
+        """There has never been a Homebrew tap; the branch that ran `brew upgrade`
+        was dead code and is gone (#154). A meta file that says brew now gets the
+        unknown-method error, and nothing is executed."""
         from gateway.upgrade import run_upgrade
 
         meta_file = tmp_path / "install_meta.json"
         meta_file.write_text(json.dumps({"method": "brew", "repo_path": None, "version": "0.1.0"}))
 
-        brew_result = MagicMock()
-        brew_result.returncode = 0
-
         with (
             patch("gateway.upgrade.META_FILE", meta_file),
-            patch("subprocess.run", return_value=brew_result) as mock_run,
-        ):
-            run_upgrade()
-
-        mock_run.assert_called_once_with(
-            ["brew", "upgrade", "agent-chat-gateway"],
-            check=False,
-        )
-
-    def test_run_upgrade_brew_failure(self, tmp_path: Path):
-        """Exits with error when brew upgrade fails."""
-        from gateway.upgrade import run_upgrade
-
-        meta_file = tmp_path / "install_meta.json"
-        meta_file.write_text(json.dumps({"method": "brew", "version": "0.1.0"}))
-
-        brew_result = MagicMock()
-        brew_result.returncode = 1
-
-        with (
-            patch("gateway.upgrade.META_FILE", meta_file),
-            patch("subprocess.run", return_value=brew_result),
+            patch("subprocess.run") as mock_run,
             pytest.raises(SystemExit) as exc_info,
         ):
             run_upgrade()
 
         assert exc_info.value.code == 1
+        mock_run.assert_not_called()
 
     def test_run_upgrade_git_missing_repo(self, tmp_path: Path):
         """Exits with error when repo_path in meta does not exist."""
@@ -395,122 +374,24 @@ class TestRunUpgrade:
 
         assert exc_info.value.code == 1
 
-    def test_run_upgrade_missing_meta_not_pip(self, tmp_path: Path):
-        """Exits with error when install_meta.json does not exist and not a pip install."""
+    def test_run_upgrade_missing_meta_exits(self, tmp_path: Path):
+        """No install_meta.json → error and exit 1. There is no pip fallback:
+        AgentCoop is not on PyPI, and the `agentcoop` name there is someone
+        else's package, so `pip install --upgrade` was removed with the
+        publishing workflow (#154)."""
         from gateway.upgrade import run_upgrade
 
         meta_file = tmp_path / "nonexistent_meta.json"
 
         with (
             patch("gateway.upgrade.META_FILE", meta_file),
-            patch("gateway.upgrade._is_pip_installed", return_value=False),
+            patch("subprocess.run") as mock_run,
             pytest.raises(SystemExit) as exc_info,
         ):
             run_upgrade()
 
         assert exc_info.value.code == 1
-
-    def test_run_upgrade_pip_no_meta(self, tmp_path: Path):
-        """When install_meta.json is missing but pip-installed, runs pip upgrade."""
-        from gateway.upgrade import run_upgrade
-
-        meta_file = tmp_path / "nonexistent_meta.json"
-        ok_result = MagicMock()
-        ok_result.returncode = 0
-
-        with (
-            patch("gateway.upgrade.META_FILE", meta_file),
-            patch("gateway.upgrade._is_pip_installed", return_value=True),
-            patch("subprocess.run", return_value=ok_result) as mock_run,
-        ):
-            run_upgrade()
-
-        called_cmd = mock_run.call_args.args[0]
-        assert called_cmd[-2:] == ["--upgrade", "agent-chat-gateway"]
-
-    def test_run_upgrade_pip_failure(self, tmp_path: Path):
-        """Exits with error when pip upgrade fails."""
-        from gateway.upgrade import run_upgrade
-
-        meta_file = tmp_path / "nonexistent_meta.json"
-        fail_result = MagicMock()
-        fail_result.returncode = 1
-
-        with (
-            patch("gateway.upgrade.META_FILE", meta_file),
-            patch("gateway.upgrade._is_pip_installed", return_value=True),
-            patch("subprocess.run", return_value=fail_result),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            run_upgrade()
-
-        assert exc_info.value.code == 1
-
-
-class TestIsPipInstalled:
-    """Tests for _is_pip_installed detection logic."""
-
-    def test_returns_false_when_package_not_found(self):
-        """Returns False when importlib.metadata raises PackageNotFoundError."""
-        import importlib.metadata
-
-        from gateway.upgrade import _is_pip_installed
-
-        with patch.object(importlib.metadata, "version", side_effect=importlib.metadata.PackageNotFoundError):
-            assert _is_pip_installed() is False
-
-    def test_returns_true_when_no_direct_url(self):
-        """Returns True when package found and no direct_url.json (regular PyPI install)."""
-        import importlib.metadata
-
-        from gateway.upgrade import _is_pip_installed
-
-        mock_dist = MagicMock()
-        mock_dist.files = []  # no direct_url.json
-
-        with (
-            patch.object(importlib.metadata, "version", return_value="0.1.0"),
-            patch.object(importlib.metadata, "distribution", return_value=mock_dist),
-        ):
-            assert _is_pip_installed() is True
-
-    def test_returns_false_for_editable_install(self):
-        """Returns False when direct_url.json indicates editable install."""
-        import importlib.metadata
-
-        from gateway.upgrade import _is_pip_installed
-
-        mock_file = MagicMock()
-        mock_file.name = "direct_url.json"
-        mock_file.read_text.return_value = '{"url": "file:///home/user/repo", "dir_info": {"editable": true}}'
-
-        mock_dist = MagicMock()
-        mock_dist.files = [mock_file]
-
-        with (
-            patch.object(importlib.metadata, "version", return_value="0.1.0"),
-            patch.object(importlib.metadata, "distribution", return_value=mock_dist),
-        ):
-            assert _is_pip_installed() is False
-
-    def test_returns_false_for_local_directory_install(self):
-        """Returns False when direct_url.json indicates local directory install."""
-        import importlib.metadata
-
-        from gateway.upgrade import _is_pip_installed
-
-        mock_file = MagicMock()
-        mock_file.name = "direct_url.json"
-        mock_file.read_text.return_value = '{"url": "file:///home/user/repo", "dir_info": {"editable": false}}'
-
-        mock_dist = MagicMock()
-        mock_dist.files = [mock_file]
-
-        with (
-            patch.object(importlib.metadata, "version", return_value="0.1.0"),
-            patch.object(importlib.metadata, "distribution", return_value=mock_dist),
-        ):
-            assert _is_pip_installed() is False
+        mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -834,7 +715,7 @@ class TestEnsureLocalBinSymlinks:
     configured. Every test here redirects Path.home() — this function writes to
     ~/.local/bin, and must never touch the real one."""
 
-    def _setup(self, tmp_path: Path, *, installed: bool, scripts=("agent-chat-gateway",)):
+    def _setup(self, tmp_path: Path, *, installed: bool, scripts=("coop",)):
         home = tmp_path / "home"
         local_bin = home / ".local" / "bin"
         local_bin.mkdir(parents=True)
@@ -845,27 +726,27 @@ class TestEnsureLocalBinSymlinks:
             (venv_bin / name).write_text("#!/bin/sh\n")
         if installed:
             # install.sh's fingerprint: the primary entrypoint is already linked.
-            (local_bin / "agent-chat-gateway").symlink_to(venv_bin / "agent-chat-gateway")
+            (local_bin / "coop").symlink_to(venv_bin / "coop")
         return home, local_bin, repo, venv_bin
 
     def test_links_a_script_added_after_install(self, tmp_path: Path):
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        assert not (local_bin / "acg-provision").exists()
+        assert not (local_bin / "coop-provision").exists()
 
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
-        link = local_bin / "acg-provision"
+        link = local_bin / "coop-provision"
         assert link.is_symlink()
-        assert link.resolve() == (venv_bin / "acg-provision").resolve()
+        assert link.resolve() == (venv_bin / "coop-provision").resolve()
 
     def test_does_nothing_when_not_an_installer_managed_layout(self, tmp_path: Path):
-        # No ~/.local/bin/agent-chat-gateway => pipx/distro/manual install.
+        # No ~/.local/bin/coop => pipx/distro/manual install.
         # Must not inject symlinks the user never asked for.
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=False, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=False, scripts=("coop", "coop-provision")
         )
 
         with patch("gateway.upgrade.Path.home", return_value=home):
@@ -875,17 +756,17 @@ class TestEnsureLocalBinSymlinks:
 
     def test_repoints_a_stale_symlink(self, tmp_path: Path):
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        stale = tmp_path / "old-repo" / ".venv" / "bin" / "acg-provision"
+        stale = tmp_path / "old-repo" / ".venv" / "bin" / "coop-provision"
         stale.parent.mkdir(parents=True)
         stale.write_text("#!/bin/sh\n")
-        (local_bin / "acg-provision").symlink_to(stale)
+        (local_bin / "coop-provision").symlink_to(stale)
 
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
-        assert (local_bin / "acg-provision").resolve() == (venv_bin / "acg-provision").resolve()
+        assert (local_bin / "coop-provision").resolve() == (venv_bin / "coop-provision").resolve()
 
     def test_repairs_a_dangling_installer_symlink(self, tmp_path: Path):
         """A repo/venv move leaves the fingerprint symlink dangling — still repair it.
@@ -897,19 +778,19 @@ class TestEnsureLocalBinSymlinks:
         against the corrected repo path succeeded.
         """
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=False, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=False, scripts=("coop", "coop-provision")
         )
         # The old repo path was never created => this symlink dangles.
-        gone = tmp_path / "old-repo" / ".venv" / "bin" / "agent-chat-gateway"
-        (local_bin / "agent-chat-gateway").symlink_to(gone)
-        assert (local_bin / "agent-chat-gateway").is_symlink()
-        assert not (local_bin / "agent-chat-gateway").exists()  # the trap
+        gone = tmp_path / "old-repo" / ".venv" / "bin" / "coop"
+        (local_bin / "coop").symlink_to(gone)
+        assert (local_bin / "coop").is_symlink()
+        assert not (local_bin / "coop").exists()  # the trap
 
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
         # Both are now linked into the current venv, and both actually resolve.
-        for name in ("agent-chat-gateway", "acg-provision"):
+        for name in ("coop", "coop-provision"):
             link = local_bin / name
             assert link.is_symlink(), f"{name} was not linked"
             assert link.exists(), f"{name} still dangles"
@@ -917,14 +798,14 @@ class TestEnsureLocalBinSymlinks:
 
     def test_is_idempotent(self, tmp_path: Path):
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
-            first = (local_bin / "acg-provision").resolve()
+            first = (local_bin / "coop-provision").resolve()
             _ensure_local_bin_symlinks(repo)
 
-        assert (local_bin / "acg-provision").resolve() == first
+        assert (local_bin / "coop-provision").resolve() == first
 
     def test_backs_up_a_users_own_regular_file_then_links(self, tmp_path: Path):
         """A real file the user made is preserved, but does not block the link.
@@ -939,9 +820,9 @@ class TestEnsureLocalBinSymlinks:
         command) and deleting (destructive).
         """
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
         own.write_text("# my own wrapper\n")
 
         with patch("gateway.upgrade.Path.home", return_value=home):
@@ -949,9 +830,9 @@ class TestEnsureLocalBinSymlinks:
 
         # The managed link now exists and works.
         assert own.is_symlink()
-        assert own.resolve() == (venv_bin / "acg-provision").resolve()
+        assert own.resolve() == (venv_bin / "coop-provision").resolve()
         # And the user's file survived, byte-for-byte, under a timestamped name.
-        backups = list(local_bin.glob("acg-provision.*.bak"))
+        backups = list(local_bin.glob("coop-provision.*.bak"))
         assert len(backups) == 1, f"expected exactly one backup, got {backups}"
         assert backups[0].read_text() == "# my own wrapper\n"
         assert not backups[0].is_symlink()
@@ -967,9 +848,9 @@ class TestEnsureLocalBinSymlinks:
         from being worse than never having run.
         """
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
         own.write_text("# my own wrapper\n")
 
         with patch("gateway.upgrade.Path.home", return_value=home), \
@@ -981,17 +862,17 @@ class TestEnsureLocalBinSymlinks:
         assert not own.is_symlink()
         assert own.read_text() == "# my own wrapper\n"
         # ...and the backup was consumed rather than left as a duplicate.
-        assert list(local_bin.glob("acg-provision.*.bak")) == []
+        assert list(local_bin.glob("coop-provision.*.bak")) == []
 
     def test_restores_a_displaced_foreign_symlink_when_relinking_fails(self, tmp_path: Path):
         """Same guarantee for the symlink branch, which keeps no backup file."""
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
         foreign = tmp_path / "mine" / "my-provisioner.sh"
         foreign.parent.mkdir()
         foreign.write_text("#!/bin/sh\n")
-        link = local_bin / "acg-provision"
+        link = local_bin / "coop-provision"
         link.symlink_to(foreign)
 
         real_symlink_to = Path.symlink_to
@@ -1020,7 +901,7 @@ class TestEnsureLocalBinSymlinks:
         rich's Console.print() raises SystemExit(1) when stdout is a broken pipe.
         SystemExit is a BaseException, so `except (OSError, RuntimeError)` does not
         catch it and the rollback does not run. With a print between rename() and
-        symlink_to(), `agent-chat-gateway upgrade | head -4` left the user's own
+        symlink_to(), `coop upgrade | head -4` left the user's own
         wrapper in a .bak with nothing on PATH — silently, because SystemExit(1)
         prints nothing. Hence all filesystem work happens before any output.
 
@@ -1028,9 +909,9 @@ class TestEnsureLocalBinSymlinks:
         whatever the print does, the link must exist and the backup must survive.
         """
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
         own.write_text("# my own wrapper\n")
 
         with patch("gateway.upgrade.Path.home", return_value=home), \
@@ -1039,8 +920,8 @@ class TestEnsureLocalBinSymlinks:
             _ensure_local_bin_symlinks(repo)
 
         assert own.is_symlink(), "link was not created before the failing print"
-        assert own.resolve() == (venv_bin / "acg-provision").resolve()
-        backups = list(local_bin.glob("acg-provision.*.bak"))
+        assert own.resolve() == (venv_bin / "coop-provision").resolve()
+        backups = list(local_bin.glob("coop-provision.*.bak"))
         assert len(backups) == 1, f"expected the backup to survive, got {backups}"
         assert backups[0].read_text() == "# my own wrapper\n"
 
@@ -1055,9 +936,9 @@ class TestEnsureLocalBinSymlinks:
         path. State first, message second, on both paths.
         """
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
         own.write_text("# my own wrapper\n")
 
         with patch("gateway.upgrade.Path.home", return_value=home), \
@@ -1069,7 +950,7 @@ class TestEnsureLocalBinSymlinks:
         assert own.exists(), "the wrapper was not restored before the failing print"
         assert not own.is_symlink()
         assert own.read_text() == "# my own wrapper\n"
-        assert list(local_bin.glob("acg-provision.*.bak")) == [], "backup left behind"
+        assert list(local_bin.glob("coop-provision.*.bak")) == [], "backup left behind"
 
     def test_says_where_the_backup_is_when_the_rollback_also_fails(
         self, tmp_path: Path, capsys
@@ -1083,9 +964,9 @@ class TestEnsureLocalBinSymlinks:
         right (it must not replace the real one); swallowing the location is not.
         """
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
         own.write_text("# my own wrapper\n")
 
         real_rename = Path.rename
@@ -1105,7 +986,7 @@ class TestEnsureLocalBinSymlinks:
         # a long path arrives split across lines and a naive `name in out` fails on
         # the newline rather than on a missing message.
         flat = "".join(capsys.readouterr().out.split())
-        backups = list(local_bin.glob("acg-provision.*.bak"))
+        backups = list(local_bin.glob("coop-provision.*.bak"))
         assert len(backups) == 1, "the file should still be in its backup"
         assert backups[0].read_text() == "# my own wrapper\n"
         assert backups[0].name in flat, (
@@ -1121,9 +1002,9 @@ class TestEnsureLocalBinSymlinks:
         this holds regardless of how fast the two calls land.
         """
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
-        own = local_bin / "acg-provision"
+        own = local_bin / "coop-provision"
 
         own.write_text("first\n")
         with patch("gateway.upgrade.Path.home", return_value=home):
@@ -1134,7 +1015,7 @@ class TestEnsureLocalBinSymlinks:
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
-        backups = sorted(p.read_text() for p in local_bin.glob("acg-provision.*.bak"))
+        backups = sorted(p.read_text() for p in local_bin.glob("coop-provision.*.bak"))
         assert backups == ["first\n", "second\n"], backups
 
     def test_reports_the_old_target_when_repointing_a_foreign_symlink(
@@ -1148,39 +1029,39 @@ class TestEnsureLocalBinSymlinks:
         printed instead.
         """
         home, local_bin, repo, venv_bin = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
         foreign_target = tmp_path / "mine" / "my-provisioner.sh"
         foreign_target.parent.mkdir()
         foreign_target.write_text("#!/bin/sh\n")
-        (local_bin / "acg-provision").symlink_to(foreign_target)
+        (local_bin / "coop-provision").symlink_to(foreign_target)
 
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
         out = capsys.readouterr().out
         assert "my-provisioner.sh" in out.replace("\n", "")
-        assert (local_bin / "acg-provision").resolve() == (venv_bin / "acg-provision").resolve()
+        assert (local_bin / "coop-provision").resolve() == (venv_bin / "coop-provision").resolve()
         # The file it used to point at is untouched, and no litter was created.
         assert foreign_target.read_text() == "#!/bin/sh\n"
-        assert list(local_bin.glob("acg-provision.*.bak")) == []
+        assert list(local_bin.glob("coop-provision.*.bak")) == []
 
     def test_skips_scripts_absent_from_this_release(self, tmp_path: Path):
-        # An older release where acg-provision does not exist in .venv/bin.
+        # An older release where coop-provision does not exist in .venv/bin.
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway",)
+            tmp_path, installed=True, scripts=("coop",)
         )
 
         with patch("gateway.upgrade.Path.home", return_value=home):
             _ensure_local_bin_symlinks(repo)
 
-        assert not (local_bin / "acg-provision").exists()
+        assert not (local_bin / "coop-provision").exists()
 
     def test_symlink_failure_is_not_fatal(self, tmp_path: Path, capsys):
         # A failure here must not invalidate an upgrade that already succeeded —
         # but it must SAY so, or PATH is silently left unfixed.
         home, _, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
 
         with patch("gateway.upgrade.Path.home", return_value=home), \
@@ -1209,11 +1090,11 @@ class TestEnsureLocalBinSymlinks:
         pull that already succeeded.
         """
         home, local_bin, repo, _ = self._setup(
-            tmp_path, installed=True, scripts=("agent-chat-gateway", "acg-provision")
+            tmp_path, installed=True, scripts=("coop", "coop-provision")
         )
         # Two symlinks pointing at each other => resolving either one loops.
-        a = local_bin / "acg-provision"
-        b = local_bin / "acg-provision-cycle"
+        a = local_bin / "coop-provision"
+        b = local_bin / "coop-provision-cycle"
         a.symlink_to(b)
         b.symlink_to(a)
         assert a.is_symlink()

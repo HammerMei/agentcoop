@@ -96,7 +96,7 @@ class TestARemovalReclaimsTheRecord(unittest.IsolatedAsyncioTestCase):
         lifecycle, _ = _harness([record])
 
         with self.assertLogs(
-            "agent-chat-gateway.core.watcher_lifecycle", level="WARNING"
+            "coop.core.watcher_lifecycle", level="WARNING"
         ) as captured:
             name = await lifecycle.reclaim_room("room-w1", reason="removed")
 
@@ -175,7 +175,7 @@ class TestARemovalReclaimsTheRecord(unittest.IsolatedAsyncioTestCase):
         default_backend.delete_session = AsyncMock()
 
         with self.assertLogs(
-            "agent-chat-gateway.core.watcher_lifecycle", level="WARNING"
+            "coop.core.watcher_lifecycle", level="WARNING"
         ) as captured:
             name = await lifecycle.reclaim_room("room-w1", reason="removed")
 
@@ -204,7 +204,7 @@ class TestARemovalReclaimsTheRecord(unittest.IsolatedAsyncioTestCase):
         default_backend.delete_session = AsyncMock()
 
         with self.assertLogs(
-            "agent-chat-gateway.core.watcher_lifecycle", level="WARNING"
+            "coop.core.watcher_lifecycle", level="WARNING"
         ) as captured:
             name = await lifecycle.reclaim_room("room-w1", reason="removed")
 
@@ -230,7 +230,7 @@ class TestARemovalReclaimsTheRecord(unittest.IsolatedAsyncioTestCase):
         default_backend.delete_session = AsyncMock()
 
         with self.assertLogs(
-            "agent-chat-gateway.core.watcher_lifecycle", level="WARNING"
+            "coop.core.watcher_lifecycle", level="WARNING"
         ) as captured:
             name = await lifecycle.reclaim_room("room-w1", reason="removed")
 

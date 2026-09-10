@@ -36,7 +36,7 @@ class TestTheHandleFollowsTheRoom(unittest.IsolatedAsyncioTestCase):
     async def test_a_renamed_channel_gets_a_new_handle_and_the_old_one_stops_resolving(self):
         lifecycle, record = _lifecycle_with()
 
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "WARNING") as cm:
+        with self.assertLogs("coop.core.watcher_lifecycle", "WARNING") as cm:
             taken = await lifecycle.observe_room_name("R1", "test-channel-new")
 
         self.assertEqual(taken, "mm:test-channel-new")
@@ -92,7 +92,7 @@ class TestTheHandleFollowsTheRoom(unittest.IsolatedAsyncioTestCase):
         other = make_rule_derived_record(name="mm:renamed", room_id="R2", connector="mm")
         install_record(lifecycle, other)
 
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "WARNING") as cm:
+        with self.assertLogs("coop.core.watcher_lifecycle", "WARNING") as cm:
             taken = await lifecycle.observe_room_name("R1", "renamed")
 
         self.assertIsNone(taken)
@@ -134,7 +134,7 @@ class TestTheHandleFollowsTheRoom(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_the_resident_processor_takes_the_new_name(self):
-        """The processor carries the handle into the ACG Session Identity header
+        """The processor carries the handle into the Coop Session Identity header
         the agent reads every turn (Codex, PR #140): a stale one sends the
         agent's own `schedule create` at a name that no longer resolves."""
         from tests.helpers import register_processor
@@ -153,7 +153,7 @@ class TestTheHandleFollowsTheRoom(unittest.IsolatedAsyncioTestCase):
         register_processor(lifecycle, "mm:test-channel",
                            MagicMock(rename=AsyncMock(side_effect=OSError("disk"))))
 
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "WARNING") as cm:
+        with self.assertLogs("coop.core.watcher_lifecycle", "WARNING") as cm:
             taken = await lifecycle.observe_room_name("R1", "test-channel-new")
 
         self.assertEqual(taken, "mm:test-channel-new")
@@ -272,7 +272,7 @@ class TestTheProcessorReissuesItsIdentityOnRename(unittest.IsolatedAsyncioTestCa
         from tests.helpers import make_processor
 
         injector = MagicMock()
-        injector.build = AsyncMock(side_effect=lambda agent, conn, wc, **kw: f"## ACG Session Identity\n- {wc.name} / {wc.room}")
+        injector.build = AsyncMock(side_effect=lambda agent, conn, wc, **kw: f"## Coop Session Identity\n- {wc.name} / {wc.room}")
         agent = MagicMock()
         agent.ensure_durable_instructions = AsyncMock(return_value="/runtime/system-prompts/k.md")
         wc = WatcherConfig(name="mm:test-channel", connector="mm", room="test-channel", agent="default")

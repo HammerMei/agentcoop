@@ -62,9 +62,9 @@ ALLOWED = {
         "thin delegator for the operator boundary (control.py): tells an unloaded "
         "record from a gone one before a name is called unknown (#151)",
     ("core/session_manager.py", "SessionManager.expire_watcher"):
-        "an operator verb: `agent-chat-gateway expire <name>` — the human typed the name",
+        "an operator verb: `coop expire <name>` — the human typed the name",
     ("core/session_manager.py", "SessionManager.resume_watcher"):
-        "an operator verb: `agent-chat-gateway resume <name>` — the human typed the name; "
+        "an operator verb: `coop resume <name>` — the human typed the name; "
         "the record is read to resolve ITS room id through the connector first (#145)",
     ("core/scheduler.py", "JobScheduler._resolve_target"):
         "the scheduler's single resolution seam; calls resolve_handle once per fire",

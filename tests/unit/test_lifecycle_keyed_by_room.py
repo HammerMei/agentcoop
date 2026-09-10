@@ -186,7 +186,7 @@ class TestHydrationAtStartup(unittest.TestCase):
         self.assertIs(self.lc.record_for_room("R-eng"), ws)
 
     def test_a_record_with_no_room_is_skipped_with_a_warning(self):
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "WARNING") as cm:
+        with self.assertLogs("coop.core.watcher_lifecycle", "WARNING") as cm:
             ok = self.lc._hydrate(_record_without_a_room())
 
         self.assertFalse(ok)
@@ -200,7 +200,7 @@ class TestHydrationAtStartup(unittest.TestCase):
         second = make_rule_derived_record("rc:b", room_id="R-1")
         self.lc._hydrate(first)
 
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "ERROR") as cm:
+        with self.assertLogs("coop.core.watcher_lifecycle", "ERROR") as cm:
             ok = self.lc._hydrate(second)
 
         self.assertFalse(ok)

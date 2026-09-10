@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 # Task-local, not a module-level flag: two concurrent admin operations in
 # the same process (e.g. two agents provisioned around the same time by a
-# future ACG-integrated version of this tool — see gateway/admin/__init__.py)
+# future AgentCoop-integrated version of this tool — see gateway/admin/__init__.py)
 # would otherwise race on a single shared mutable flag. contextvars.ContextVar
 # is copied per asyncio.Task at creation, so each task's set()/reset() is
 # invisible to every other task, regardless of how their awaits interleave.

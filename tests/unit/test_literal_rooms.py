@@ -79,7 +79,7 @@ class TestTheTwoDeclarationsAgree(unittest.TestCase):
     They cannot be collapsed — enforcement happens in `gateway/config.py`, which only
     sees a type string, and `gateway/connectors/` imports `gateway.config`, so reading
     the classes from the loader would invert the dependency and pull the websocket
-    stack into `agent-chat-gateway config validate`. So they are bound here instead of by a comment.
+    stack into `coop config validate`. So they are bound here instead of by a comment.
     """
 
     # Every type gateway/connectors/__init__.py's factory accepts.

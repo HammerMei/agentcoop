@@ -18,7 +18,7 @@ declare their types is one someone can copy whole.
 
 `working_directory` is redirected to a real temp directory before loading: the
 loader checks that it exists, and an example naturally writes something like
-`~/.agent-chat-gateway/work` that a test machine has no reason to have. Nothing
+`~/.agentcoop/work` that a test machine has no reason to have. Nothing
 else is rewritten, so a rule missing a required field still fails here.
 
 Run with:

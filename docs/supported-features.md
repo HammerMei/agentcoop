@@ -1,6 +1,6 @@
 # Supported Features & Roadmap
 
-This document clearly communicates what agent-chat-gateway supports today, what is known to be limited, and what is planned for future releases.
+This document clearly communicates what AgentCoop supports today, what is known to be limited, and what is planned for future releases.
 
 ---
 
@@ -71,7 +71,7 @@ This document clearly communicates what agent-chat-gateway supports today, what 
 
 - ✅ **Multi-agent / agent-chain support**
   - Shared turn-budget loop protection with Rocket.Chat (same underlying
-    `TurnStore`), so two ACG agents in the same channel can converse without
+    `TurnStore`), so two AgentCoop agents in the same channel can converse without
     looping forever
 
 - ⚠️ **Team-scoped**: one connector instance serves exactly one Mattermost
@@ -82,7 +82,7 @@ This document clearly communicates what agent-chat-gateway supports today, what 
 
 ### Voice Gateway (Experimental) 🧪
 
-A lightweight HTTP endpoint that turns any ACG-connected agent into a voice assistant
+A lightweight HTTP endpoint that turns any AgentCoop-connected agent into a voice assistant
 accessible from Siri via iOS Shortcuts — no custom hardware, no wake word infrastructure.
 
 ```
@@ -255,7 +255,7 @@ watcher_rules:
 #### Behavior
 - ✅ Injected on session start (one-time, not per-message)
 - ✅ Built-in Rocket.Chat gateway context injected automatically
-- ✅ Lazy instruction loading for bundled scheduling/history docs via `agent-chat-gateway instructions ...`
+- ✅ Lazy instruction loading for bundled scheduling/history docs via `coop instructions ...`
 - ✅ 256 KB per file limit
 - ✅ 512 KB total context limit
 - ✅ Multiple context files supported (concatenated)
@@ -303,11 +303,11 @@ watcher_rules:
 #### Features
 - ✅ YAML configuration file
 - ✅ Secrets stored directly in `config.yaml` (chmod'd `0600` automatically —
-  both by the config TUI and by `agent-chat-gateway start`)
+  both by the config TUI and by `coop start`)
 - ✅ Auto-migration: a legacy `.env`-backed config (`$VAR`/`${VAR}` references
   resolved from a colocated `.env` file) is folded into `config.yaml` as
   literal values on first start (or before the config TUI opens), then
-  `.env` is removed (one-time; also available as `agent-chat-gateway config
+  `.env` is removed (one-time; also available as `coop config
   migrate-env` for a manual run). After migration — or for any config
   written from scratch — `$VAR`/`${VAR}` is not a recognized syntax; a value
   that merely looks like one is a plain string, used as written.
@@ -341,7 +341,7 @@ watcher_rules:
   set per-entry, not inherited — and the removed `session_id`, reported as removed
   rather than as "set it per-entry"
 - ✅ `tool_presets` are regex-validated eagerly at load, even if unused
-- ✅ `agent-chat-gateway config validate [--lint] [--json]` — checks config.yaml
+- ✅ `coop config validate [--lint] [--json]` — checks config.yaml
   without starting the daemon: structural validation, per-connector-type
   credential checks (e.g. empty Rocket.Chat/Mattermost `server:` fields, or
   a `server.url` that doesn't look like a URL — a lenient scheme+netloc
@@ -369,7 +369,7 @@ watcher_rules:
 
 ### Message Delivery
 
-- 🔶 **No zero-loss guarantee under sustained overload.** ACG applies backpressure: when
+- 🔶 **No zero-loss guarantee under sustained overload.** AgentCoop applies backpressure: when
   every processor queue for a room is full, an inbound message is refused rather than
   queued without bound. A refused message is normally recoverable — its dedup id is
   forgotten and a mark is left below it so the next reconnect re-fetches it — but that
@@ -381,7 +381,7 @@ watcher_rules:
     the sender knows to resend. A message refused while replaying a reconnect window does
     not — 200 such replies would be worse than the loss.
   - **Deliberate.** Persisting the mark was assessed and declined: guaranteeing delivery
-    through overload is not a goal ACG trades complexity for. Both chat connectors behave
+    through overload is not a goal AgentCoop trades complexity for. Both chat connectors behave
     the same way here.
 
 ### Platform Support
@@ -391,7 +391,7 @@ watcher_rules:
   - Webhook-based (push) connectors not yet implemented
   - Both chat connectors are pull-based (persistent WebSocket)
   - Voice gateway connector is experimental — see [Voice Gateway](#voice-gateway-experimental-) section
-  - Mattermost's onboarding CLI wizard (`agent-chat-gateway onboard`) and a
+  - Mattermost's onboarding CLI wizard (`coop onboard`) and a
     real E2E docker test harness are not yet implemented (config.yaml must be
     hand-written for now) — planned as a follow-up
 

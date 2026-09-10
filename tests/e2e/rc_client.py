@@ -373,7 +373,7 @@ class RCClient:
     def extract_permission_id(self, msg: dict[str, Any]) -> str | None:
         """Extract the 4-char permission request ID from a bot permission message.
 
-        ACG formats permission notices as:
+        AgentCoop formats permission notices as:
             🔐 **Permission required** `[a3k9]`
             ...
             Reply `approve a3k9` or `deny a3k9`

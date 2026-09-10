@@ -1,6 +1,6 @@
 """Standalone RC/MM administrative CLI (user/channel provisioning).
 
-Deliberately decoupled from ACG's own config.yaml / Connector runtime:
+Deliberately decoupled from AgentCoop's own config.yaml / Connector runtime:
 this package reads its own profile file (see config.py) and drives the
 existing RocketChatREST / MattermostREST clients directly, for three
 reasons (see the profile-based design in config.py):
@@ -13,5 +13,5 @@ reasons (see the profile-based design in config.py):
      lab-specific assumptions.
 
 Not yet wired into gateway/cli.py or config.yaml; run via
-``python -m gateway.admin`` or the ``acg-provision`` console script.
+``python -m gateway.admin`` or the ``coop-provision`` console script.
 """

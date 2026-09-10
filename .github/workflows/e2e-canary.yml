@@ -4,7 +4,7 @@ name: E2E Canary (Latest Agents)
 # breaking changes before they affect production deployments.
 #
 # Failures here do NOT block merges — they indicate an upstream agent
-# change that may require ACG code or context updates.
+# change that may require AgentCoop code or context updates.
 # Check the run log to identify which agent changed and what broke.
 
 on:
@@ -14,7 +14,7 @@ on:
 
 jobs:
   e2e-canary:
-    name: E2E Canary — RC + ACG + Claude/OpenCode (latest)
+    name: E2E Canary — RC + AgentCoop + Claude/OpenCode (latest)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Never block PRs or releases — canary failures are informational
@@ -40,7 +40,7 @@ jobs:
           docker compose -f tests/e2e/docker-compose.yml up -d \
             mongodb rocketchat postgres mattermost
 
-      # Both bootstraps must finish before ACG starts: each connector logs in
+      # Both bootstraps must finish before AgentCoop starts: each connector logs in
       # as acg_bot at startup, and `depends_on: service_healthy` orders
       # containers, not accounts. A connector that starts before its account
       # exists fails to authenticate, and on Mattermost an unresolvable team
@@ -51,16 +51,16 @@ jobs:
       - name: Create MM team + accounts (waits for MM health)
         run: uv run python tests/e2e/mm_setup.py --mm-url http://localhost:8065
 
-      - name: Build ACG image from source (latest agent versions)
+      - name: Build AgentCoop image from source (latest agent versions)
         run: |
           docker compose -f tests/e2e/docker-compose.yml build acg
 
       # Fail before the 40-minute version of this failure. Without credentials
-      # ACG starts fine, both connectors log in fine, mm_connected passes — and
+      # AgentCoop starts fine, both connectors log in fine, mm_connected passes — and
       # then every agent test burns its full --timeout=180 and reports "No
       # matching post", which reads as a delivery bug. `make e2e-test` has a
       # container-side check for exactly this, and neither workflow calls it.
-      - name: Require Claude credentials before starting ACG
+      - name: Require Claude credentials before starting AgentCoop
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -73,7 +73,7 @@ jobs:
             exit 1
           fi
 
-      - name: Start ACG (phase 2)
+      - name: Start AgentCoop (phase 2)
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -113,14 +113,14 @@ jobs:
           # The gateway's OWN log inside the container is where connector,
           # watcher and agent detail lives — the container's stdout only
           # carries entrypoint output plus whatever escapes the logger.
-          docker exec acg-e2e sh -c 'cat /root/.agent-chat-gateway/gateway.log' \
+          docker exec acg-e2e sh -c 'cat /root/.agentcoop/gateway.log' \
             > e2e-logs/acg-gateway.log 2>&1 || true
           # --all, because idle watchers are hidden by default and a plain
           # list can say "No watchers" for a room that has one.
-          docker exec acg-e2e agent-chat-gateway list --all > e2e-logs/acg-list.txt 2>&1 || true
+          docker exec acg-e2e coop list --all > e2e-logs/acg-list.txt 2>&1 || true
           # Keep a short tail inline too, so an obvious failure is readable
           # without downloading anything.
-          echo "=== ACG (last 50) ==="
+          echo "=== AgentCoop (last 50) ==="
           tail -50 e2e-logs/acg-e2e.log || true
           echo "=== Rocket.Chat (last 30) ==="
           tail -30 e2e-logs/acg-e2e-rocketchat.log || true

@@ -1,4 +1,4 @@
-"""Talking to the running ACG container — the docker-facing half of the E2E rig.
+"""Talking to the running AgentCoop container — the docker-facing half of the E2E rig.
 
 Split out of `conftest.py` for the same reason `gateway_log.py` was: a pytest
 conftest is a plugin, not a library. Both `tests/conftest.py` and
@@ -20,7 +20,7 @@ import re
 import subprocess
 
 CONTAINER = "acg-e2e"
-GATEWAY_LOG = "/root/.agent-chat-gateway/gateway.log"
+GATEWAY_LOG = "/root/.agentcoop/gateway.log"
 
 # Must match the connector name in tests/e2e/acg-config/config.yaml. Pinned by
 # tests/unit/test_e2e_mm_wiring.py so a rename fails without Docker.
@@ -54,16 +54,16 @@ def read_gateway_log() -> str:
 def gateway_pid() -> int | None:
     """The running daemon's pid, or None if it is not running.
 
-    Read from `status`' TEXT, not its exit code: `agent-chat-gateway status`
+    Read from `status`' TEXT, not its exit code: `coop status`
     exits 0 while printing "Gateway: not running" (issue #134), which is why a
     readiness check gated on the returncode admits a dead daemon.
     """
-    match = re.search(r"running \(pid=(\d+)\)", _exec("agent-chat-gateway", "status").stdout)
+    match = re.search(r"running \(pid=(\d+)\)", _exec("coop", "status").stdout)
     return int(match.group(1)) if match else None
 
 
 def watcher_list() -> str:
-    """`agent-chat-gateway list --all` as seen inside the container.
+    """`coop list --all` as seen inside the container.
 
     `--all` matters: idle watchers are hidden by default, so a plain `list` can
     report "No watchers" for a room that has one.
@@ -74,7 +74,7 @@ def watcher_list() -> str:
     for a reason unrelated to what they check, which is the one direction a
     guard must never fail in.
     """
-    result = _exec("agent-chat-gateway", "list", "--all")
+    result = _exec("coop", "list", "--all")
     if result.returncode != 0:
         raise RuntimeError(
             f"`list --all` failed inside {CONTAINER} (exit {result.returncode}). "

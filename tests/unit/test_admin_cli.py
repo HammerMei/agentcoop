@@ -46,8 +46,8 @@ def _detach_admin_log_handlers(abs_path: str) -> None:
     """Remove handlers a test attached for `abs_path`, so a temp file that is
     about to be deleted is not left wired to a module-level logger."""
     for lg in (
-        logging.getLogger("agent-chat-gateway.admin.errors"),
-        logging.getLogger("agent-chat-gateway"),
+        logging.getLogger("coop.admin.errors"),
+        logging.getLogger("coop"),
     ):
         for h in [
             h for h in lg.handlers
@@ -91,7 +91,7 @@ class TestBuildParser(unittest.TestCase):
 
     def test_log_file_defaults_to_msg_admin_log(self):
         args = _args(["mm-lab", "delete-user", "alice"])
-        self.assertEqual(args.log_file, "acg-provision.log")
+        self.assertEqual(args.log_file, "coop-provision.log")
 
     def test_log_file_flag_overrides_default(self):
         args = _args(["--log-file", "/tmp/custom.log", "mm-lab", "delete-user", "alice"])
@@ -101,7 +101,7 @@ class TestBuildParser(unittest.TestCase):
 class TestRunDispatch(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # _run() always calls _configure_error_log(args.log_file), which
-        # defaults to a real, cwd-relative "acg-provision.log" — none of these
+        # defaults to a real, cwd-relative "coop-provision.log" — none of these
         # tests care about that concern (it's covered by TestConfigureErrorLog
         # and TestHttpStatusErrorHandling below), so stub it out to avoid
         # every test in this class writing a stray file to the repo.
@@ -390,8 +390,8 @@ class TestCloseFailureDoesNotChangeTheOutcome(unittest.IsolatedAsyncioTestCase):
 
 class TestConfigureErrorLog(unittest.TestCase):
     def setUp(self):
-        self.error_logger = logging.getLogger("agent-chat-gateway.admin.errors")
-        self.umbrella_logger = logging.getLogger("agent-chat-gateway")
+        self.error_logger = logging.getLogger("coop.admin.errors")
+        self.umbrella_logger = logging.getLogger("coop")
         self._orig_error_handlers = list(self.error_logger.handlers)
         self._orig_error_propagate = self.error_logger.propagate
         self._orig_umbrella_handlers = list(self.umbrella_logger.handlers)
@@ -422,7 +422,7 @@ class TestConfigureErrorLog(unittest.TestCase):
     def test_attaches_a_warning_level_handler_to_umbrella_logger(self):
         # This is the actual fix: RocketChatREST/MattermostREST's own
         # logger.error() calls (on loggers named
-        # "agent-chat-gateway.connectors.<platform>.rest") would otherwise
+        # "coop.connectors.<platform>.rest") would otherwise
         # find no handler anywhere in their hierarchy and fall through to
         # Python's stderr-printing "handler of last resort".
         with tempfile.TemporaryDirectory() as d:
@@ -459,13 +459,13 @@ class TestConfigureErrorLog(unittest.TestCase):
     def test_rest_client_logger_error_reaches_the_file(self):
         # Simulates what MattermostREST/RocketChatREST's shared _request()
         # does on a non-2xx response — a logger under the
-        # "agent-chat-gateway.connectors.*" namespace, which has no handler
+        # "coop.connectors.*" namespace, which has no handler
         # of its own and relies on propagation up to the umbrella logger.
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "custom.log")
             _configure_error_log(path)
 
-            rest_logger = logging.getLogger("agent-chat-gateway.connectors.mattermost.rest")
+            rest_logger = logging.getLogger("coop.connectors.mattermost.rest")
             rest_logger.error("Mattermost API error 400 for POST users — body: {...}")
             for handler in self.umbrella_logger.handlers:
                 handler.flush()
@@ -570,8 +570,8 @@ class TestReaderlessFifoLogFile(unittest.IsolatedAsyncioTestCase):
         test this suite has already had to fix once. The ordering is what the
         fix actually guarantees, and it is deterministic.
         """
-        err_logger = logging.getLogger("agent-chat-gateway.admin.errors")
-        umb_logger = logging.getLogger("agent-chat-gateway")
+        err_logger = logging.getLogger("coop.admin.errors")
+        umb_logger = logging.getLogger("coop")
         real_close = os.close
         at_close = []
 
@@ -683,7 +683,7 @@ class TestReaderlessFifoLogFile(unittest.IsolatedAsyncioTestCase):
 class TestMain(unittest.TestCase):
     def test_main_exits_with_run_result_code(self):
         with patch("gateway.admin.cli._run", new=AsyncMock(return_value=7)), \
-             patch("sys.argv", ["acg-provision", "p", "delete-user", "alice"]), \
+             patch("sys.argv", ["coop-provision", "p", "delete-user", "alice"]), \
              self.assertRaises(SystemExit) as ctx:
             main()
         self.assertEqual(ctx.exception.code, 7)
@@ -696,7 +696,7 @@ class TestMain(unittest.TestCase):
         killed = []
         stderr = io.StringIO()
         with patch("gateway.admin.cli._run", new=AsyncMock(side_effect=KeyboardInterrupt())), \
-             patch("sys.argv", ["acg-provision", "p", "delete-user", "alice"]), \
+             patch("sys.argv", ["coop-provision", "p", "delete-user", "alice"]), \
              patch("gateway.admin.cli.signal.signal") as mock_signal, \
              patch("gateway.admin.cli.os.kill", side_effect=lambda *a: killed.append(a)), \
              contextlib.redirect_stderr(stderr):

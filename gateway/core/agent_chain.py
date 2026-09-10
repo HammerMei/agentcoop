@@ -34,7 +34,7 @@ _RELEASED_TOKENS_REMEMBERED = 256
 logger = logging.getLogger("coop.core.agent_chain")
 
 # Sentinel the LLM outputs to self-terminate an agent chain turn.
-# ACG detects this via exact match (response.text.strip() == TOKEN).
+# AgentCoop detects this via exact match (response.text.strip() == TOKEN).
 AGENT_CHAIN_TERMINATION_TOKEN = "<end-of-agent-chain>"
 
 

@@ -393,7 +393,7 @@ def config_from_record(record: WatcherState) -> WatcherConfig | None:
 
     Recreation reads the record, never the current rule — that is what sticky
     binding means. The record's `config` was written by `_jsonable(materialize(...))`,
-    so the shape is ACG's own; still, every read below tolerates absence and wrong
+    so the shape is AgentCoop's own; still, every read below tolerates absence and wrong
     types by returning None rather than raising, because the caller's correct answer
     to an unreadable record is "decline to recreate and log", not a traceback on the
     routing path. A record with no `config` at all is the static model's (its

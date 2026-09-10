@@ -2,7 +2,7 @@
         e2e-up e2e-down e2e-test e2e-logs e2e-reset e2e-shell e2e-acg \
         e2e-dump e2e-probe e2e-probe-mm
 
-RUNTIME_DIR := $(HOME)/.agent-chat-gateway
+RUNTIME_DIR := $(HOME)/.agentcoop
 CONFIG      := $(RUNTIME_DIR)/config.yaml
 
 help: ## Show this help
@@ -13,7 +13,7 @@ install: ## Install dependencies (uv sync)
 	uv sync
 
 setup: ## Run the interactive setup wizard (idempotent — skips if config exists)
-	uv run agent-chat-gateway onboard --repo-path "$(CURDIR)"
+	uv run coop onboard --repo-path "$(CURDIR)"
 
 test: ## Run test suite
 	uv run pytest tests/ -v --tb=short
@@ -32,13 +32,13 @@ lint: ## Run ruff check (if installed)
 	fi
 
 start: ## Start daemon
-	uv run agent-chat-gateway start
+	uv run coop start
 
 stop: ## Stop daemon
-	uv run agent-chat-gateway stop
+	uv run coop stop
 
 status: ## Show daemon status
-	uv run agent-chat-gateway status
+	uv run coop status
 
 clean: ## Remove __pycache__, .coverage, dist/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
@@ -55,7 +55,7 @@ E2E_COMPOSE := tests/e2e/docker-compose.yml
 E2E_RC_URL  := http://localhost:3100
 E2E_MM_URL  := http://localhost:8065
 
-# Both platforms must be bootstrapped BEFORE ACG starts, and the ordering is
+# Both platforms must be bootstrapped BEFORE AgentCoop starts, and the ordering is
 # not something compose can express. `depends_on: service_healthy` orders
 # CONTAINERS; it says nothing about whether the `acg_bot` ACCOUNT exists yet.
 # Each connector logs in as that account at startup, and a connector that
@@ -64,7 +64,7 @@ E2E_MM_URL  := http://localhost:8065
 # degrade to "that platform's tests time out": it takes the gateway down,
 # every test with it, and under `restart: unless-stopped` it becomes a crash
 # loop. That is what the running-state guard in e2e-test reports.
-e2e-up: ## Start RC + Mattermost + ACG for E2E tests (idempotent)
+e2e-up: ## Start RC + Mattermost + AgentCoop for E2E tests (idempotent)
 	@echo "==> Starting MongoDB + Rocket.Chat ..."
 	docker compose -f $(E2E_COMPOSE) up -d mongodb rocketchat
 	@echo "==> Starting Postgres + Mattermost ..."
@@ -73,7 +73,7 @@ e2e-up: ## Start RC + Mattermost + ACG for E2E tests (idempotent)
 	uv run python tests/e2e/setup.py --rc-url $(E2E_RC_URL)
 	@echo "==> Running MM setup (creating MM team + accounts) ..."
 	uv run python tests/e2e/mm_setup.py --mm-url $(E2E_MM_URL)
-	@echo "==> Starting ACG ..."
+	@echo "==> Starting AgentCoop ..."
 	docker compose -f $(E2E_COMPOSE) up -d acg
 	@echo "==> Done. Run 'make e2e-test' to execute the test suite."
 
@@ -141,9 +141,9 @@ e2e-logs: ## Tail logs for all E2E containers
 e2e-shell: ## Shell into a running E2E container (S=acg|rocketchat|mongodb|mattermost|postgres, default acg)
 	docker compose -f $(E2E_COMPOSE) exec $(or $(S),acg) bash
 
-e2e-acg: ## Run an ACG command inside the container (e.g. make e2e-acg C="list")
+e2e-acg: ## Run an AgentCoop command inside the container (e.g. make e2e-acg C="list")
 	@test -n "$(C)" || (echo "usage: make e2e-acg C=\"list\"" && exit 1)
-	docker compose -f $(E2E_COMPOSE) exec acg agent-chat-gateway $(C)
+	docker compose -f $(E2E_COMPOSE) exec acg AgentCoop $(C)
 
 e2e-dump: ## Write full container logs + state to ./e2e-logs (same set CI uploads)
 	@mkdir -p e2e-logs
@@ -153,9 +153,9 @@ e2e-dump: ## Write full container logs + state to ./e2e-logs (same set CI upload
 	done
 	@docker compose -f $(E2E_COMPOSE) ps > e2e-logs/ps.txt 2>&1 || true
 	@docker compose -f $(E2E_COMPOSE) config > e2e-logs/resolved-compose.yml 2>&1 || true
-	@docker exec acg-e2e sh -c 'cat /root/.agent-chat-gateway/gateway.log' \
+	@docker exec acg-e2e sh -c 'cat /root/.agentcoop/gateway.log' \
 	    > e2e-logs/acg-gateway.log 2>&1 || true
-	@docker exec acg-e2e agent-chat-gateway list --all > e2e-logs/acg-list.txt 2>&1 || true
+	@docker exec acg-e2e coop list --all > e2e-logs/acg-list.txt 2>&1 || true
 	@echo "==> Wrote e2e-logs/ ($$(ls e2e-logs | wc -l | tr -d ' ') files)"
 
 e2e-probe: ## Re-verify the RC platform behaviour design §6 depends on, against the running stack
@@ -166,9 +166,9 @@ e2e-probe: ## Re-verify the RC platform behaviour design §6 depends on, against
 	    --member-room acg-e2e-claude --outside-room acg-e2e-outside
 
 # The probe answers a different question from the E2E test, which is why both
-# exist: this one asks what MATTERMOST does (no ACG involved), and is what to
+# exist: this one asks what MATTERMOST does (no AgentCoop involved), and is what to
 # reach for when a version bump makes the pin guard fail. The E2E test asks
-# whether ACG honours it. A probe pass with an E2E failure means the runtime
+# whether AgentCoop honours it. A probe pass with an E2E failure means the runtime
 # regressed; both failing means the platform changed under us.
 #
 # NOTE: this drives the acg_bot ACCOUNT — the same one the connector uses —

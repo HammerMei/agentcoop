@@ -1,6 +1,6 @@
 # Config Reload
 
-`agent-chat-gateway config reload` applies changes in `config.yaml` to the
+`coop config reload` applies changes in `config.yaml` to the
 running daemon: it validates the whole file, diffs it against the active
 configuration, restarts the affected connectors and agents, and runs the same
 record reconciliation boot runs — re-materializing records against the current

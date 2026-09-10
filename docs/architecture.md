@@ -1,6 +1,6 @@
-# Agent Chat Gateway Architecture
+# AgentCoop Architecture
 
-A comprehensive guide to the internal design of agent-chat-gateway—a standalone Python daemon that bridges chat platforms to AI agent backends with role-based access control and human-in-the-loop tool approval.
+A comprehensive guide to the internal design of AgentCoop—a standalone Python daemon that bridges chat platforms to AI agent backends with role-based access control and human-in-the-loop tool approval.
 
 **Target audience:** Developers who want to understand the system internals, extend with new connectors or agents, or contribute to the codebase.
 
@@ -8,7 +8,7 @@ A comprehensive guide to the internal design of agent-chat-gateway—a standalon
 
 ## System Overview
 
-**agent-chat-gateway** is a long-running daemon that:
+**AgentCoop** is a long-running daemon that:
 
 1. Connects to chat platforms (Rocket.Chat, and extensible to Slack/Discord/etc.) via platform-specific **Connectors**
 2. Routes inbound messages through **per-room message queues** for serial, race-condition-free processing
@@ -17,12 +17,25 @@ A comprehensive guide to the internal design of agent-chat-gateway—a standalon
 5. Posts agent responses back to the chat platform
 6. Exposes a **Unix socket CLI control interface** for daemon management (add/stop watchers, check status)
 
+### Naming: AgentCoop and the gateway
+
+**AgentCoop** is the product — this repository, the `coop` command, the
+documentation. **The gateway** is the daemon process AgentCoop runs: the thing
+`coop start` starts, that holds watcher records, talks to the connectors and
+drives the agents. It is one component of AgentCoop (the Python package is
+`gateway/` for the same reason), in the way OpenClaw has a gateway component
+inside a larger product. Operator-facing output says "Gateway: not running"
+because it is describing that process, not the product. The short form of the
+product name is **Coop** — the agent-facing session header is
+`## Coop Session Identity`, and `COOP_*` is the environment-variable prefix.
+AgentCoop was previously known as agent-chat-gateway, or ACG.
+
 ### Key Properties
 
 - **Per-room serial processing** — One async queue per room prevents race conditions
 - **Multi-connector support** — Run multiple Rocket.Chat instances (or mixed platforms) in a single daemon
 - **Multi-agent support** — Different rooms can use different agent backends
-- **Stateful** — Agent sessions and watcher state persist to `~/.agent-chat-gateway/state.<connector>.json`
+- **Stateful** — Agent sessions and watcher state persist to `~/.agentcoop/state.<connector>.json`
 - **Graceful shutdown** — Drains queues with 30-second grace period before terminating agent subprocesses
 - **Security by design** — Roles resolved by connector (never from message content), permission broker is fail-closed (no broker = no watcher start)
 
@@ -155,7 +168,7 @@ graph TD
                                                               │
     └─→ MessageProcessor._process()  [queue consumer loop]   │
         ├─→ InjectedContextBuilder.build()+.ensure()  [every watcher start] │
-        │   └─ Read ~/.agent-chat-gateway/contexts/*.md      │
+        │   └─ Read ~/.agentcoop/contexts/*.md      │
         │   └─ Deliver via agent.ensure_durable_instructions() │
         │      (Claude: --append-system-prompt-file; else: one-time send) │
         │                                                     │
@@ -509,7 +522,7 @@ Streams one JSON object per line; extracts text from content blocks and metadata
 
 **Permission handling:** When permissions enabled, a temporary `settings.json` file is generated with an HTTP hook URL and passed via `--settings`. Claude CLI calls the hook before executing sensitive tools.
 
-**Environment isolation:** Strips `CLAUDECODE` from subprocess environment; injects `ACG_ROLE` and `ACG_ALLOWED_TOOLS` for per-message RBAC.
+**Environment isolation:** Strips `CLAUDECODE` from subprocess environment; injects `COOP_ROLE` and `COOP_ALLOWED_TOOLS` for per-message RBAC.
 
 ### OpenCodeBackend
 
@@ -561,11 +574,11 @@ Secrets are stored directly in config.yaml as literal values (chmod'd
 `0600`). `$VAR`/`${VAR}` is NOT expanded — a value that happens to look
 like one is used as a plain string, same as any other. A legacy config
 still using a colocated `.env` file with `$VAR`/`${VAR}` references is
-auto-migrated to literal values on first `agent-chat-gateway start` (or
+auto-migrated to literal values on first `coop start` (or
 before the config TUI opens) — see `gateway/config_migrate.py`. See
 `docs/migration-0.2.md` for the compact-format rationale and
 `gateway/schema/config.schema.json` for the field-level JSON Schema. Run
-`agent-chat-gateway config validate --lint` to check a config.yaml without
+`coop config validate --lint` to check a config.yaml without
 starting the daemon.
 
 ### Startup Sequence
@@ -647,7 +660,7 @@ daemon.py:_exit()
 
 ## State Persistence
 
-All state files live in `~/.agent-chat-gateway/`:
+All state files live in `~/.agentcoop/`:
 
 | File | Contents |
 |---|---|
@@ -944,16 +957,16 @@ async with AgentSession(
 
 ### Daemon won't start
 
-Check `~/.agent-chat-gateway/gateway.log` for errors. Common issues:
+Check `~/.agentcoop/gateway.log` for errors. Common issues:
 
 1. **Config YAML syntax error** — Run `python -m yaml config.yaml` to validate
 2. **Agent binary missing** — Ensure Claude CLI or opencode is in PATH
 3. **Port already in use** — Permission broker HTTP server conflicts; check netstat
-4. **Permission denied** — Ensure daemon can write to `~/.agent-chat-gateway/`
+4. **Permission denied** — Ensure daemon can write to `~/.agentcoop/`
 
 ### Messages not being processed
 
-1. **Check the room is being watched at all** — `agent-chat-gateway list --all`
+1. **Check the room is being watched at all** — `coop list --all`
    (plain `list` hides idle watchers). No row means no state record survived;
    the reason is in the startup log. See step 3 before concluding anything more
    than that from it.
@@ -967,7 +980,7 @@ Check `~/.agent-chat-gateway/gateway.log` for errors. Common issues:
    start never got far: context injection, the attachment workspace and session
    binding all roll their record back, so a watcher can fail well into startup
    and still leave nothing. The log is authoritative, `list` is not.
-4. **Check daemon logs** — `tail -f ~/.agent-chat-gateway/gateway.log`
+4. **Check daemon logs** — `tail -f ~/.agentcoop/gateway.log`
 5. **Check connector logs** — Filter by `connectors.rocketchat` in logs
 
 ### Permission requests timing out
@@ -1032,7 +1045,7 @@ Check `~/.agent-chat-gateway/gateway.log` for errors. Common issues:
 
 ## Summary
 
-agent-chat-gateway provides a modular, extensible bridge between chat platforms and AI agents with enterprise-grade RBAC and approval workflows. Its architecture emphasizes:
+AgentCoop provides a modular, extensible bridge between chat platforms and AI agents with enterprise-grade RBAC and approval workflows. Its architecture emphasizes:
 
 - **Modularity** — Swap connectors and agents without touching core logic
 - **Security** — Defense-in-depth via role resolution, prompt injection, broker interception, and path normalization

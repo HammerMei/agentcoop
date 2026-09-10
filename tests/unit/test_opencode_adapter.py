@@ -139,7 +139,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
 
     async def test_start_injects_sidecar_env(self):
         """start() merges sidecar_env into the subprocess environment."""
-        b = _make_backend(sidecar_env={"ACG_ROLE": "owner", "MY_VAR": "hello"})
+        b = _make_backend(sidecar_env={"COOP_ROLE": "owner", "MY_VAR": "hello"})
 
         mock_process = MagicMock()
         mock_process.returncode = None
@@ -164,7 +164,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             mock_client.get = AsyncMock(return_value=mock_health_resp)
             await b.start()
 
-        self.assertEqual(captured_env.get("ACG_ROLE"), "owner")
+        self.assertEqual(captured_env.get("COOP_ROLE"), "owner")
         self.assertEqual(captured_env.get("MY_VAR"), "hello")
 
 
@@ -264,7 +264,7 @@ class TestEnsureDurableInstructions(unittest.IsolatedAsyncioTestCase):
         backend = _make_backend()
         with tempfile.TemporaryDirectory() as tmp:
             with patch("gateway.agents.opencode.adapter.RUNTIME_DIR", Path(tmp)):
-                content = "## ACG Session Identity\nhello world"
+                content = "## Coop Session Identity\nhello world"
                 path = await backend.ensure_durable_instructions(
                     "ses_001", "/unused", 10, content,
                     path_key="w1", already_delivered=False,
@@ -505,7 +505,7 @@ class TestSend(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.md"
-            path.write_text("## ACG Session Identity\nyou are watcher w")
+            path.write_text("## Coop Session Identity\nyou are watcher w")
 
             result = await b.send(
                 "ses_abc", "Hello", "/workspace", timeout=60,
@@ -514,7 +514,7 @@ class TestSend(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, AgentResponse)
         body = mock_client.post.call_args.kwargs["json"]
-        self.assertEqual(body["system"], "## ACG Session Identity\nyou are watcher w")
+        self.assertEqual(body["system"], "## Coop Session Identity\nyou are watcher w")
 
     async def test_missing_append_system_prompt_file_omits_system_field(self):
         """If the durable-instructions file is missing, send() still proceeds
@@ -1788,7 +1788,7 @@ class TestOrphanCleanupTimeout(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(b, "_cleanup_orphan_sessions_best_effort",
                          side_effect=slow_cleanup),
-            self.assertLogs("agent-chat-gateway.agents.opencode", level="WARNING") as log_ctx,
+            self.assertLogs("coop.agents.opencode", level="WARNING") as log_ctx,
         ):
             try:
                 await asyncio.wait_for(b.stop(), timeout=15.0)
@@ -2602,7 +2602,7 @@ class TestStream(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.md"
-            path.write_text("## ACG Session Identity\nyou are watcher w")
+            path.write_text("## Coop Session Identity\nyou are watcher w")
 
             with patch("gateway.agents.opencode.adapter.httpx.AsyncClient",
                        return_value=mock_sse_client):
@@ -2613,7 +2613,7 @@ class TestStream(unittest.IsolatedAsyncioTestCase):
                     pass
 
         b._post_message_async.assert_awaited_once_with(
-            "sess-1", "hello", system="## ACG Session Identity\nyou are watcher w",
+            "sess-1", "hello", system="## Coop Session Identity\nyou are watcher w",
         )
 
     async def test_stream_cancels_sse_task_on_completion(self):
@@ -2983,7 +2983,7 @@ class TestBuildSafeOpencodeConfig(unittest.TestCase):
         self.assertEqual(bash["git log *"], "allow")
 
     def test_user_bash_patterns_not_overwritten_by_defaults(self):
-        """If user already has a default pattern set, ACG must not overwrite it."""
+        """If user already has a default pattern set, AgentCoop must not overwrite it."""
         existing = json.dumps({
             "permission": {"bash": {"git log *": "deny"}}  # user explicitly denies
         })
@@ -3077,8 +3077,8 @@ class TestBuildSafeOpencodeConfig(unittest.TestCase):
 
     def test_init_merges_with_existing_sidecar_env(self):
         """__init__ merges injection with other sidecar_env vars."""
-        b = _make_backend(sidecar_env={"ACG_ROLE": "owner"})
-        self.assertEqual(b._sidecar_env["ACG_ROLE"], "owner")
+        b = _make_backend(sidecar_env={"COOP_ROLE": "owner"})
+        self.assertEqual(b._sidecar_env["COOP_ROLE"], "owner")
         self.assertIn("OPENCODE_CONFIG_CONTENT", b._sidecar_env)
 
     def test_init_respects_user_catchall_in_sidecar_env(self):

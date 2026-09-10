@@ -850,7 +850,7 @@ class TestEndToEndThroughTheRealLifecycle(unittest.IsolatedAsyncioTestCase):
             await lifecycle.stop_all()
 
             with self.assertLogs(
-                "agent-chat-gateway.core.watcher_manager", "WARNING"
+                "coop.core.watcher_manager", "WARNING"
             ):
                 proc = await manager.get_or_create("rc", _room())
 

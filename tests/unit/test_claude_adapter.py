@@ -491,12 +491,12 @@ class TestClaudeBackendEnsureDurableInstructions(unittest.IsolatedAsyncioTestCas
     writing has no side effect to avoid repeating (regression test for design
     review blocker #1: a resumed session must still get a non-None path).
 
-    Written under RUNTIME_DIR (ACG's own state directory), NOT under
+    Written under RUNTIME_DIR (AgentCoop's own state directory), NOT under
     working_directory — a real user project directory could be under git
     version control, and a generated file living there risks an accidental
     `git add`. Tests patch the module-local RUNTIME_DIR constant (same
     convention as tests/unit/test_daemon.py, test_control_server.py, etc.)
-    rather than relying on the real ~/.agent-chat-gateway. `working_directory`
+    rather than relying on the real ~/.agentcoop. `working_directory`
     is passed as an arbitrary unused placeholder since this method no longer
     keys the path off it.
     """
@@ -510,7 +510,7 @@ class TestClaudeBackendEnsureDurableInstructions(unittest.IsolatedAsyncioTestCas
         with tempfile.TemporaryDirectory() as tmp:
             with patch("gateway.agents.claude.adapter.RUNTIME_DIR", Path(tmp)):
                 path = await backend.ensure_durable_instructions(
-                    "sess-1", "/unused", 10, "## ACG Session Identity\nhello",
+                    "sess-1", "/unused", 10, "## Coop Session Identity\nhello",
                     path_key="my-watcher", already_delivered=False,
                 )
 
@@ -524,7 +524,7 @@ class TestClaudeBackendEnsureDurableInstructions(unittest.IsolatedAsyncioTestCas
         backend = _make_backend()
         with tempfile.TemporaryDirectory() as tmp:
             with patch("gateway.agents.claude.adapter.RUNTIME_DIR", Path(tmp)):
-                content = "## ACG Session Identity\nhello world"
+                content = "## Coop Session Identity\nhello world"
                 path = await backend.ensure_durable_instructions(
                     "sess-1", "/unused", 10, content,
                     path_key="my-watcher", already_delivered=False,

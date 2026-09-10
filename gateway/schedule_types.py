@@ -18,7 +18,7 @@ class JobStatus(str, Enum):
     """Lifecycle status of a scheduled job.
 
     ACTIVE    — scheduler fires this job on schedule.
-    PAUSED    — user explicitly paused via ``agent-chat-gateway schedule pause``; scheduler skips it.
+    PAUSED    — user explicitly paused via ``coop schedule pause``; scheduler skips it.
     COMPLETED — all runs exhausted (``run_count >= times > 0``); pending TTL purge.
                 Forever jobs (``times == 0``) never transition to COMPLETED automatically.
     CANCELLED — the gateway stopped it (the bot was removed from the room, or the
@@ -59,7 +59,7 @@ class ScheduledJob:
 
                        Empty on a job written before schema version 2. Such a job
                        falls back to resolving by handle, exactly as it did before
-                       the field existed, and `agent-chat-gateway schedule migrate`
+                       the field existed, and `coop schedule migrate`
                        fills it in. That is deliberately an operator step rather
                        than a lazy backfill at fire time: a handle only maps to the
                        right room while nobody has renamed it, and the operator is

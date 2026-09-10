@@ -406,7 +406,7 @@ class RocketChatREST:
         Dispatches to the RC-8.0+ two-step ``rooms.media`` + ``rooms.mediaConfirm``
         flow or the legacy one-step ``rooms.upload`` flow based on the server's
         detected major version (see ``_get_server_major_version``; undetectable
-        version falls back to legacy, matching ACG's behavior before this
+        version falls back to legacy, matching AgentCoop's behavior before this
         version-detection capability existed). See issue #56.
         """
         path = Path(file_path)
@@ -457,7 +457,7 @@ class RocketChatREST:
             raise RuntimeError(
                 f"rooms.upload/{room_id} returned 404. This endpoint was removed "
                 "in Rocket.Chat 8.0+; the server is likely running RC 8.0+ but "
-                "ACG's version detection via GET /api/info could not confirm it "
+                "AgentCoop's version detection via GET /api/info could not confirm it "
                 "(see warning logged above). If this server is RC 8.0+, check "
                 "that /api/info is reachable and returns a 'version' field."
             )
@@ -528,7 +528,7 @@ class RocketChatREST:
           - ``group``    → ``groups.history``
           - ``dm``       → ``im.history``
           - ``group_dm`` → ``im.history`` (one direct endpoint serves both DM
-            kinds; the distinction is ACG's, not the server's — §6.4)
+            kinds; the distinction is AgentCoop's, not the server's — §6.4)
 
         Returns messages in **chronological order** (oldest first).
         System messages (RC ``t`` field present) and messages with empty

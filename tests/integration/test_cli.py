@@ -170,8 +170,8 @@ class TestCLIInstructions(_CLITestBase):
 
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
-        self.assertIn("# ACG Scheduling Commands", stdout)
-        self.assertIn("agent-chat-gateway schedule create", stdout)
+        self.assertIn("# AgentCoop Scheduling Commands", stdout)
+        self.assertIn("coop schedule create", stdout)
 
     def test_instructions_fetch_history_prints_fetch_history_doc(self):
         stdout, stderr, code = self._run(["instructions", "fetch-history"])
@@ -179,7 +179,7 @@ class TestCLIInstructions(_CLITestBase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertIn("# fetch-history", stdout)
-        self.assertIn("agent-chat-gateway fetch-history", stdout)
+        self.assertIn("coop fetch-history", stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ class TestCLIConfigLaunchesTUI(_CLITestBase):
         usage string and exited 1 — it must now attempt to launch the TUI
         (and hit the TTY guard under test) instead."""
         stdout, stderr, code = self._run(["config"])
-        self.assertNotIn("Usage: agent-chat-gateway config", stdout + stderr)
+        self.assertNotIn("Usage: coop config", stdout + stderr)
 
     def test_config_and_lint_flags_are_forwarded_to_run_app(self):
         with patch("gateway.configtool.run_app") as mock_run_app:
@@ -278,7 +278,7 @@ class TestCLIConfigValidate(_CLITestBase):
 
     gateway.core.state.RUNTIME_DIR is patched to a per-test temp dir in every
     case — otherwise the state-orphan check would read this machine's real
-    ~/.agent-chat-gateway/state.*.json files and make the test non-hermetic.
+    ~/.agentcoop/state.*.json files and make the test non-hermetic.
     """
 
     def setUp(self):
@@ -1512,9 +1512,9 @@ class TestCLIScheduleMigrateReporting(_CLITestBase):
         the CLI has to surface that as a failure, not a quiet success."""
         self._start_daemon({"schedule-migrate": {
             "ok": False,
-            "error": "jobs.json declares schema version 3, but this ACG "
+            "error": "jobs.json declares schema version 3, but this AgentCoop "
                      "understands 2. It was written by a newer version — "
-                     "upgrade ACG rather than migrating down."}})
+                     "upgrade AgentCoop rather than migrating down."}})
         stdout, stderr, code = self._run(["schedule", "migrate"])
 
         self.assertEqual(code, 1)
@@ -1790,7 +1790,7 @@ class TestCLIConfigReload(_ConfigCLIBase):
             ["config", "reload", "--config", self.cfg_path], running=False)
         self.assertEqual(code, 1)
         self.assertIn("not running", stderr)
-        self.assertIn("agent-chat-gateway start", stderr)
+        self.assertIn("coop start", stderr)
 
     def test_offline_dry_run_keeps_the_validation_warnings(self):
         self._write_config(rules=(  # w2 is shadowed by w1 — a warning, not an error

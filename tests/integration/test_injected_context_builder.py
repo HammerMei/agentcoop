@@ -140,7 +140,7 @@ class TestBuildAllFilesOversized(unittest.IsolatedAsyncioTestCase):
         ):
             content = await injector.build("default", "rc", wc)
 
-        self.assertIn("## ACG Session Identity", content)
+        self.assertIn("## Coop Session Identity", content)
 
     async def test_partial_oversized_injects_small_files(self):
         """Files under the size limit are still included even if others are oversized."""
@@ -167,7 +167,7 @@ class TestBuildAllFilesOversized(unittest.IsolatedAsyncioTestCase):
             content = await injector.build("default", "rc", wc)
 
         self.assertIn("small context content", content)
-        self.assertIn("## ACG Session Identity", content)
+        self.assertIn("## Coop Session Identity", content)
 
 
 # ── Tests: build() — TOCTOU re-validation ────────────────────────────────────
@@ -202,7 +202,7 @@ class TestBuildTOCTOU(unittest.IsolatedAsyncioTestCase):
             content = await injector.build("default", "rc", wc)
 
         self.assertNotIn(oversized_content, content)
-        self.assertIn("## ACG Session Identity", content)
+        self.assertIn("## Coop Session Identity", content)
 
 
 # ── Tests: build() — missing file ────────────────────────────────────────────
@@ -239,14 +239,14 @@ class TestBuildNoContextFiles(unittest.IsolatedAsyncioTestCase):
         injector = _make_injector()
         wc = _make_wc([])
         content = await injector.build("default", "rc", wc, agent_username="bot")
-        self.assertIn("## ACG Session Identity", content)
+        self.assertIn("## Coop Session Identity", content)
         self.assertIn("## Multi-Agent Addressing", content)
 
     async def test_header_present_without_agent_username(self):
         injector = _make_injector()
         wc = _make_wc([])
         content = await injector.build("default", "rc", wc)
-        self.assertIn("## ACG Session Identity", content)
+        self.assertIn("## Coop Session Identity", content)
         self.assertNotIn("## Multi-Agent Addressing", content)
 
 
@@ -285,7 +285,7 @@ class TestInjectedContextBuilderHeader(unittest.IsolatedAsyncioTestCase):
                 "default", "rc-home", wc, agent_username="bot"
             )
 
-        header_pos = content.find("## ACG Session Identity")
+        header_pos = content.find("## Coop Session Identity")
         static_pos = content.find("# Static Context")
         self.assertGreater(header_pos, -1, "Header must be present")
         self.assertGreater(static_pos, -1, "Static file content must be present")

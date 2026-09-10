@@ -5,13 +5,13 @@ returns True on the grounds that one socket carries every channel the bot
 belongs to "and only those", so the creation path performs **no REST
 membership check** — a channel that produces an event is by definition one the
 bot is in. If Mattermost ever delivered events for merely-readable channels,
-ACG would silently start answering in rooms nobody invited it to.
+AgentCoop would silently start answering in rooms nobody invited it to.
 
 `scripts/probe_a2_mm.py` already verifies this at the PLATFORM level, and §6.2
 records the result. This test is not a copy of that: it verifies the same
-property **through the whole ACG runtime** — a rule that matches the channel,
+property **through the whole AgentCoop runtime** — a rule that matches the channel,
 a poster on the allow-list, a bot that is mentioned — and the probe cannot,
-because the probe does not run ACG.
+because the probe does not run AgentCoop.
 
 Three things make it a test rather than a sleep-and-hope:
 
@@ -22,7 +22,7 @@ Three things make it a test rather than a sleep-and-hope:
    `mmadmin` is not in `allowed_users.owners`, so the sender filter would
    explain the silence just as well as the missing event.
 3. **A round trip in the member channel is the liveness control**, posted
-   *after* the outside post. Waiting for that reply proves ACG was alive and
+   *after* the outside post. Waiting for that reply proves AgentCoop was alive and
    consuming events after the outside message — which is what makes this a
    causal bound instead of a magic sleep. A pure negative assertion would pass
    just as happily against a dead gateway.

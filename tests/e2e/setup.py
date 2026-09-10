@@ -36,7 +36,7 @@ ADMIN_PASSWORD = "admin_e2e_2024"
 BOT_USERNAME = "acg_bot"
 BOT_PASSWORD = "acg_bot_e2e_2024"
 BOT_EMAIL = "acg_bot@e2e.local"
-BOT_NAME = "ACG Bot"
+BOT_NAME = "AgentCoop Bot"
 
 TEST_USER_USERNAME = "test_user"
 TEST_USER_PASSWORD = "test_user_e2e_2024"

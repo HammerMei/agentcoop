@@ -35,7 +35,7 @@ from tests.unit.test_wake_path import (
 )
 
 ROOM_ID = "wake-1"
-LIFECYCLE_LOGGER = "agent-chat-gateway.core.watcher_lifecycle"
+LIFECYCLE_LOGGER = "coop.core.watcher_lifecycle"
 NAME = "rc:eng-backend"
 
 

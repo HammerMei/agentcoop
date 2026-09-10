@@ -490,12 +490,12 @@ class TestFormatPromptPrefixSanitization(unittest.TestCase):
         self.assertTrue(prefix.endswith("]"))
 
 
-# ── Tests: format_prompt_prefix day: field (agent-chat-gateway#53) ──────────
+# ── Tests: format_prompt_prefix day: field (AgentCoop#53) ──────────
 
 
 class TestFormatPromptPrefixDayField(unittest.TestCase):
     """The day: field surfaces the precomputed weekday so agents don't have
-    to infer it themselves from a bare date (agent-chat-gateway#53)."""
+    to infer it themselves from a bare date (AgentCoop#53)."""
 
     def _prefix_for(self, timestamp_ms: str, tz: str = "UTC"):
         connector = _make_rc_connector()
@@ -1403,7 +1403,7 @@ class TestOnWsReconnect(unittest.IsolatedAsyncioTestCase):
 
         connector._on_raw_ddp_message = capture_dispatch  # type: ignore[method-assign]
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", level=logging.WARNING) as cm:
+        with self.assertLogs("coop.connectors.rocketchat", level=logging.WARNING) as cm:
             await connector._on_ws_reconnect()
 
         # All messages replayed
@@ -1593,7 +1593,7 @@ class TestReplayBoundary(unittest.IsolatedAsyncioTestCase):
         connector._rest.is_room_member = AsyncMock(return_value=None)
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
         self.assertEqual(connector._rooms["room-1"].replay_boundary, "100")
 
@@ -1613,7 +1613,7 @@ class TestReplayBoundary(unittest.IsolatedAsyncioTestCase):
         connector._rest.get_room_history_page = AsyncMock(side_effect=RuntimeError("502"))
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(connector._rooms["room-1"].replay_boundary, "100")
@@ -1659,7 +1659,7 @@ class TestReplayMembershipGate(unittest.IsolatedAsyncioTestCase):
         """REST history for a public channel does not require membership, so the fetch
         would succeed and the agent would answer in a room it was thrown out of."""
         connector = self._connector(member=False)
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
         connector._rest.get_room_history_page.assert_not_awaited()
 
@@ -1668,7 +1668,7 @@ class TestReplayMembershipGate(unittest.IsolatedAsyncioTestCase):
         reconnect asks again; a message wrongly withheld can still be read by a human,
         while one wrongly sent cannot be taken back."""
         connector = self._connector(member=None)
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
         connector._rest.get_room_history_page.assert_not_awaited()
 
@@ -1782,7 +1782,7 @@ class TestReviewFixes(unittest.IsolatedAsyncioTestCase):
 
         connector._on_raw_ddp_message = capture  # type: ignore[method-assign]
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", level=logging.WARNING) as cm:
+        with self.assertLogs("coop.connectors.rocketchat", level=logging.WARNING) as cm:
             await connector._on_ws_reconnect()
 
         # Replay must still proceed (user gets missed messages).
@@ -2367,7 +2367,7 @@ class TestProbeMissedSince(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await connector.probe_missed_since(self._ROOM, "1000"))
 
     async def test_a_page_filled_by_system_events_is_a_gap_not_an_empty_window(self):
-        """`count` is the server's, the filter is ACG's, and it runs after — so
+        """`count` is the server's, the filter is AgentCoop's, and it runs after — so
         a window whose newest entries are all joins and topic changes arrives
         as an empty list with every user message in it still waiting behind
         that page. Only `raw_count` tells that apart from a genuinely empty
@@ -2481,7 +2481,7 @@ class TestMalformedFrames(unittest.IsolatedAsyncioTestCase):
         # AttributeError — the outer handler catches it and creates no queue either. The
         # distinction is whether the frame is *reported as an error*, so that is what this
         # asserts. Written after injecting the fault and watching the first version pass.
-        with self.assertNoLogs("agent-chat-gateway.connectors.rocketchat.ws", "ERROR"):
+        with self.assertNoLogs("coop.connectors.rocketchat.ws", "ERROR"):
             await client._handle_room_message({
                 "msg": "changed", "collection": "stream-room-messages",
                 "fields": {"eventName": "room-real", "args": ["not a doc"]},
@@ -2772,7 +2772,7 @@ class TestDirectRoomClassification(unittest.IsolatedAsyncioTestCase):
         connector._rest.dm_members = AsyncMock(side_effect=RuntimeError("api down"))
 
         with self.assertLogs(
-            "agent-chat-gateway.connectors.rocketchat", "WARNING"
+            "coop.connectors.rocketchat", "WARNING"
         ) as logs:
             await self._deliver(connector)
 
@@ -3047,7 +3047,7 @@ class TestReplayWindowsDoNotSpanMembership(unittest.IsolatedAsyncioTestCase):
         connector = self._connector(member=False)
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertIsNone(connector._rooms["room-1"].replay_boundary)
@@ -3055,7 +3055,7 @@ class TestReplayWindowsDoNotSpanMembership(unittest.IsolatedAsyncioTestCase):
     async def test_a_re_add_does_not_replay_the_time_away(self):
         connector = self._connector(member=False)
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         # Re-added later; live traffic has moved on in the meantime.
@@ -3075,7 +3075,7 @@ class TestReplayWindowsDoNotSpanMembership(unittest.IsolatedAsyncioTestCase):
         connector = self._connector(member=None)
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(connector._rooms["room-1"].replay_boundary, "100")
@@ -3163,7 +3163,7 @@ class TestARemovalDropsTheFallbackBoundaryToo(unittest.IsolatedAsyncioTestCase):
     async def test_a_removal_leaves_no_mark_to_replay_from(self):
         connector = self._connector()
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         sub = connector._rooms["room-1"]
@@ -3175,7 +3175,7 @@ class TestARemovalDropsTheFallbackBoundaryToo(unittest.IsolatedAsyncioTestCase):
         message. Without dropping the watermark this replays the whole time away."""
         connector = self._connector()
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         connector._rest.is_room_member = AsyncMock(return_value=True)
@@ -3190,7 +3190,7 @@ class TestARemovalDropsTheFallbackBoundaryToo(unittest.IsolatedAsyncioTestCase):
         connector = self._connector()
         connector._rest.is_room_member = AsyncMock(return_value=None)
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(connector._rooms["room-1"].last_processed_ts, "100")
@@ -3292,7 +3292,7 @@ class TestABatchHandedBackKeepsItsWindow(unittest.IsolatedAsyncioTestCase):
         connector = self._connector([True, False, True])
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(connector._rooms["room-1"].replay_boundary, "100")
@@ -3785,7 +3785,7 @@ class TestAReplayStopsWhenMembershipIsRevokedUnderIt(unittest.IsolatedAsyncioTes
 
         connector._rest.is_room_member = AsyncMock(side_effect=_check)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         connector._rest.get_room_history_page.assert_not_awaited()
@@ -3804,7 +3804,7 @@ class TestAReplayStopsWhenMembershipIsRevokedUnderIt(unittest.IsolatedAsyncioTes
 
         connector._rest.get_room_history_page = AsyncMock(side_effect=_history)
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(dispatched, [], "not one message from a room we have left")
@@ -3822,7 +3822,7 @@ class TestAReplayStopsWhenMembershipIsRevokedUnderIt(unittest.IsolatedAsyncioTes
 
         connector._on_raw_ddp_message = _dispatch
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(dispatched, ["m0", "m1"], "the rest belong to a room we left")
@@ -3850,7 +3850,7 @@ class TestAReplayStopsWhenMembershipIsRevokedUnderIt(unittest.IsolatedAsyncioTes
 
         connector._handler = _handler
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(len(handled), 2)
@@ -3958,7 +3958,7 @@ class TestAPageFilledWithSystemEventsIsNotAnEmptyWindow(unittest.IsolatedAsyncio
         )
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(
@@ -4007,7 +4007,7 @@ class TestAnInFlightDeliveryCannotReopenAClosedEpoch(unittest.IsolatedAsyncioTes
 
         connector._handler = _handler
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             handled = await connector._on_raw_ddp_message(
                 "room-1",
                 {"_id": "m9", "msg": "hi", "u": {"username": "alice"},
@@ -4087,7 +4087,7 @@ class TestEveryRemovalSiteRecordsTheSameThing(unittest.IsolatedAsyncioTestCase):
         before = sub.membership_epoch
 
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self._assert_left(sub, before)
@@ -4146,7 +4146,7 @@ class TestAFailedSubscribeReleasesTheTransportToo(unittest.IsolatedAsyncioTestCa
         connector._ws.unsubscribe_room = AsyncMock(side_effect=RuntimeError("also down"))
 
         room = Room(id="brand-new", name="other", type="channel")
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             with self.assertRaises(RuntimeError) as caught:
                 await connector.subscribe_room(
                     room, watcher_id="w9", working_directory="/tmp")
@@ -4185,7 +4185,7 @@ class TestAReplayedMessageRejectedByPreflightStaysReplayable(unittest.IsolatedAs
         sub = connector._rooms["room-1"]
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         self.assertNotIn(
@@ -4202,7 +4202,7 @@ class TestAReplayedMessageRejectedByPreflightStaysReplayable(unittest.IsolatedAs
         """The whole point: the loss was permanent, not delayed."""
         connector = self._connector(RoomCapacity.FULL)
         await connector._snapshot_replay_boundaries()
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_ws_reconnect()
 
         dispatched: list[str] = []
@@ -4911,7 +4911,7 @@ class TestABatchClearsOnlyTheWindowItRead(unittest.IsolatedAsyncioTestCase):
         connector._on_raw_ddp_message = _dispatch
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "INFO"):
+        with self.assertLogs("coop.connectors.rocketchat", "INFO"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(
@@ -4939,7 +4939,7 @@ class TestABatchClearsOnlyTheWindowItRead(unittest.IsolatedAsyncioTestCase):
         connector._rest.get_room_history_page = _empty_page
         await connector._snapshot_replay_boundaries()
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "INFO"):
+        with self.assertLogs("coop.connectors.rocketchat", "INFO"):
             await connector._on_ws_reconnect()
 
         self.assertEqual(
@@ -5008,7 +5008,7 @@ class TestARemovalDuringTheHandlerLeavesNoWindowBehind(unittest.IsolatedAsyncioT
 
         connector._handler = _handler
 
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             await connector._on_raw_ddp_message("room-1", self._doc())
 
         self.assertIsNone(

@@ -1,8 +1,8 @@
 """Profile-based config for the standalone RC/MM admin CLI.
 
-Deliberately a plain YAML file, separate from ACG's own ``config.yaml`` /
+Deliberately a plain YAML file, separate from AgentCoop's own ``config.yaml`` /
 ``ConnectorConfig`` (see gateway/admin/__init__.py for why). Profile-based
-rather than a single server/credential pair because one ACG deployment can
+rather than a single server/credential pair because one AgentCoop deployment can
 have agents talking to multiple RC and/or MM servers — the CLI operates on
 one named profile per invocation.
 

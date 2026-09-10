@@ -99,10 +99,10 @@ class ToolRule:
 # These allow agents to call gateway management commands (send / schedule)
 # without triggering a 🔐 human-approval prompt in Rocket.Chat.
 _BUILTIN_OWNER_TOOL_RULES = [
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+send\\s+.*"),
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+schedule\\s+.*"),
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+fetch-history\\s+.*"),
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+instructions\\s+(scheduling|fetch-history)\\s*"),
+    ToolRule(tool="Bash", params="coop\\s+send\\s+.*"),
+    ToolRule(tool="Bash", params="coop\\s+schedule\\s+.*"),
+    ToolRule(tool="Bash", params="coop\\s+fetch-history\\s+.*"),
+    ToolRule(tool="Bash", params="coop\\s+instructions\\s+(scheduling|fetch-history)\\s*"),
     # date is a read-only command used by agents to compute timestamps.
     # It is safe to auto-approve for owners so that compound bash commands
     # containing $(date ...) sub-expressions do not trigger approval prompts.
@@ -112,8 +112,8 @@ _BUILTIN_OWNER_TOOL_RULES = [
 _BUILTIN_GUEST_TOOL_RULES = [
     # fetch-history is read-only — guests can safely query channel history
     # for context without being able to send messages or create schedules.
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+fetch-history\\s+.*"),
-    ToolRule(tool="Bash", params="agent-chat-gateway\\s+instructions\\s+(scheduling|fetch-history)\\s*"),
+    ToolRule(tool="Bash", params="coop\\s+fetch-history\\s+.*"),
+    ToolRule(tool="Bash", params="coop\\s+instructions\\s+(scheduling|fetch-history)\\s*"),
 ]
 
 
@@ -140,7 +140,7 @@ class AgentConfig:
     def effective_owner_allowed_tools(self) -> "list[ToolRule]":
         """Return owner_allowed_tools with built-in gateway rules prepended.
 
-        The built-in rules (``agent-chat-gateway send``, ``schedule``,
+        The built-in rules (``coop send``, ``schedule``,
         ``fetch-history``, and ``instructions``) are always included so that
         agents can call gateway management commands without triggering a 🔐
         human-approval prompt — no user config required.  User-defined rules
@@ -152,8 +152,8 @@ class AgentConfig:
     def effective_guest_allowed_tools(self) -> "list[ToolRule]":
         """Return guest_allowed_tools with built-in read-only gateway rules prepended.
 
-        The built-in guest rules allow ``agent-chat-gateway fetch-history``
-        and ``agent-chat-gateway instructions`` — read-only operations safe
+        The built-in guest rules allow ``coop fetch-history``
+        and ``coop instructions`` — read-only operations safe
         for guest-role agents.  Write operations (``send``, ``schedule``)
         remain owner-only.
         """
@@ -181,7 +181,7 @@ class ConnectorConfig:
 class HistoryHandoffConfig:
     """Configuration for on-startup channel history injection.
 
-    When enabled, ACG fetches recent channel history and injects it as Layer 0
+    When enabled, AgentCoop fetches recent channel history and injects it as Layer 0
     context whenever a new agent session is created (reset, upgrade, or first
     join).  This restores conversational continuity without requiring the
     previous agent session to be alive.

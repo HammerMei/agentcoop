@@ -76,7 +76,7 @@ class LegacyStateError(StateFormatError):
             f"To proceed: move '{path}' aside — keep the copy, because the file IS "
             "the inventory: it lists each watcher's name, session id, paused flag and "
             "message watermark in plain JSON. Then start again. Do not reach for "
-            "'agent-chat-gateway list' at this point: it queries the running daemon, "
+            "'coop list' at this point: it queries the running daemon, "
             "and the daemon is what just refused to start. Your config.yaml does NOT need "
             "rewriting for this: rule-shaped watchers are not active yet, so the "
             "§5.3 procedure's config rewrite belongs to the later cutover, not to "
@@ -114,7 +114,7 @@ def _state_file(connector_name: str) -> Path:
     Each connector gets its own namespaced file so multiple connectors
     can run side by side without clobbering each other's state.
 
-    Example: connector_name="rc-home" → ~/.agent-chat-gateway/state.rc-home.json
+    Example: connector_name="rc-home" → ~/.agentcoop/state.rc-home.json
     """
     return RUNTIME_DIR / f"state.{connector_name}.json"
 

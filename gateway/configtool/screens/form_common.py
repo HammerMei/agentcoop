@@ -70,7 +70,7 @@ class FieldSpec:
     # resolved by anything but the one-time migration
     # (gateway/config_migrate.py) — by the time this screen opens, a
     # pre-existing .env-backed config has already been migrated (the TUI
-    # launch path triggers it, same as `agent-chat-gateway start`), so a
+    # launch path triggers it, same as `coop start`), so a
     # secret field's value is always its real, literal value here.
     secret: bool = False
 

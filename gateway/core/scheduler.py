@@ -403,7 +403,7 @@ class JobScheduler:
             logger.warning(
                 "Job %s: connector '%s' is degraded (a config reload could not bring it "
                 "back) — not fired this slot; it fires once the connector is back. "
-                "'agent-chat-gateway status' says what is wrong.", job.id, job.connector,
+                "'coop status' says what is wrong.", job.id, job.connector,
             )
             return job
         if self._connector_is_gone(job):
@@ -424,7 +424,7 @@ class JobScheduler:
             else:
                 logger.warning(
                     "AUDIT: cancelled scheduled job %s (watcher '%s', room %s) — %s. "
-                    "The record is kept; 'agent-chat-gateway schedule resume %s' restores it.",
+                    "The record is kept; 'coop schedule resume %s' restores it.",
                     job.id, job.watcher, job.room_id, reason, job.id,
                 )
             # The copy, marked, not None: `_fire_catch_up` re-assigns this
@@ -590,7 +590,7 @@ class JobScheduler:
             logger.warning(
                 "Job %s: no session manager owns watcher %r (connector %r is "
                 "not configured and no room or record names one). "
-                "'agent-chat-gateway schedule migrate' records the room.",
+                "'coop schedule migrate' records the room.",
                 job.id, job.watcher, job.connector,
             )
             return None
@@ -601,7 +601,7 @@ class JobScheduler:
                 "Job %s: watcher %r has no resolvable room — a job created "
                 "before schema 2 carries no room id and its watcher's record is "
                 "gone, so there is nothing to fire into. "
-                "'agent-chat-gateway schedule migrate' records one.",
+                "'coop schedule migrate' records one.",
                 job.id, job.watcher,
             )
             return None

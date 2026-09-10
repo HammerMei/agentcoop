@@ -15,11 +15,11 @@ provided, their paths are injected into the prompt text via
 access them using the Read tool.
 
 Durable system-prompt files (see :meth:`ClaudeBackend.ensure_durable_instructions`)
-are written under ``RUNTIME_DIR`` (``~/.agent-chat-gateway``), NOT under a
+are written under ``RUNTIME_DIR`` (``~/.agentcoop``), NOT under a
 watcher's ``working_directory`` — that directory can be (and per
 ``docs/user-guide.md`` examples, often is) a real user project under git
 version control, and a generated file living there risks being accidentally
-`git add`-ed. ``RUNTIME_DIR`` is ACG's own dedicated state directory (already
+`git add`-ed. ``RUNTIME_DIR`` is AgentCoop's own dedicated state directory (already
 used by ``state.json``, ``gateway.pid``, etc. — see ``gateway/runtime_lock.py``),
 never inside any user-controlled repo.
 """
@@ -360,7 +360,7 @@ class ClaudeBackend(AgentBackend):
         """Claude Code's default ``cleanupPeriodDays`` (settings.json) is 30 —
         JSONL session transcripts older than this are deleted at CLI startup.
         This is a documented default, not a guaranteed constant: a user can
-        change it per-machine, and ACG has no way to read the actual configured
+        change it per-machine, and AgentCoop has no way to read the actual configured
         value from here (see docs/design/dynamic-watcher-design.md's open items).
         """
         return 30
@@ -441,7 +441,7 @@ class ClaudeBackend(AgentBackend):
         subprocess reading this file concurrently with an update always sees
         either the old or the new content in full, never a partial write.
 
-        Deliberately written under ``RUNTIME_DIR`` (ACG's own state directory),
+        Deliberately written under ``RUNTIME_DIR`` (AgentCoop's own state directory),
         NOT under ``working_directory`` — Claude reads this file via a plain
         CLI flag at startup, before any tool-permission sandboxing applies, so
         it is not restricted to the project directory (verified empirically:

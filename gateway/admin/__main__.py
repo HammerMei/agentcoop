@@ -1,4 +1,4 @@
-"""Allows ``python -m gateway.admin`` as an alternative to the ``acg-provision`` script."""
+"""Allows ``python -m gateway.admin`` as an alternative to the ``coop-provision`` script."""
 
 from gateway.admin.cli import main
 

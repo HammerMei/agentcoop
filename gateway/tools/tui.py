@@ -10,7 +10,7 @@ Use --no-permissions to disable.
 
 Usage::
 
-    # From the agent-chat-gateway directory:
+    # From the AgentCoop directory:
     uv run python -m gateway.tools.tui
 
     # Specific agent, simulated guest role:
@@ -321,7 +321,7 @@ async def run_tui(
     )
 
     # ---- Header ------------------------------------------------------------
-    console.rule("[bold blue]agent-chat-gateway TUI[/bold blue]")
+    console.rule("[bold blue]AgentCoop TUI[/bold blue]")
     for line in state.info_lines():
         console.print(line)
     console.print()
@@ -439,7 +439,7 @@ async def run_tui(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="gateway-tui",
-        description="Interactive REPL for testing agent-chat-gateway agent backends.",
+        description="Interactive REPL for testing AgentCoop agent backends.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

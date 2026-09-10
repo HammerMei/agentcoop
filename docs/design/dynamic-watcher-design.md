@@ -760,7 +760,7 @@ more robust than pinning — it survives the backend expiring the session, which
 pinning never did (§3, backend retention).
 
 Note precisely which id disappears. `WatcherConfig.session_id` — the
-*config-pinned* one — is gone. `WatcherState.session_id` — the id ACG assigns
+*config-pinned* one — is gone. `WatcherState.session_id` — the id AgentCoop assigns
 at provisioning and persists so a room can resume — is untouched and remains
 central to the whole idle/expiry model (§2.5). Conflating the two would be an
 easy and damaging mistake.
@@ -918,7 +918,7 @@ activity to reclamation. Chosen to sit in the range agent backends retain
 sessions for anyway, so the expectation an operator already has is the one this
 meets.
 
-Both timers are wall-clock and know nothing about whether ACG was running, so a
+Both timers are wall-clock and know nothing about whether AgentCoop was running, so a
 daemon that is down for a week returns to find every record a week older. What
 keeps that survivable is **where each timer starts**, and the two halves of the
 fleet are protected differently.
@@ -1834,7 +1834,7 @@ still outranks a schedule (§4.4). A room that cannot be resolved injects nothin
 rather than injecting a message with nowhere to reply.
 
 **Old jobs migrate on an operator's command, not at fire time.**
-`agent-chat-gateway schedule migrate` fills in `room_id` for jobs written before
+`coop schedule migrate` fills in `room_id` for jobs written before
 schema 2. Deliberately not lazy: the step finds a job's room through its watcher
 handle, and a handle only names the right room while nobody has renamed it — the
 operator can choose a moment when that holds, right after an upgrade and before
@@ -1885,7 +1885,7 @@ operator verb reclaim a job-bearing room, and in both cases a job can bring it
 back.
 
 One interaction worth stating: a room idle for a long time will have had its
-session deleted by the agent backend regardless of what ACG persisted
+session deleted by the agent backend regardless of what AgentCoop persisted
 (§3, backend retention). The recreation path handles that through the typed
 session-not-found error — a new session is minted and handoff re-runs — which
 is why that error, and not TTL arithmetic, is the load-bearing mechanism.
@@ -1917,7 +1917,7 @@ on-disk records persist, and boot then eagerly starts every room ever seen.
   per-room route, at the cost of that room's conversational continuity.
 - **`list` output becomes dynamic.** There is no longer a static set of
   watchers derivable from `config.yaml`; the answer to "what is being
-  watched" is runtime state, so tooling must query the daemon. `agent-chat-gateway list`
+  watched" is runtime state, so tooling must query the daemon. `coop list`
   defaults to **active + paused + failed** — what an operator is about to act
   on — with `--all`, `--active`, `--idle`, `--paused` and `--failed` for the
   rest. Idle is excluded by default because with membership-event registration
@@ -1985,9 +1985,9 @@ on-disk records persist, and boot then eagerly starts every room ever seen.
   multiple-agent form, and it forces either a second mechanism or a
   precedence policy anyway.
 - **Deriving TTL from each agent backend's own session retention.** Clamping
-  ACG's TTL to the backend's declared retention is one-sided and cannot help
+  AgentCoop's TTL to the backend's declared retention is one-sided and cannot help
   in the direction that matters: a backend configured to delete transcripts
-  sooner than ACG expects will do so at *any* TTL value, while
+  sooner than AgentCoop expects will do so at *any* TTL value, while
   over-estimating merely wastes a recreate. The **typed session-not-found
   error** is the load-bearing mechanism instead — when a resume reports the
   session is gone, mint a new one and re-run handoff.
@@ -2196,7 +2196,7 @@ Independently shippable, and each is a separate change. The first two are
 Two representations are in play and nothing said which went where, so a value
 that looked right crossed an interface that wanted the other one. The rule:
 
-> **Every timestamp crossing an ACG interface is epoch milliseconds as a
+> **Every timestamp crossing an AgentCoop interface is epoch milliseconds as a
 > string.** ISO-8601 appears in exactly two places, both of them edges: what
 > the control socket accepts from an operator, and what `fetch_room_history`
 > returns *inside its message dicts*, which an agent reads.
@@ -2225,7 +2225,7 @@ candidate for the internal one.
   before calling any connector method.
 * `fetch_room_history`'s `before_ts`/`after_ts` are epoch-ms like everything
   else. Its *return* dicts keep ISO in their `ts` field: that value is read by
-  an agent, not compared by ACG.
+  an agent, not compared by AgentCoop.
 
 **The failure this closes**, recorded because it was silent: connectors were
 free to differ on tolerance. Rocket.Chat's bound normalizer accepted both forms
@@ -2361,12 +2361,12 @@ one upgrade.
 **The procedure**, which belongs in the migration guide:
 
 ```
-1. agent-chat-gateway list                      # record what exists, and what is paused
-2. agent-chat-gateway schedule list             # record scheduled jobs
+1. coop list                      # record what exists, and what is paused
+2. coop schedule list             # record scheduled jobs
 3. stop the gateway
 4. rewrite config.yaml as rules (§5.4) — see "not a 1:1 rewrite" below
       – drop any `session_id:`; it no longer exists (§2.4)
-5. remove the old state files:  ~/.agent-chat-gateway/state.*.json
+5. remove the old state files:  ~/.agentcoop/state.*.json
 6. start, then re-create the scheduled jobs from step 2
 ```
 
@@ -2466,7 +2466,7 @@ path that would need maintaining and testing indefinitely.
 > **Amended at implementation (`impl/config-tooling`, 2026-08-18):** the
 > Rules tab shipped as specified below. The **Sessions tab is deferred** by
 > owner decision — the config tool operates on `config.yaml` only and never
-> talks to the control socket; runtime observability stays in `agent-chat-gateway list`,
+> talks to the control socket; runtime observability stays in `coop list`,
 > and the session verbs (`pause`/`resume`/`reset`/`expire`) stay CLI-only
 > permanently. Of the four display states, only the two that concern the
 > config side remain applicable (valid config → Rules; unparseable → the
@@ -2597,7 +2597,7 @@ for rooms the account never per-room-subscribed to. Frame shape:
 | Own messages **are** delivered | Own-message filtering is required (already present). |
 | System messages **are** delivered — observed `t: "au"` for a member-added event | **A `t`-field filter is required on the live path.** Only the REST history path filters system messages today; under subscribe-all every join/leave/rename in every readable room arrives. |
 | `roomType` uses Rocket.Chat's raw letters: `c` public channel, `p` private group, `d` direct | Needs mapping to the internal `channel`/`group`/`dm` vocabulary that history fetching depends on. |
-| Second `sub` parameter `false` (what ACG sends) vs `true` (what Rocket.Chat's own SDK sends) | No observable difference in the emitted frames. No change needed. |
+| Second `sub` parameter `false` (what AgentCoop sends) vs `true` (what Rocket.Chat's own SDK sends) | No observable difference in the emitted frames. No change needed. |
 
 #### Subscribe-all: the stream's lifecycle, and what depends on it
 
@@ -2819,7 +2819,7 @@ within milliseconds once the membership row was added.
 **But the probe did not catch everything, and that is worth recording.** The
 `@` prefix on a DM's `channel_display_name` — now the subject of the row above
 — was missed by both the original probe and this re-verification, and was
-found afterwards by reading a populated `agent-chat-gateway list --all` and
+found afterwards by reading a populated `coop list --all` and
 seeing a watcher called `mm-e2e:dm:%40test_user`. The probe prints the raw
 event and so contained the evidence all along; nothing asserted anything about
 it. The group-DM half of the same field was then confirmed bare (§6.4) by
@@ -2830,10 +2830,10 @@ to ask; a field it merely prints is not thereby verified.
 This is now also covered **through the runtime**, not only at the platform
 level, by `tests/e2e/test_mm_membership_delivery.py`. The distinction is worth
 keeping: the probe establishes what Mattermost does, while the E2E test
-establishes that ACG honours it — with a rule that matches the unjoined
+establishes that AgentCoop honours it — with a rule that matches the unjoined
 channel, an allow-listed poster and a mentioned bot, so that none of those
 can account for the silence. A probe that passes while the test fails locates
-the regression in ACG; both failing locates it in the platform.
+the regression in AgentCoop; both failing locates it in the platform.
 
 ### 6.3 Mattermost: channel names are per-team, DMs are per-account
 

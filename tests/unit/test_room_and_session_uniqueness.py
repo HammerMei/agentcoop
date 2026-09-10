@@ -221,7 +221,7 @@ class TestLoadTimeSessionUniqueness(unittest.TestCase):
 
 
 class TestValidateReportsWhatBlocksTheBoot(unittest.TestCase):
-    """`agent-chat-gateway config validate` must know about every refusal the daemon added.
+    """`coop config validate` must know about every refusal the daemon added.
 
     A preflight that stops the daemon and is invisible to the validation command leaves
     the operator only one way to discover it: a failed start. `validate_config()` already
@@ -373,7 +373,7 @@ class TestConfigRefusesARoomTwice(unittest.TestCase):
         self._load(self._config(second_room="random"))
 
     def test_config_validate_reports_it_too(self):
-        """Same finding through `agent-chat-gateway config validate`: a warning naming the
+        """Same finding through `coop config validate`: a warning naming the
         shadowed rule, never an error — the room cannot be double-served."""
         from gateway.config_validate import validate_config
 

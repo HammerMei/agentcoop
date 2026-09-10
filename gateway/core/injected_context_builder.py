@@ -4,7 +4,7 @@ Split responsibilities (see gateway issue #52 — durable system prompt):
 
   - ``build()`` is pure-ish: it does file I/O (reading configured context
     files) but never calls ``agent.send()`` or touches any AgentBackend. It
-    combines the ACG identity/addressing header (``prompt_builder.build_system_header``)
+    combines the AgentCoop identity/addressing header (``prompt_builder.build_system_header``)
     with the user's configured ``context_inject_files`` content into a single
     string.
   - ``ensure()`` wraps ``agent.ensure_durable_instructions()`` with retry
@@ -53,7 +53,7 @@ class InjectedContextBuilder:
     """Builds gateway session context and ensures it durably reaches the agent.
 
     ``build()`` reads the concatenated list of context files from all three
-    layers (connector → agent → watcher), combines them with the ACG identity
+    layers (connector → agent → watcher), combines them with the AgentCoop identity
     header, and returns the combined string. Raises on hard errors (e.g.
     missing file) — caller must handle.
 
@@ -124,7 +124,7 @@ class InjectedContextBuilder:
         Resolves ``context_inject_files`` via the connector → agent → watcher
         layering (``CoreConfig.context_inject_files_for``), reads each file
         (subject to ``_MAX_FILE_SIZE``/``_MAX_CONTEXT_SIZE``), and prepends
-        the ACG identity + multi-agent addressing header
+        the AgentCoop identity + multi-agent addressing header
         (``prompt_builder.build_system_header``).
 
         Raises:

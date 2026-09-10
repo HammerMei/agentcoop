@@ -1,6 +1,6 @@
 # Installation & Getting Started Guide
 
-Follow this guide to install `agent-chat-gateway` and set up your first agent watcher.
+Follow this guide to install `coop` and set up your first agent watcher.
 
 ---
 
@@ -25,26 +25,26 @@ Before starting, ensure you have:
 Run the one-line installer with `--no-onboard` to skip the interactive setup wizard:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/install.sh | bash -s -- --no-onboard
+curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash -s -- --no-onboard
 ```
 
 This will:
 1. Check Python 3.12+ and install `uv` if missing
-2. Clone the repo to `~/.agent-chat-gateway/repo`
+2. Clone the repo to `~/.agentcoop/repo`
 3. Install dependencies with `uv sync`
-4. Copy bundled context files to `~/.agent-chat-gateway/contexts/`
-5. Create symlinks at `~/.local/bin/agent-chat-gateway` and `~/.local/bin/acg-provision`
+4. Copy bundled context files to `~/.agentcoop/contexts/`
+5. Create symlinks at `~/.local/bin/coop` and `~/.local/bin/coop-provision`
 6. Add `~/.local/bin` to PATH in `~/.bashrc` / `~/.zshrc` if needed
 
 After the installer finishes, it will print:
-- The executable location: `~/.local/bin/agent-chat-gateway`
+- The executable location: `~/.local/bin/coop`
 - The `source` command needed to activate it in the current shell (e.g. `source ~/.zshrc`)
 
-**Inform the user:** The executable has been installed at `~/.local/bin/agent-chat-gateway`. They need to run `source ~/.zshrc` (or `source ~/.bashrc`, depending on their shell) — or restart their terminal — before `agent-chat-gateway` will work as a direct command.
+**Inform the user:** The executable has been installed at `~/.local/bin/coop`. They need to run `source ~/.zshrc` (or `source ~/.bashrc`, depending on their shell) — or restart their terminal — before `coop` will work as a direct command.
 
 Verify the installation:
 ```bash
-~/.local/bin/agent-chat-gateway --help
+~/.local/bin/coop --help
 ```
 
 You should see the available commands: `start`, `stop`, `status`, `list`, `pause`, `resume`, `reset`, `send`, `onboard`, `upgrade`.
@@ -86,24 +86,24 @@ proceeding — the rest of this step and Step 3 branch on that choice.
 
 Create a directory for the gateway's runtime files:
 ```bash
-mkdir -p ~/.agent-chat-gateway
+mkdir -p ~/.agentcoop
 ```
 
 ### Create `config.yaml` file
 
 Credentials go directly into `config.yaml` below — no separate `.env` file needed.
-`agent-chat-gateway` chmods `config.yaml` to `0600` automatically (on every save via
-the config TUI, and on every `agent-chat-gateway start`), so this is safe as long as
+`coop` chmods `config.yaml` to `0600` automatically (on every save via
+the config TUI, and on every `coop start`), so this is safe as long as
 you don't commit your filled-in copy to version control.
 
 > Coming from an older setup that used a `.env` file? Nothing to do — the next
-> `agent-chat-gateway start` folds it into `config.yaml` automatically and removes
-> it (one-time). Run `agent-chat-gateway config migrate-env` first if you'd rather
+> `coop start` folds it into `config.yaml` automatically and removes
+> it (one-time). Run `coop config migrate-env` first if you'd rather
 > do it manually / as a dry run.
 
 **Rocket.Chat:**
 ```bash
-cat > ~/.agent-chat-gateway/config.yaml << 'EOF'
+cat > ~/.agentcoop/config.yaml << 'EOF'
 connectors:
   - name: rc-home
     type: rocketchat
@@ -127,7 +127,7 @@ agents:
   my-agent:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     new_session_args: []                # extra CLI flags passed when creating a new session
     session_prefix: "agent-chat"
     context_inject_files: []            # agent-level extra context (usually empty)
@@ -150,7 +150,7 @@ agents:
       - tool: "Bash"
         params: "ls( .*)?"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"   # agent-initiated file send to RC
+        params: "coop\\s+send\\s+.*"   # agent-initiated file send to RC
 
     guest_allowed_tools:
       - tool: "Read"
@@ -159,7 +159,7 @@ agents:
       - tool: "WebFetch"
         params: "https?://[^/]*\\.wikipedia\\.org/.*"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
 
     timeout: 360
     permissions:
@@ -177,7 +177,7 @@ EOF
 **Mattermost** (same `agents:`/`watcher_rules:` shape — only the `connectors:` block and the
 watcher's `connector:`/`room:` values differ from the Rocket.Chat example above):
 ```bash
-cat > ~/.agent-chat-gateway/config.yaml << 'EOF'
+cat > ~/.agentcoop/config.yaml << 'EOF'
 connectors:
   - name: mm-home
     type: mattermost
@@ -203,7 +203,7 @@ agents:
   my-agent:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     new_session_args: []                # extra CLI flags passed when creating a new session
     session_prefix: "agent-chat"
     context_inject_files: []            # agent-level extra context (usually empty)
@@ -226,7 +226,7 @@ agents:
       - tool: "Bash"
         params: "ls( .*)?"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"   # agent-initiated file send to chat
+        params: "coop\\s+send\\s+.*"   # agent-initiated file send to chat
 
     guest_allowed_tools:
       - tool: "Read"
@@ -235,7 +235,7 @@ agents:
       - tool: "WebFetch"
         params: "https?://[^/]*\\.wikipedia\\.org/.*"
       - tool: "Bash"
-        params: "agent-chat-gateway\\s+send\\s+.*"
+        params: "coop\\s+send\\s+.*"
 
     timeout: 360
     permissions:
@@ -260,7 +260,7 @@ EOF
 - `your-username` — your username on the chosen chat platform (the one who will own the bot)
 - `your-rocket-chat-server.com` / `your-mattermost-server.com` — your server URL
 - `your-team-name` (Mattermost only) — the team's URL slug (not its display name) that your channels live in
-- `~/.agent-chat-gateway/work` — **the project folder where Claude Code or OpenCode will run tasks and create files**. Default to the current project directory (`pwd`); ask the user to confirm or change it before proceeding.
+- `~/.agentcoop/work` — **the project folder where Claude Code or OpenCode will run tasks and create files**. Default to the current project directory (`pwd`); ask the user to confirm or change it before proceeding.
 - If using OpenCode instead of Claude, change `type: claude` and `command: claude` to `type: opencode` and `command: opencode`
 
 > **About context injection:** The built-in gateway context (message format, RBAC rules,
@@ -283,12 +283,12 @@ mkdir -p <working_directory>
 ## Step 4: Start the Daemon
 
 ```bash
-agent-chat-gateway start
+coop start
 ```
 
 You should see output indicating the daemon is starting. If there are any errors, check the log:
 ```bash
-tail -f ~/.agent-chat-gateway/gateway.log
+tail -f ~/.agentcoop/gateway.log
 ```
 
 ---
@@ -297,21 +297,21 @@ tail -f ~/.agent-chat-gateway/gateway.log
 
 Check the status:
 ```bash
-agent-chat-gateway status
+coop status
 ```
 
 Expected output:
 ```
 Gateway:  running (pid=12345)
 Uptime:   0h 0m 15s
-PID file: /Users/yourname/.agent-chat-gateway/gateway.pid
-Log file: /Users/yourname/.agent-chat-gateway/gateway.log
+PID file: /Users/yourname/.agentcoop/gateway.pid
+Log file: /Users/yourname/.agentcoop/gateway.log
 Watchers: 1
 ```
 
 List watchers:
 ```bash
-agent-chat-gateway list
+coop list
 ```
 
 Expected output:
@@ -327,7 +327,7 @@ dm-me  rc-home    @your-username  aBcD1234efGh5678iJkL  my-agent  active  agent-
 1. Open your chat platform and go to your direct message with the bot (or the configured room/channel)
 2. Send a message (e.g., "Hello, what can you do?")
 3. The agent should respond in a few seconds
-4. If you don't see a response, check the logs: `tail -f ~/.agent-chat-gateway/gateway.log`
+4. If you don't see a response, check the logs: `tail -f ~/.agentcoop/gateway.log`
 
 ---
 
@@ -337,7 +337,7 @@ To monitor additional rooms/channels:
 
 1. Add the bot to the room (Rocket.Chat) or channel (Mattermost — must also already be a
    team member, see Step 2)
-2. Edit `~/.agent-chat-gateway/config.yaml` and make sure a watcher RULE claims the
+2. Edit `~/.agentcoop/config.yaml` and make sure a watcher RULE claims the
    room. Rules match room names by glob, so one rule usually covers many rooms — the
    watcher itself is created automatically on the room's first message, named
    `<connector>:<room>`:
@@ -351,8 +351,8 @@ To monitor additional rooms/channels:
    ```
    See `config.example.yaml` for the full annotated format (DM opt-ins, `except_for`,
    per-rule session TTLs).
-3. Validate before restarting: `agent-chat-gateway config validate --config ~/.agent-chat-gateway/config.yaml`
-4. Restart the daemon: `agent-chat-gateway restart`
+3. Validate before restarting: `coop config validate --config ~/.agentcoop/config.yaml`
+4. Restart the daemon: `coop restart`
 
 ---
 
@@ -369,15 +369,15 @@ To monitor additional rooms/channels:
 
 | Command | Purpose |
 |---------|---------|
-| `agent-chat-gateway start` | Start the daemon |
-| `agent-chat-gateway stop` | Stop the daemon |
-| `agent-chat-gateway status` | Show status and uptime |
-| `agent-chat-gateway list` | List active, failed and paused watchers (`--all` for every state) |
-| `agent-chat-gateway pause WATCHER` | Pause a watcher |
-| `agent-chat-gateway resume WATCHER` | Resume a paused watcher |
-| `agent-chat-gateway reset WATCHER` | Reset a watcher session |
-| `agent-chat-gateway send ROOM MESSAGE` | Send a text message to a room |
-| `agent-chat-gateway send ROOM --file FILE` | Send message from a file (or `-` for stdin) |
-| `agent-chat-gateway send ROOM --attach FILE` | Upload a file attachment to a room |
-| `tail -f ~/.agent-chat-gateway/gateway.log` | View logs |
-| `agent-chat-gateway onboard` | Interactive setup wizard (alternative to manual config) |
+| `coop start` | Start the daemon |
+| `coop stop` | Stop the daemon |
+| `coop status` | Show status and uptime |
+| `coop list` | List active, failed and paused watchers (`--all` for every state) |
+| `coop pause WATCHER` | Pause a watcher |
+| `coop resume WATCHER` | Resume a paused watcher |
+| `coop reset WATCHER` | Reset a watcher session |
+| `coop send ROOM MESSAGE` | Send a text message to a room |
+| `coop send ROOM --file FILE` | Send message from a file (or `-` for stdin) |
+| `coop send ROOM --attach FILE` | Upload a file attachment to a room |
+| `tail -f ~/.agentcoop/gateway.log` | View logs |
+| `coop onboard` | Interactive setup wizard (alternative to manual config) |

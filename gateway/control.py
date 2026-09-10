@@ -61,7 +61,7 @@ def _degraded_error(entry: "ConnectorEntry") -> dict | None:
         return None
     return {"ok": False, "error": (
         f"Connector '{entry.name}' is degraded: {degraded}. Fix the cause and run "
-        f"'agent-chat-gateway config reload' to bring it back.")}
+        f"'coop config reload' to bring it back.")}
 
 
 class ControlServer:
@@ -874,7 +874,7 @@ class ControlServer:
             )
             # Converted here, at the one boundary where a human types a
             # timestamp: connector bounds are epoch milliseconds like every
-            # other timestamp inside ACG (§5.2). Both values are already
+            # other timestamp inside AgentCoop (§5.2). Both values are already
             # parsed above, so this reuses the datetimes rather than the
             # strings.
             msgs = await entry.connector.fetch_room_history(

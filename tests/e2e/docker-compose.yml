@@ -1,5 +1,5 @@
 # =============================================================================
-# E2E Test Infrastructure — Rocket.Chat + MongoDB, Mattermost + Postgres, ACG
+# E2E Test Infrastructure — Rocket.Chat + MongoDB, Mattermost + Postgres, AgentCoop
 #
 # Four phases, and the ORDER is load-bearing — `make e2e-up` is the authority:
 #   1. platforms:  up -d mongodb rocketchat postgres mattermost
@@ -157,7 +157,7 @@ services:
     # curl, so every `CMD-SHELL` probe fails with `stat /bin/sh: no such file
     # or directory` and the container sits unhealthy forever while the server
     # is in fact serving. That is exactly how it failed here — `/system/ping`
-    # answered 200 from the host while compose refused to start ACG on an
+    # answered 200 from the host while compose refused to start AgentCoop on an
     # "unhealthy" dependency. The vendor probe also checks more than a port:
     # it reports database and filestore status. `--local` needs local mode,
     # which this image enables by ENV default (nothing in this repo sets it),
@@ -180,7 +180,7 @@ services:
       retries: 30
       start_period: 60s
 
-  # ── ACG ─────────────────────────────────────────────────────────────────────
+  # ── AgentCoop ─────────────────────────────────────────────────────────────────────
   # Started last, after BOTH platforms have been bootstrapped: each connector
   # logs in as acg_bot at boot, and on Mattermost an unresolvable team is fatal
   # to the whole gateway. Config is pre-written in tests/e2e/acg-config/.
@@ -190,7 +190,7 @@ services:
     # :latest image only tracks the main branch.
     build:
       context: ../..
-      dockerfile: docker/Dockerfile.acg
+      dockerfile: docker/Dockerfile.coop
     image: acg-e2e-local
     container_name: acg-e2e
     restart: unless-stopped
@@ -200,18 +200,18 @@ services:
       mattermost:
         condition: service_healthy
     environment:
-      # Claude Code auth — pick ONE (same env vars as the production ACG image).
+      # Claude Code auth — pick ONE (same env vars as the production AgentCoop image).
       # Option A (recommended): OAuth token — works with Claude.ai subscription.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Option B: direct Anthropic API key
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
-      # ACG config: config.yaml + .env (pre-written by tests/e2e/acg-config/)
-      - ./acg-config:/root/.agent-chat-gateway/config
+      # AgentCoop config: config.yaml + .env (pre-written by tests/e2e/acg-config/)
+      - ./acg-config:/root/.agentcoop/config
       # Agent working directories
-      - acg_e2e_work:/root/.agent-chat-gateway/work
+      - acg_e2e_work:/root/.agentcoop/work
       # Context files (defaults restored by entrypoint if empty)
-      - acg_e2e_contexts:/root/.agent-chat-gateway/contexts
+      - acg_e2e_contexts:/root/.agentcoop/contexts
       # Claude Code auth (OAuth token / API key stored here)
       - ~/.claude:/root/.claude
     logging:

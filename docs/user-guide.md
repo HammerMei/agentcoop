@@ -1,12 +1,12 @@
-# agent-chat-gateway User Guide
+# AgentCoop User Guide
 
-## What is agent-chat-gateway?
+## What is AgentCoop?
 
-Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making AI agents accessible from any messaging app, `agent-chat-gateway` bridges your existing AI agent tools — Claude CLI, OpenCode, or any custom backend — to your team's chat platform. When someone messages the bot in a watched room, the message is forwarded to the configured agent and the response is posted back.
+Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making AI agents accessible from any messaging app, AgentCoop (previously known as agent-chat-gateway, or ACG) bridges your existing AI agent tools — Claude CLI, OpenCode, or any custom backend — to your team's chat platform. When someone messages the bot in a watched room, the message is forwarded to the configured agent and the response is posted back.
 
 Think of it as a persistent bridge: set up once, configure which rooms to watch, and your AI assistant becomes available across your entire chat workspace (Rocket.Chat or Mattermost — mix both if you use more than one) — with full support for role-based access control, human-in-the-loop permission approvals, and file attachments.
 
-> **How it compares to Claude Code Channels:** Claude Code's native [Channels](https://code.claude.com/docs/en/channels) feature (v2.1.80+) lets a single Claude Code session receive messages from Telegram, Discord, or iMessage — a great fit for personal use. `agent-chat-gateway` was developed independently before Channels shipped and targets a different layer: team deployments with multiple agent backends (not just Claude Code), Owner/Guest roles with per-tool allow-lists, and a shared workspace where multiple people can interact with the same or different agents across multiple rooms simultaneously.
+> **How it compares to Claude Code Channels:** Claude Code's native [Channels](https://code.claude.com/docs/en/channels) feature (v2.1.80+) lets a single Claude Code session receive messages from Telegram, Discord, or iMessage — a great fit for personal use. AgentCoop was developed independently before Channels shipped and targets a different layer: team deployments with multiple agent backends (not just Claude Code), Owner/Guest roles with per-tool allow-lists, and a shared workspace where multiple people can interact with the same or different agents across multiple rooms simultaneously.
 
 ### Key Concepts
 
@@ -40,10 +40,10 @@ For detailed installation instructions, see [install-agent.md](install-agent.md)
 
 Quick summary:
 ```bash
-pip install agent-chat-gateway
-mkdir -p ~/.agent-chat-gateway
-# Create config.yaml (see Configuration section below)
-agent-chat-gateway start
+curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
+# The installer clones to ~/.agentcoop/repo, links `coop` into ~/.local/bin
+# and runs the setup wizard that writes ~/.agentcoop/config.yaml.
+coop start
 ```
 
 ---
@@ -52,7 +52,7 @@ agent-chat-gateway start
 
 ### Minimal Working Config
 
-Create `~/.agent-chat-gateway/config.yaml`:
+Create `~/.agentcoop/config.yaml`:
 
 ```yaml
 connectors:
@@ -71,7 +71,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     timeout: 360
     permissions:
       enabled: true
@@ -92,20 +92,20 @@ watcher_rules:
 export RC_PASSWORD="your_bot_password"
 
 # Start the gateway
-agent-chat-gateway start
+coop start
 
 # Check status
-agent-chat-gateway status
+coop status
 ```
 
 ### Send a Message
 
 ```bash
 # Direct message (bypasses the agent)
-agent-chat-gateway send general "Hello from the CLI"
+coop send general "Hello from the CLI"
 
 # Or read from stdin
-echo "Hello from stdin" | agent-chat-gateway send general -
+echo "Hello from stdin" | coop send general -
 ```
 
 ---
@@ -138,7 +138,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     timeout: 360
     permissions:
       enabled: true
@@ -156,7 +156,7 @@ agents:
   opencode:
     type: opencode
     command: opencode
-    working_directory: ~/.agent-chat-gateway/opencode-work
+    working_directory: ~/.agentcoop/opencode-work
     timeout: 360
     permissions:
       enabled: true
@@ -240,7 +240,7 @@ watcher_rules:
 - Set `permissions.enabled: false` for personal use where approval friction isn't needed
 - Set yourself as the sole owner; omit `guests` entirely
 
-> **Similar to Claude Code Channels:** Claude Code's [Channels](https://code.claude.com/docs/en/channels) feature (v2.1.80+) also connects external platforms (Telegram, Discord, iMessage) to a local Claude Code session via `claude --channels`. The key differences: Channels is Claude Code-specific and single-user focused, while `agent-chat-gateway` supports any agent backend (Claude CLI, OpenCode, custom), multi-user RBAC, and is designed for team-shared chat workspaces (Rocket.Chat or Mattermost). If you only use Claude Code and only need personal access, Channels may be simpler to set up; if you need team access or a different agent backend, `agent-chat-gateway` is the better fit.
+> **Similar to Claude Code Channels:** Claude Code's [Channels](https://code.claude.com/docs/en/channels) feature (v2.1.80+) also connects external platforms (Telegram, Discord, iMessage) to a local Claude Code session via `claude --channels`. The key differences: Channels is Claude Code-specific and single-user focused, while `coop` supports any agent backend (Claude CLI, OpenCode, custom), multi-user RBAC, and is designed for team-shared chat workspaces (Rocket.Chat or Mattermost). If you only use Claude Code and only need personal access, Channels may be simpler to set up; if you need team access or a different agent backend, `coop` is the better fit.
 
 ---
 
@@ -250,7 +250,7 @@ If you have a long-running agent session already in progress (e.g. a Claude sess
 you started locally), hand its context over to a watcher so your messaging app picks
 up where you left off.
 
-> **Similar to Claude Code's Remote Control:** Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) feature (`claude --remote-control`) lets you drive a local session from `claude.ai/code` or the Claude mobile app. `agent-chat-gateway` takes a complementary approach: instead of a personal remote interface, your session becomes accessible from your team's shared chat room — with RBAC and permission approval so others can interact safely too.
+> **Similar to Claude Code's Remote Control:** Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) feature (`claude --remote-control`) lets you drive a local session from `claude.ai/code` or the Claude mobile app. `coop` takes a complementary approach: instead of a personal remote interface, your session becomes accessible from your team's shared chat room — with RBAC and permission approval so others can interact safely too.
 
 **Use a handoff, not a pinned session id.** Earlier versions accepted
 `watchers[].session_id` to attach a watcher to one specific backend session.
@@ -306,7 +306,7 @@ watcher_rules:
 
 ```bash
 # 3. Start the gateway and continue from your messaging app.
-agent-chat-gateway start
+coop start
 ```
 
 **Notes:**
@@ -315,7 +315,7 @@ agent-chat-gateway start
   a relative path written from a project shell will not resolve — use an absolute
   path, or write the handoff next to `config.yaml`.
 - Context files are re-read on every watcher start, so rewriting `HANDOFF.md` takes
-  effect the next time the watcher starts. Run `agent-chat-gateway reset <watcher>`
+  effect the next time the watcher starts. Run `coop reset <watcher>`
   as well if you want the updated context to open a *fresh* conversation instead of
   continuing the existing one.
 - Session *continuity* across daemon restarts needs no configuration: the gateway
@@ -344,7 +344,7 @@ deployments — see `docs/migration-0.3.md` for the reasoning and before/after
 recipes. `config.example.yaml` has a worked example. A leftover
 `connector_defaults:`/`agent_defaults:`/`watcher_defaults:` key (the pre-v0.3
 mechanism) is a hard load-time error, not silently ignored.
-Check your config any time with `agent-chat-gateway config validate --lint`.
+Check your config any time with `coop config validate --lint`.
 
 ### Connectors
 
@@ -383,7 +383,7 @@ connectors:
     attachments:
       max_file_size_mb: 50           # 0 = no limit
       download_timeout: 30            # Seconds
-      cache_dir_global: ~/.agent-chat-gateway/attachments  # connector-global cache directory
+      cache_dir_global: ~/.agentcoop/attachments  # connector-global cache directory
     reply_in_thread: false            # Start new thread for replies
     permission_reply_in_thread: true  # Post permission requests in thread
     context_inject_files: []          # Files sent to agent on session start
@@ -404,14 +404,14 @@ connectors:
     attachments:
       max_file_size_mb: 50
       download_timeout: 30
-      cache_dir_global: ~/.agent-chat-gateway/attachments
+      cache_dir_global: ~/.agentcoop/attachments
     reply_in_thread: false
     permission_reply_in_thread: true
     context_inject_files: []
 ```
 
 > Mattermost has no onboarding CLI wizard support yet — this block must be hand-written
-> (unlike Rocket.Chat, which `agent-chat-gateway onboard` can generate for you).
+> (unlike Rocket.Chat, which `coop onboard` can generate for you).
 
 **Connector Fields:**
 
@@ -428,7 +428,7 @@ connectors:
 | `allowed_users.guests` | list | No | Usernames with restricted tool access |
 | `attachments.max_file_size_mb` | integer | No | Maximum file size; 0 = unlimited |
 | `attachments.download_timeout` | integer | No | Seconds to wait per file download |
-| `attachments.cache_dir_global` | string | No | Download cache directory (default: `~/.agent-chat-gateway/attachments`; only needed to override the default) |
+| `attachments.cache_dir_global` | string | No | Download cache directory (default: `~/.agentcoop/attachments`; only needed to override the default) |
 | `reply_in_thread` | boolean | No | Reply in thread for every message |
 | `permission_reply_in_thread` | boolean | No | Post permission requests in threads |
 | `context_inject_files` | list | No | Context files for all sessions on this connector |
@@ -442,7 +442,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     new_session_args: []
     session_prefix: "agent-chat"
     lazy_instruction_loading: true
@@ -475,7 +475,7 @@ agents:
 | `working_directory` | string | Yes | Working directory for the agent subprocess |
 | `new_session_args` | list | No | Extra CLI args for new sessions |
 | `session_prefix` | string | No | Prefix for session titles |
-| `lazy_instruction_loading` | boolean | No | If `true` (default), injects a short tool index and lets agents load bundled scheduling/history docs on demand with `agent-chat-gateway instructions ...`; if `false`, injects the full bundled tool docs at session start. |
+| `lazy_instruction_loading` | boolean | No | If `true` (default), injects a short tool index and lets agents load bundled scheduling/history docs on demand with `coop instructions ...`; if `false`, injects the full bundled tool docs at session start. |
 | `context_inject_files` | list | No | Context files injected on every session |
 | `owner_allowed_tools` | list | No | Auto-approved tools for owners (see Tool Allow-Lists below) |
 | `guest_allowed_tools` | list | No | Auto-approved tools for guests (see Tool Allow-Lists below) |
@@ -519,7 +519,7 @@ makes a watcher handle unambiguous. DM labels keep the counterpart's name as of
 creation, and a new name still held by another room's stale record is not taken
 until that record goes. Scripts should not store a watcher name; the room is the
 identity. Rules
-match top-down; the first rule that claims a room wins, and `agent-chat-gateway config
+match top-down; the first rule that claims a room wins, and `coop config
 validate` warns when an earlier rule shadows a later one completely.
 
 A quiet room is dropped after `session_idle_days` (default 15 — the session
@@ -705,16 +705,16 @@ server:
 ```
 
 `config.yaml` is chmod'd `0600` automatically, both by the config TUI on every
-save and by `agent-chat-gateway start` — as long as you don't commit your
+save and by `coop start` — as long as you don't commit your
 filled-in copy to version control, plaintext here is safe.
 
 The gateway does **not** expand `$VAR`/`${VAR}` in config values — a string
 that happens to look like a placeholder is used exactly as written, like
 any other string. If you're upgrading from an older setup that used a
-`.env` file with `${VAR}` references, the next `agent-chat-gateway start`
-(or opening `agent-chat-gateway config`) folds those values into `config.yaml`
+`.env` file with `${VAR}` references, the next `coop start`
+(or opening `coop config`) folds those values into `config.yaml`
 as literal text and removes `.env` automatically — one-time, no action
-needed. Run `agent-chat-gateway config migrate-env` first if you'd rather
+needed. Run `coop config migrate-env` first if you'd rather
 do that as a manual step or a dry run.
 
 ---
@@ -725,17 +725,17 @@ do that as a manual step or a dry run.
 
 ```bash
 # Start the daemon
-agent-chat-gateway start [--config path/to/config.yaml]
+coop start [--config path/to/config.yaml]
 
 # Stop the daemon
-agent-chat-gateway stop
+coop stop
 
 # Restart (picks up config and code changes)
-agent-chat-gateway restart [--config path/to/config.yaml]
+coop restart [--config path/to/config.yaml]
 
 # Check status — pid, uptime, watcher count, the active config digest and load
 # time, and any section a reload could not bring back
-agent-chat-gateway status
+coop status
 ```
 
 ### Reloading Configuration
@@ -745,13 +745,13 @@ restarting the parts the edit did not touch:
 
 ```bash
 # Preview: what a reload would do, changing nothing
-agent-chat-gateway config reload --dry-run
+coop config reload --dry-run
 
 # Apply: prints the plan it is about to execute, then executes it
-agent-chat-gateway config reload
+coop config reload
 
 # Machine-readable, for scripts and agents
-agent-chat-gateway config reload --dry-run --json
+coop config reload --dry-run --json
 ```
 
 What it does, in order: validates the whole file (an invalid file is rejected
@@ -809,39 +809,39 @@ All commands require the daemon to be running.
 
 ```bash
 # List watchers — active, failed and paused by default
-agent-chat-gateway list [--connector NAME]
+coop list [--connector NAME]
 
 # Include idle watchers (released on purpose, nothing running),
 # or ask for one state at a time
-agent-chat-gateway list --all
-agent-chat-gateway list --idle
-agent-chat-gateway list --failed
-agent-chat-gateway list --active --paused
+coop list --all
+coop list --idle
+coop list --failed
+coop list --active --paused
 
 # Pause a watcher (stops processing messages)
-agent-chat-gateway pause <watcher-name>
+coop pause <watcher-name>
 
 # Resume a paused watcher. Refused, and the watcher left paused, when the
 # connector no longer serves its room (deleted, another team, this account
 # removed from it) — `expire` reclaims the record in that case.
-agent-chat-gateway resume <watcher-name>
+coop resume <watcher-name>
 
 # Reset a watcher (clear state, create new session)
-agent-chat-gateway reset <watcher-name>
+coop reset <watcher-name>
 
 # Expire a watcher now: reclaim its record and files; the room's next message
 # recreates it. Refused on voice/script connectors — nothing arrives on its
 # own there to bring the watcher back — use `reset` on those instead.
-agent-chat-gateway expire <watcher-name>
+coop expire <watcher-name>
 
 # Any of the four takes a glob over watcher names instead of one name — the
 # NAME column of `list --all`, DMs included. Quote it so the shell does not
 # expand it.
-agent-chat-gateway reset '*'              # every watcher
-agent-chat-gateway reset 'mm-*'           # every watcher on connectors named mm-...
-agent-chat-gateway pause 'mm-wavebro:*'   # every room on one connector
-agent-chat-gateway resume '*:nest'        # the "nest" room on every connector
-agent-chat-gateway expire '*:dm:*'        # every 1:1 DM watcher
+coop reset '*'              # every watcher
+coop reset 'mm-*'           # every watcher on connectors named mm-...
+coop pause 'mm-wavebro:*'   # every room on one connector
+coop resume '*:nest'        # the "nest" room on every connector
+coop expire '*:dm:*'        # every 1:1 DM watcher
 ```
 
 A glob run collects its matches — names and states — once, up front, then
@@ -930,32 +930,32 @@ Send messages directly to a room (bypasses the agent):
 
 ```bash
 # Send text directly
-agent-chat-gateway send <room> "message text"
+coop send <room> "message text"
 
 # Read from stdin
-echo "Hello" | agent-chat-gateway send <room> -
+echo "Hello" | coop send <room> -
 
 # Send from file
-agent-chat-gateway send <room> --file message.txt
+coop send <room> --file message.txt
 
 # Attach files
-agent-chat-gateway send <room> --attach document.pdf --file caption.txt
+coop send <room> --attach document.pdf --file caption.txt
 
 # Specify connector
-agent-chat-gateway send <room> --connector rc-main "message"
+coop send <room> --connector rc-main "message"
 ```
 
 ### Setup
 
 ```bash
 # Interactive setup wizard (creates config interactively)
-agent-chat-gateway onboard [--repo-path PATH]
+coop onboard [--repo-path PATH]
 
 # Interactive config TUI — edit an existing config.yaml (see docs/config-tool.md)
-agent-chat-gateway config
+coop config
 
 # Check for and install updates
-agent-chat-gateway upgrade
+coop upgrade
 ```
 
 ---
@@ -1086,7 +1086,7 @@ watcher_rules:
 Restart or reset the watcher to load the new context:
 
 ```bash
-agent-chat-gateway reset rc-main:general
+coop reset rc-main:general
 ```
 
 > **Tip:** `contexts/rc-gateway-context.md` (included in the repo) sets up baseline gateway
@@ -1169,7 +1169,7 @@ Only use this in trusted, sandboxed environments where interactive approval is n
 
 Context files are injected into the agent session to provide domain knowledge, system prompts, or other guidance. Three levels of context are supported:
 
-ACG also injects built-in gateway context automatically. You do **not** need to list
+AgentCoop also injects built-in gateway context automatically. You do **not** need to list
 `gateway/contexts/rc-gateway-context.md`, `gateway/contexts/mm-gateway-context.md`, or
 other bundled context files in your config — the right one is chosen automatically based
 on the connector's `type`. The built-in context teaches agents how to read trusted
@@ -1190,12 +1190,12 @@ and history-fetching instructions. This keeps new sessions lighter while still m
 the full docs available on demand:
 
 ```bash
-agent-chat-gateway instructions scheduling
-agent-chat-gateway instructions fetch-history
+coop instructions scheduling
+coop instructions fetch-history
 ```
 
 Agents should run the matching `instructions` command before using advanced gateway
-commands such as `agent-chat-gateway schedule ...` or `agent-chat-gateway fetch-history ...`.
+commands such as `coop schedule ...` or `coop fetch-history ...`.
 These read-only instruction commands are auto-approved for owners and guests.
 
 If an agent backend performs better with all tool instructions present up front, set:
@@ -1206,7 +1206,7 @@ agents:
     lazy_instruction_loading: false
 ```
 
-When disabled, ACG injects the full bundled scheduling and fetch-history context at
+When disabled, AgentCoop injects the full bundled scheduling and fetch-history context at
 session start instead of the compact tool index.
 
 ### Example
@@ -1305,7 +1305,7 @@ connectors:
     attachments:
       max_file_size_mb: 50          # Skip files larger than this
       download_timeout: 30           # Seconds to wait per download
-      cache_dir_global: ~/.agent-chat-gateway/attachments  # preferred: connector-global cache
+      cache_dir_global: ~/.agentcoop/attachments  # preferred: connector-global cache
 ```
 
 ### What Happens
@@ -1330,7 +1330,7 @@ Files are cached globally in the `cache_dir` and symlinked into each watcher's w
 
 ### Automatic Sessions
 
-By default, each watcher creates its own persistent session with the agent backend. The session ID is stored in `~/.agent-chat-gateway/state.<connector>.json` and reused across daemon restarts.
+By default, each watcher creates its own persistent session with the agent backend. The session ID is stored in `~/.agentcoop/state.<connector>.json` and reused across daemon restarts.
 
 The session is reused only while the agent still resolves to the same **backend type and physical working directory** — the pair that scopes where the backend keeps its sessions. Change either one and the watcher starts a fresh session and logs why, rather than replaying an id into a store that never issued it, where it would find nothing or, worse, an unrelated session with the same id. The earlier conversation is not deleted; it stays in the backend it was created against. The gateway will not re-attach it, though — the state record now holds the new session, so changing the setting back starts a third session rather than returning to the first. Recovering that conversation means resuming it with the backend's own tooling (for Claude Code, `claude --resume <id>` from the original working directory), using the id from the log line that reported the change.
 
@@ -1360,7 +1360,7 @@ To carry context into a session, use a handoff file instead — see
 To clear a watcher's state and create a fresh session:
 
 ```bash
-agent-chat-gateway reset <watcher-name>
+coop reset <watcher-name>
 ```
 
 This:
@@ -1371,7 +1371,7 @@ This:
 
 ### Viewing Runtime State
 
-Runtime state is stored in `~/.agent-chat-gateway/`:
+Runtime state is stored in `~/.agentcoop/`:
 
 | File | Contents |
 |---|---|
@@ -1383,13 +1383,13 @@ Runtime state is stored in `~/.agent-chat-gateway/`:
 Check the logs:
 
 ```bash
-tail -f ~/.agent-chat-gateway/gateway.log
+tail -f ~/.agentcoop/gateway.log
 ```
 
 View persisted state:
 
 ```bash
-cat ~/.agent-chat-gateway/state.rc-main.json | jq .
+cat ~/.agentcoop/state.rc-main.json | jq .
 ```
 
 ---
@@ -1398,23 +1398,23 @@ cat ~/.agent-chat-gateway/state.rc-main.json | jq .
 
 ### Gateway won't start
 
-**Symptom:** `agent-chat-gateway start` returns immediately, `status` shows offline.
+**Symptom:** `coop start` returns immediately, `status` shows offline.
 
 **Solution:**
-1. Check the log: `tail ~/.agent-chat-gateway/gateway.log`
+1. Check the log: `tail ~/.agentcoop/gateway.log`
 2. Verify Python 3.12+: `python3 --version`
 3. Verify agent backends: `claude --version` and/or `opencode --version`
-4. Validate config: `python3 -c "import yaml; yaml.safe_load(open('$HOME/.agent-chat-gateway/config.yaml'))" && echo OK`
+4. Validate config: `python3 -c "import yaml; yaml.safe_load(open('$HOME/.agentcoop/config.yaml'))" && echo OK`
 
 ### Agent not responding
 
 **Symptom:** You message the bot but get no reply.
 
 **Solution:**
-1. Check status: `agent-chat-gateway status`
-2. Check logs: `tail -f ~/.agent-chat-gateway/gateway.log`
+1. Check status: `coop status`
+2. Check logs: `tail -f ~/.agentcoop/gateway.log`
 3. Verify the bot account is a member of the watched room/channel (Mattermost also requires the bot to be a member of the `server.team` itself — `mmctl team add <team> <username>`)
-4. Try the CLI: `agent-chat-gateway send <room> "test"` (should post immediately)
+4. Try the CLI: `coop send <room> "test"` (should post immediately)
 5. Verify agent backend: `claude -p` or `opencode run` (should start a session)
 
 ### Permission request hangs
@@ -1424,7 +1424,7 @@ cat ~/.agent-chat-gateway/state.rc-main.json | jq .
 **Solution:**
 1. Verify exact ID format (4 characters, e.g., `a3k9`)
 2. Confirm you typed without a leading slash: `approve a3k9` (not `/approve a3k9`)
-3. Check logs for errors: `tail ~/.agent-chat-gateway/gateway.log`
+3. Check logs for errors: `tail ~/.agentcoop/gateway.log`
 4. Wait for timeout if needed; request will auto-deny after `permissions.timeout` seconds
 
 ### High token usage
@@ -1432,7 +1432,7 @@ cat ~/.agent-chat-gateway/state.rc-main.json | jq .
 **Symptom:** Unexpectedly high Claude API costs.
 
 **Solution:**
-1. Check agent logs for repeated context injection: `grep "context_inject" ~/.agent-chat-gateway/gateway.log`
+1. Check agent logs for repeated context injection: `grep "context_inject" ~/.agentcoop/gateway.log`
 2. Reduce context file sizes (keep under 256 KB per file, 512 KB total)
 3. Consider disabling context for specific watchers: set `context_inject_files: []`
 
@@ -1453,17 +1453,17 @@ cat ~/.agent-chat-gateway/state.rc-main.json | jq .
 **Symptom:** Attachments mentioned in messages but not passed to agent.
 
 **Solution:**
-1. Check max file size: `agent-chat-gateway` skips files larger than `attachments.max_file_size_mb`
+1. Check max file size: `coop` skips files larger than `attachments.max_file_size_mb`
 2. Check timeout: increase `attachments.download_timeout` if slow network
-3. Verify cache directory exists: `mkdir -p ~/.agent-chat-gateway/attachments`
-4. Check logs: `grep "attach" ~/.agent-chat-gateway/gateway.log`
+3. Verify cache directory exists: `mkdir -p ~/.agentcoop/attachments`
+4. Check logs: `grep "attach" ~/.agentcoop/gateway.log`
 
 ### Config validation errors
 
 **Symptom:** `Error loading config.yaml: ...`
 
 **Solution:**
-1. Validate YAML syntax: `python3 -c "import yaml; yaml.safe_load(open('$HOME/.agent-chat-gateway/config.yaml'))"`
+1. Validate YAML syntax: `python3 -c "import yaml; yaml.safe_load(open('$HOME/.agentcoop/config.yaml'))"`
 2. Check for missing required fields (see Configuration Reference above)
 3. Verify all connector/agent references match defined names
 
@@ -1480,7 +1480,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agent-chat-gateway/work
+    working_directory: ~/.agentcoop/work
     timeout: 360
     permissions:
       enabled: true
@@ -1489,7 +1489,7 @@ agents:
   opencode:
     type: opencode
     command: opencode
-    working_directory: ~/.agent-chat-gateway/opencode-work
+    working_directory: ~/.agentcoop/opencode-work
     timeout: 360
     permissions:
       enabled: true
@@ -1623,7 +1623,7 @@ Each agent's `working_directory` is where the agent subprocess runs. This isolat
 ```yaml
 agents:
   claude:
-    working_directory: ~/.agent-chat-gateway/claude-work
+    working_directory: ~/.agentcoop/claude-work
   opencode:
     working_directory: /data/agent-sessions/opencode
 ```
@@ -1635,7 +1635,7 @@ The gateway ensures the directory exists and uses it as the agent's current work
 The gateway logs at INFO level by default. To see detailed output, tail the log file while the daemon is running:
 
 ```bash
-tail -f ~/.agent-chat-gateway/gateway.log
+tail -f ~/.agentcoop/gateway.log
 ```
 
 ---
@@ -1643,15 +1643,15 @@ tail -f ~/.agent-chat-gateway/gateway.log
 ## Getting Help
 
 - **Documentation:** See [install-agent.md](install-agent.md) for installation details
-- **Logs:** `tail -f ~/.agent-chat-gateway/gateway.log`
-- **GitHub:** https://github.com/HammerMei/agent-chat-gateway/issues
+- **Logs:** `tail -f ~/.agentcoop/gateway.log`
+- **GitHub:** https://github.com/HammerMei/agentcoop/issues
 - **Community:** Discuss on Anthropic's community forum
 
 ---
 
 ## Summary
 
-`agent-chat-gateway` provides a flexible, secure bridge from your chat platform (Rocket.Chat or Mattermost) to AI agents. Start with a minimal config, use role-based access control to grant appropriate permissions, and leverage the permission approval system to ensure human oversight of sensitive operations.
+`coop` provides a flexible, secure bridge from your chat platform (Rocket.Chat or Mattermost) to AI agents. Start with a minimal config, use role-based access control to grant appropriate permissions, and leverage the permission approval system to ensure human oversight of sensitive operations.
 
 For production deployments, carefully review your tool allow-lists, set appropriate timeouts, and monitor your logs for errors and token usage.
 

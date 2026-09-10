@@ -27,7 +27,7 @@ class TestBuildSystemHeader(unittest.TestCase):
 
     def test_identity_fields_present(self):
         header = build_system_header(self._wc(), "")
-        self.assertIn("## ACG Session Identity", header)
+        self.assertIn("## Coop Session Identity", header)
         self.assertIn("my-watcher", header)
         self.assertIn("general", header)
         self.assertIn("rc-home", header)
@@ -36,7 +36,7 @@ class TestBuildSystemHeader(unittest.TestCase):
         """The identity block is unconditional — never empty, even with no username."""
         header = build_system_header(self._wc(), "")
         self.assertTrue(header)
-        self.assertIn("## ACG Session Identity", header)
+        self.assertIn("## Coop Session Identity", header)
 
     def test_addressing_rules_absent_when_username_falsy(self):
         header = build_system_header(self._wc(), "")
@@ -56,7 +56,7 @@ class TestBuildSystemHeader(unittest.TestCase):
     def test_identity_precedes_addressing(self):
         header = build_system_header(self._wc(), "bot")
         self.assertLess(
-            header.index("## ACG Session Identity"),
+            header.index("## Coop Session Identity"),
             header.index("## Multi-Agent Addressing"),
         )
 

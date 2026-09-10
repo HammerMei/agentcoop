@@ -46,7 +46,7 @@ class TestOrphanedStateFiles(unittest.IsolatedAsyncioTestCase):
         save_state("ghost", [_ghost_record("sess-ghost-7777")])
         save_state("script", [])
 
-        with self.assertLogs("agent-chat-gateway", level="INFO") as logs:
+        with self.assertLogs("coop", level="INFO") as logs:
             GatewayService(write_gateway_config(self.tmp))
 
         self.assertFalse((self.runtime / "state.ghost.json").exists(),
@@ -64,7 +64,7 @@ class TestOrphanedStateFiles(unittest.IsolatedAsyncioTestCase):
         save_state("ghost", [_ghost_record("sess-ghost-8888")])
 
         with patch("pathlib.Path.unlink", side_effect=OSError("read-only")), \
-                self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+                self.assertLogs("coop", level="WARNING") as logs:
             GatewayService(write_gateway_config(self.tmp))
 
         self.assertTrue((self.runtime / "state.ghost.json").exists())
@@ -80,7 +80,7 @@ class TestOrphanedStateFiles(unittest.IsolatedAsyncioTestCase):
                    paused="yes please")  # not a bool: load_state skips it
         self._write_raw("ghost", {"version": STATE_FORMAT_VERSION, "watchers": [good, bad]})
 
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             GatewayService(write_gateway_config(self.tmp))
 
         self.assertTrue((self.runtime / "state.ghost.json").exists(),
@@ -112,7 +112,7 @@ class TestOrphanedStateFiles(unittest.IsolatedAsyncioTestCase):
 
         self._write_raw("ghost", {"version": STATE_FORMAT_VERSION, "watchers": None})
 
-        with self.assertLogs("agent-chat-gateway", level="WARNING") as logs:
+        with self.assertLogs("coop", level="WARNING") as logs:
             GatewayService(write_gateway_config(self.tmp))  # no TypeError
 
         self.assertTrue((self.runtime / "state.ghost.json").exists(), "kept for manual repair")

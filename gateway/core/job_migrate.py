@@ -1,6 +1,6 @@
 """Operator-run migrations for `jobs.json`.
 
-`agent-chat-gateway schedule migrate` runs these. Deliberately not automatic,
+`coop schedule migrate` runs these. Deliberately not automatic,
 and not lazy at fire time: the 1→2 step reads each job's watcher HANDLE to find
 its room, and a handle only names the right room while nobody has renamed it.
 The operator is the one who can choose a moment when that holds — right after an
@@ -319,9 +319,9 @@ async def migrate(store: JobStore, entries) -> MigrationReport:
     from_version = store.file_version
     if from_version > _SCHEMA_VERSION:
         raise ValueError(
-            f"jobs.json declares schema version {from_version}, but this ACG "
+            f"jobs.json declares schema version {from_version}, but this AgentCoop "
             f"understands {_SCHEMA_VERSION}. It was written by a newer version — "
-            f"upgrade ACG rather than migrating down."
+            f"upgrade AgentCoop rather than migrating down."
         )
 
     report = MigrationReport(from_version=from_version, to_version=_SCHEMA_VERSION)

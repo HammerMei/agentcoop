@@ -1347,7 +1347,7 @@ class TestGetRoomHistory(unittest.IsolatedAsyncioTestCase):
 
     async def test_group_dm_uses_im_history_endpoint(self):
         """One direct endpoint serves both DM kinds — the group/1:1 distinction
-        is ACG's, not the server's (§6.4).
+        is AgentCoop's, not the server's (§6.4).
 
         Reached for real: the creation path types a room from its *classified*
         kind, so `"group_dm"` arrives here. It used to fall through to the
@@ -1531,13 +1531,13 @@ class TestIsRoomMember(unittest.IsolatedAsyncioTestCase):
                 response=httpx.Response(403, request=httpx.Request("GET", "http://x")),
             )
         )
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             self.assertIsNone(await rest.is_room_member("r1"))
 
     async def test_any_other_failure_is_unknown_too(self):
         rest = _make_rest()
         rest._request = AsyncMock(side_effect=RuntimeError("connection reset"))
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             self.assertIsNone(await rest.is_room_member("r1"))
 
     async def test_it_asks_about_the_room_it_was_given(self):
@@ -1581,7 +1581,7 @@ class TestTheVerifiedSubscriptionContract(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         )
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             self.assertIsNone(await rest.is_room_member("r1"))
 
     async def test_an_auth_failure_is_not_a_membership_answer(self):
@@ -1594,7 +1594,7 @@ class TestTheVerifiedSubscriptionContract(unittest.IsolatedAsyncioTestCase):
                                         json={"status": "error", "message": "unauthorized"}),
             )
         )
-        with self.assertLogs("agent-chat-gateway.connectors.rocketchat", "WARNING"):
+        with self.assertLogs("coop.connectors.rocketchat", "WARNING"):
             self.assertIsNone(await rest.is_room_member("r1"))
 
 

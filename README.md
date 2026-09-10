@@ -1,18 +1,18 @@
-# agent-chat-gateway
+# AgentCoop
 
-[![CI](https://github.com/HammerMei/agent-chat-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/HammerMei/agent-chat-gateway/actions/workflows/ci.yml)
-[![Docker](https://ghcr-badge.egpl.dev/hammermei/agent-chat-gateway/latest_tag?trim=major&label=docker&color=blue)](https://github.com/HammerMei/agent-chat-gateway/pkgs/container/agent-chat-gateway)
+[![CI](https://github.com/HammerMei/agentcoop/actions/workflows/ci.yml/badge.svg)](https://github.com/HammerMei/agentcoop/actions/workflows/ci.yml)
+[![Docker](https://ghcr-badge.egpl.dev/hammermei/agentcoop/latest_tag?trim=major&label=docker&color=blue)](https://github.com/HammerMei/agentcoop/pkgs/container/agentcoop)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-[![Stars](https://img.shields.io/github/stars/HammerMei/agent-chat-gateway?style=flat&color=yellow)](https://github.com/HammerMei/agent-chat-gateway/stargazers)
+[![Stars](https://img.shields.io/github/stars/HammerMei/agentcoop?style=flat&color=yellow)](https://github.com/HammerMei/agentcoop/stargazers)
 
 **Turn your AI agent into a team-shared chatbot — in minutes.**
 
-Already running Claude Code or OpenCode? `agent-chat-gateway` connects it to your team's chat system (Rocket.Chat, Mattermost, and more) so everyone can talk to it directly from chat — no terminal required, no code changes to your agent.
+Already running Claude Code or OpenCode? **AgentCoop** (previously known as agent-chat-gateway, or ACG) connects it to your team's chat system (Rocket.Chat, Mattermost, and more) so everyone can talk to it directly from chat — no terminal required, no code changes to your agent.
 
 Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making AI agents accessible from any messaging app — built for the team layer.
 
-> **How it compares to Claude Code Channels:** Claude Code's native [Channels](https://code.claude.com/docs/en/channels) feature connects a single session to Telegram, Discord, or iMessage — great for personal use. `agent-chat-gateway` is built for teams: multiple agents, multiple chat systems, per-user roles, human oversight for sensitive operations, and shared sessions across your whole workspace.
+> **How it compares to Claude Code Channels:** Claude Code's native [Channels](https://code.claude.com/docs/en/channels) feature connects a single session to Telegram, Discord, or iMessage — great for personal use. AgentCoop is built for teams: multiple agents, multiple chat systems, per-user roles, human oversight for sensitive operations, and shared sessions across your whole workspace.
 
 ---
 
@@ -29,7 +29,7 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making 
 - ⚡ **[Multiple chat systems at once](docs/user-guide.md#multi-connector-setup)** — connect to several chat platforms simultaneously
 - ⏰ **[Built-in task scheduler](docs/scheduling.md)** — let the agent schedule recurring or one-shot tasks directly from chat ("remind me in 5 minutes", "run daily standup at 09:00") without any infrastructure setup
 - 🤝 **[Agent-to-agent collaboration](docs/agent-chain.md)** — let multiple AI agents collaborate in a shared room; built-in loop protection keeps conversations bounded and human-observable
-- 🛠️ **[Interactive config TUI](docs/config-tool.md)** — `agent-chat-gateway config` gives you a full-screen editor with validation, provenance tracking, and safe writes, instead of hand-editing YAML
+- 🛠️ **[Interactive config TUI](docs/config-tool.md)** — `coop config` gives you a full-screen editor with validation, provenance tracking, and safe writes, instead of hand-editing YAML
 - 🧪 **[Voice gateway (experimental)](docs/supported-features.md#voice-gateway-experimental-)** — connect your agent to Siri via iOS Shortcuts; any phone becomes a zero-hardware voice interface with no custom wake word infrastructure
 
 ---
@@ -46,38 +46,15 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making 
 
 ## Quick Start
 
-### Option A — AI-guided install (recommended)
+### Install (AI-guided, recommended)
 
 The easiest way to install is to ask your AI agent to do it for you — it handles dependencies, configuration, and any troubleshooting automatically.
 
 In Claude Code or OpenCode, run this prompt:
 
 ```
-Please install agent-chat-gateway by following the instructions at https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/docs/install-agent.md
+Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md
 ```
-
-### Option B — Docker (no local dependencies)
-
-If you'd rather skip installing Python, Node.js, or Claude Code locally, run ACG in a container:
-
-```bash
-# 1. Copy the example directory to your deployment location
-cp -r docker/docker-compose.example my-acg
-cd my-acg
-
-# 2. Fill in your credentials and settings
-#    .env                — Claude Code OAuth token (see file for instructions)
-#    config/config.yaml  — chat platform credentials (Rocket.Chat/Mattermost),
-#                           owners, rooms, agents — file gets chmod 600 automatically
-
-# 3. Start
-docker compose up -d
-
-# Logs
-docker compose logs -f
-```
-
-See [`docker/docker-compose.example/`](docker/docker-compose.example/) for the full annotated setup — all files are pre-structured and ready to fill in.
 
 > Prefer a native install? See [INSTALL.md](INSTALL.md) for step-by-step instructions.
 
@@ -87,13 +64,13 @@ See [`docker/docker-compose.example/`](docker/docker-compose.example/) for the f
 
 ```bash
 # Start the gateway
-agent-chat-gateway start
+coop start
 
 # Check status
-agent-chat-gateway status
+coop status
 
 # Stop the gateway
-agent-chat-gateway stop
+coop stop
 ```
 
 See [docs/user-guide.md](docs/user-guide.md) for the full CLI reference, configuration options, and usage examples.
@@ -112,4 +89,12 @@ See [docs/user-guide.md](docs/user-guide.md) for the full CLI reference, configu
 | [docs/requirements.md](docs/requirements.md) | Functional specification and behavioral requirements |
 | [docs/scheduling.md](docs/scheduling.md) | Built-in task scheduler — recurring and one-shot jobs from chat |
 | [docs/agent-chain.md](docs/agent-chain.md) | Agent-to-agent collaboration — enabling multiple heterogeneous AI agents to coordinate via chat |
-| [docs/config-tool.md](docs/config-tool.md) | Interactive config TUI — `agent-chat-gateway config`, keybindings, and a guide to every entity type |
+| [docs/config-tool.md](docs/config-tool.md) | Interactive config TUI — `coop config`, keybindings, and a guide to every entity type |
+
+---
+
+## Why "AgentCoop"?
+
+The project started as *agent-chat-gateway*: a gateway that gave agents without a built-in chat channel a way onto a messaging app. It has since grown into something else — a middleware where several agents collaborate with humans, and with each other, like regular teammates in a room. A gateway is a door; this had become the place behind the door. So: a **coop** — a shared home for agents — and a **co-op**, because they work together in it. Every agent needs a coop to come home to. And yes, they all taste like chicken.
+
+The daemon that `coop start` starts is still called *the gateway*: it is the component of AgentCoop that stands between the chat platforms and the agents (see [docs/architecture.md](docs/architecture.md)). Upgrading from an agent-chat-gateway install is a reinstall — see [docs/migration-v1.md](docs/migration-v1.md).

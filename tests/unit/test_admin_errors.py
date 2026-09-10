@@ -112,7 +112,7 @@ class TestReadbackAfterWrite(unittest.TestCase):
 
     def test_logs_the_full_body_before_wrapping(self):
         records = []
-        logger = logging.getLogger("agent-chat-gateway.admin.errors")
+        logger = logging.getLogger("coop.admin.errors")
 
         class _Capture(logging.Handler):
             def emit(self, record):

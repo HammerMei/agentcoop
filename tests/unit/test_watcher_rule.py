@@ -423,7 +423,7 @@ class TestParserScalarValidation(unittest.TestCase):
 
 
 class TestUnknownRuleKeysAreRejected(unittest.TestCase):
-    """The schema sets additionalProperties: false, but `agent-chat-gateway config validate` runs
+    """The schema sets additionalProperties: false, but `coop config validate` runs
     collect_config() rather than the schema — so without this check a typo is
     silently ignored and the rule quietly lacks whatever it was meant to set."""
 

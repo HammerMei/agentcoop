@@ -1,7 +1,7 @@
 E2E Test File
 =============
-This file is used by the ACG end-to-end test suite.
+This file is used by the AgentCoop end-to-end test suite.
 
 Content: hello from the test suite
 Purpose: verify that file uploads are received and processed by the agent.
-Marker:  ACG_E2E_TEST_UPLOAD_MARKER
+Marker:  COOP_E2E_TEST_UPLOAD_MARKER

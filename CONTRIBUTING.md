@@ -1,4 +1,4 @@
-# Contributing to agent-chat-gateway
+# Contributing to AgentCoop
 
 Thanks for your interest in contributing! This guide covers everything you need to get started.
 
@@ -20,8 +20,8 @@ Thanks for your interest in contributing! This guide covers everything you need 
 **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```bash
-git clone https://github.com/HammerMei/agent-chat-gateway.git
-cd agent-chat-gateway
+git clone https://github.com/HammerMei/agentcoop.git
+cd agentcoop
 
 # Install all dependencies (including dev extras)
 uv sync
@@ -186,5 +186,5 @@ before a PR can be merged.
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/HammerMei/agent-chat-gateway/discussions) or
+Open a [GitHub Discussion](https://github.com/HammerMei/agentcoop/discussions) or
 file an issue — we are happy to help.

@@ -7,9 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.0]
+
+The first release under the new name. Everything below the *Renamed* section
+is the dynamic-watcher cutover that had accumulated on `main` since v0.5.2.
+Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
+`docs/migration-v1.md`.
+
+### Renamed
+
+- **agent-chat-gateway is now AgentCoop.** The project outgrew "a gateway from
+  chat to an agent" and became a middleware where several agents collaborate
+  with humans and with each other; the name follows. Short form: Coop.
+  - The command is **`coop`** (`coop start`, `coop list`, …); the provisioning
+    CLI is **`coop-provision`**. There is no alias. Running the old
+    `agent-chat-gateway` command after an upgrade prints what happened and how
+    to either reinstall or stay on v0.5.2 — it does nothing else.
+  - The runtime directory is **`~/.agentcoop`**. `~/.agent-chat-gateway` is
+    not read, moved or mentioned by v1; remove it by hand
+    (`docs/migration-v1.md`).
+  - Environment variables are **`COOP_ROLE`, `COOP_ALLOWED_TOOLS`,
+    `COOP_APPROVAL_TOOLS`, `COOP_CONFIG`, `COOP_ADMIN_CONFIG`**. The `ACG_*`
+    names are gone; hooks and scripts that read them need updating.
+  - The agent-facing session header is `## Coop Session Identity`.
+  - Logger names are `coop.*`; the Docker image is `ghcr.io/hammermei/agentcoop`
+    (the old `agent-chat-gateway` image stays frozen at v0.5.2 and is not
+    deleted); the repository is `HammerMei/agentcoop` (GitHub redirects the old
+    URLs).
+  - The Python package is still `gateway`, and "the gateway" is still the name
+    of the daemon process — `docs/architecture.md` defines the two names.
+- **Docker is for internal testing only.** The compose example and image are
+  kept for AgentCoop's own E2E/CI runs and are no longer offered as an install
+  option; the supported install is `install.sh` on the host.
 
 ### Removed
+
+- **PyPI publishing.** AgentCoop is installed from git by `install.sh`; the
+  PyPI package `agent-chat-gateway` stops at 0.5.2 and nothing is published
+  under the new name.
+- **The Homebrew branch of `upgrade`**, which no install could reach (there has
+  never been a tap).
 
 - **BREAKING: `online_notification` / `offline_notification` are removed**
   from watcher rules and templates (decided 2026-08-02 with the dynamic-watcher

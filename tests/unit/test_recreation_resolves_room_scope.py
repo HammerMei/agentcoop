@@ -28,7 +28,7 @@ from gateway.core.watcher_manager import RoomRef
 from gateway.core.watcher_rule import RoomKind
 from tests.helpers import make_bare_session_manager, make_rule_derived_record
 
-_LOGGER = "agent-chat-gateway.core.session_manager"
+_LOGGER = "coop.core.session_manager"
 
 
 def _dormant_record(*, paused=False, name="mm:old-team-general", room_id="r-old",

@@ -317,7 +317,7 @@ class RuleDetailScreen(FormScreen):
                 "counts as activity that keeps the record alive. A job firing "
                 "more often than session_idle_days (15) therefore keeps running "
                 "indefinitely, while still showing as active. To stop it, delete "
-                "the jobs with 'agent-chat-gateway schedule delete <job_id>', or expire the "
+                "the jobs with 'coop schedule delete <job_id>', or expire the "
                 "watchers."
             )
         return message

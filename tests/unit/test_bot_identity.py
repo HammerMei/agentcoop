@@ -92,7 +92,7 @@ class TestCanonicalOrigin(unittest.TestCase):
         arriving one at a time: first a non-numeric port (`urlsplit().port` raises), then
         a bracketed non-IP host — which `urlsplit` itself rejects, so the per-field guard
         written for the first one did not cover the second. This function is called from
-        `agent-chat-gateway config validate`, where a traceback replaces the attributed bad-URL finding
+        `coop config validate`, where a traceback replaces the attributed bad-URL finding
         the operator needs, so totality is the requirement and not the individual fixes.
         """
         hostile = [
@@ -125,7 +125,7 @@ class TestCanonicalOrigin(unittest.TestCase):
         )
 
     def test_an_unparseable_port_does_not_raise(self):
-        """Reached from `agent-chat-gateway config validate`, where a traceback replaces the attributed
+        """Reached from `coop config validate`, where a traceback replaces the attributed
         bad-URL finding the operator actually needs."""
         self.assertEqual(
             canonical_origin("https://chat.example.com:notaport"),

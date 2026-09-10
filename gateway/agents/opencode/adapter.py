@@ -135,12 +135,12 @@ _MAX_RESTART_FAILURES = 3
 #
 # OpenCode's default permission ruleset uses ``"*": "allow"`` which means ALL
 # bash commands run without emitting a ``permission.asked`` SSE event.  This
-# completely bypasses ACG's permission broker, so guest and owner tool
+# completely bypasses AgentCoop's permission broker, so guest and owner tool
 # restrictions defined in ``guest_allowed_tools`` / ``owner_allowed_tools``
 # have no effect for bash in the default configuration.
 #
 # Fix: inject ``bash["*"] = "ask"`` via OPENCODE_CONFIG_CONTENT so OpenCode
-# emits ``permission.asked`` for every bash command, letting ACG enforce its
+# emits ``permission.asked`` for every bash command, letting AgentCoop enforce its
 # own allow-lists and approval flow.  A short set of read-only patterns is
 # pre-approved so common safe operations do not require manual approval.
 #
@@ -159,8 +159,8 @@ def _build_safe_opencode_config(sidecar_env: dict[str, str]) -> str | None:
     """Return a safe ``OPENCODE_CONFIG_CONTENT`` value with bash permission defaults.
 
     OpenCode's default bash permission is ``"allow"`` (all bash commands run
-    without asking), which bypasses ACG's permission broker entirely.  This
-    function ensures ``bash["*"] = "ask"`` is always present so that ACG can
+    without asking), which bypasses AgentCoop's permission broker entirely.  This
+    function ensures ``bash["*"] = "ask"`` is always present so that AgentCoop can
     intercept bash tool calls and enforce its own ``owner_allowed_tools`` /
     ``guest_allowed_tools`` rules.
 
@@ -193,7 +193,7 @@ def _build_safe_opencode_config(sidecar_env: dict[str, str]) -> str | None:
         except json.JSONDecodeError as e:
             raise ValueError(
                 f"OPENCODE_CONFIG_CONTENT contains invalid JSON: {e}. "
-                "Fix the env var or remove it to use ACG's safe defaults."
+                "Fix the env var or remove it to use AgentCoop's safe defaults."
             ) from e
     else:
         config = {}
@@ -210,7 +210,7 @@ def _build_safe_opencode_config(sidecar_env: dict[str, str]) -> str | None:
         if pattern not in bash:
             bash[pattern] = "allow"
 
-    # Always add the "*": "ask" catch-all so unlisted commands route through ACG.
+    # Always add the "*": "ask" catch-all so unlisted commands route through AgentCoop.
     bash["*"] = "ask"
 
     return json.dumps(config)
@@ -264,7 +264,7 @@ class OpenCodeBackend(AgentBackend):
                 the sidecar always runs as the gateway's own agent backend.
                 Guest enforcement is handled by the PermissionBroker at the
                 per-request level, not via process environment.
-                ``OPENCODE_CONFIG_CONTENT`` in this dict is merged with ACG's
+                ``OPENCODE_CONFIG_CONTENT`` in this dict is merged with AgentCoop's
                 safe bash permission defaults (``bash["*"] = "ask"``) unless
                 the user has already set a ``"*"`` catch-all.  Raises
                 ``ValueError`` if the value is malformed JSON.
@@ -279,9 +279,9 @@ class OpenCodeBackend(AgentBackend):
         self.timeout = timeout
         # Inject safe bash permission defaults before storing sidecar_env.
         # OpenCode's built-in default allows ALL bash commands without asking,
-        # which bypasses ACG's permission broker.  _build_safe_opencode_config()
+        # which bypasses AgentCoop's permission broker.  _build_safe_opencode_config()
         # ensures "bash": {"*": "ask"} is set via OPENCODE_CONFIG_CONTENT so
-        # ACG can enforce owner_allowed_tools / guest_allowed_tools for bash.
+        # AgentCoop can enforce owner_allowed_tools / guest_allowed_tools for bash.
         # Raises ValueError on malformed OPENCODE_CONFIG_CONTENT so the caller
         # gets a clear error rather than silently losing their config.
         _env: dict[str, str] = sidecar_env or {}
@@ -835,7 +835,7 @@ class OpenCodeBackend(AgentBackend):
         ``session/prompt.ts``, joined in last in ``session/llm/request.ts``).
         That field travels with each individual API call, not with the
         sidecar process, which matters here: a single OpenCode sidecar/agent
-        config can be shared by multiple ACG watchers (``WatcherConfig.agent``
+        config can be shared by multiple AgentCoop watchers (``WatcherConfig.agent``
         is many-to-one), so a sidecar-global mechanism like ``config.instructions``
         would leak one watcher's identity/addressing header into another's
         session. The per-request ``system`` field is correctly scoped per
@@ -847,7 +847,7 @@ class OpenCodeBackend(AgentBackend):
         resumed session after a gateway restart still gets a correct, current
         file. The write itself is atomic (see ``_atomic_write_text``).
 
-        Deliberately written under ``RUNTIME_DIR`` (ACG's own state
+        Deliberately written under ``RUNTIME_DIR`` (AgentCoop's own state
         directory), NOT under ``working_directory`` — same rationale as
         Claude's implementation (avoids an accidental ``git add`` if
         ``working_directory`` is a real user project under version control).

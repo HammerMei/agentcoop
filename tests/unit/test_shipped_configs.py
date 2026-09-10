@@ -6,7 +6,7 @@ shipped inputs still set it:
 
 * `docker/docker-compose.example/config/config.yaml` (`session_id: ~`), the
   ready-to-copy config for the documented compose path
-* `docker/entrypoint.acg.sh`'s env-var quick-start generator (`"session_id": None`)
+* `docker/entrypoint.coop.sh`'s env-var quick-start generator (`"session_id": None`)
 
 Both would have failed at startup, so **every new Docker install would have broken**,
 which is worse than any of the documentation problems found alongside it. A review
@@ -45,7 +45,7 @@ SHIPPED_CONFIGS = (
 
 # Scripts that generate a config.yaml at runtime, and cannot be schema-validated
 # without executing them.
-GENERATOR_SCRIPTS = (REPO / "docker" / "entrypoint.acg.sh",)
+GENERATOR_SCRIPTS = (REPO / "docker" / "entrypoint.coop.sh",)
 
 
 def _validator() -> jsonschema.Draft202012Validator:
@@ -109,7 +109,7 @@ class TestShippedConfigsValidate(unittest.TestCase):
 class TestGeneratedConfigsCarryNoRemovedKeys(unittest.TestCase):
     """A generator script builds its config as a literal, so it can be read statically.
 
-    Executing `entrypoint.acg.sh` is not an option here (it needs a container), but the
+    Executing `entrypoint.coop.sh` is not an option here (it needs a container), but the
     embedded Python builds one dict literal, so the watcher keys it emits can be
     extracted and checked against the schema's own field list — no hand-maintained copy
     of "which keys are gone".

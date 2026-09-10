@@ -68,7 +68,7 @@ class HistoryPage:
     that cannot tell that from a genuinely empty window will report an outage as read when
     every user message in it is still waiting behind that page.
 
-    In `core` rather than beside either REST client because the distinction is ACG's, not a
+    In `core` rather than beside either REST client because the distinction is AgentCoop's, not a
     platform's: every connector filters something out of a page it did not size, so every
     connector's replay can be handed an empty list that is not an empty window. *What* gets
     filtered stays per-platform — Rocket.Chat drops `t`-typed events, Mattermost drops
@@ -219,7 +219,7 @@ class MembershipHook:
 # classes: enforcement happens in `gateway/config.py`, which only ever sees a
 # `ConnectorConfig` (a type string, no instance), and `gateway/connectors/` imports
 # `gateway.config`, so reading the classes from there would invert the dependency
-# and pull the whole websocket stack into `agent-chat-gateway config validate`.
+# and pull the whole websocket stack into `coop config validate`.
 #
 # Two declarations of one fact is the shape that has bitten this loader repeatedly,
 # so they are bound by a test that walks every type the connector factory knows and
@@ -618,7 +618,7 @@ class Connector(ABC):
           bound, so the very message that set the watermark comes back — and it
           is a user message, so the own-message rule does not remove it.
 
-        ``after_ts`` is epoch milliseconds, like every timestamp inside ACG
+        ``after_ts`` is epoch milliseconds, like every timestamp inside coop
         (§5.2).
 
         Default: ``False`` — a connector with no history API has nothing to
@@ -651,7 +651,7 @@ class Connector(ABC):
     def trigger_history_bound(self, trigger: Any) -> str | None:
         """A router trigger frame's timestamp, for bounding history handoff.
 
-        Epoch milliseconds as a string, like every timestamp inside ACG (§5.2):
+        Epoch milliseconds as a string, like every timestamp inside AgentCoop (§5.2):
         its consumer compares it against a room's watermark and forwards it as
         a `fetch_room_history` bound, and both of those are epoch-ms.
 
@@ -699,7 +699,7 @@ class Connector(ABC):
             count    : Maximum number of messages to retrieve.
             before_ts: Exclusive upper bound, **epoch milliseconds as a string**
                        — the internal representation for every timestamp
-                       crossing an ACG interface (§5.2). Only messages older
+                       crossing an AgentCoop interface (§5.2). Only messages older
                        than it are returned. Maps to the platform's own
                        upper-bound parameter, which each connector converts to
                        if its API wants something else.
@@ -707,7 +707,7 @@ class Connector(ABC):
                        Connectors that do not support it may silently ignore it.
 
         Note the asymmetry, which is deliberate: the *bounds* are epoch-ms
-        because ACG compares them, while the ``ts`` field of each returned dict
+        because AgentCoop compares them, while the ``ts`` field of each returned dict
         is ISO because an agent reads it.
         """
         return []

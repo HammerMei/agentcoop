@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/gateway/schema/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/HammerMei/agentcoop/main/gateway/schema/config.schema.json",
   "title": "AgentCoop config.yaml",
-  "description": "Hand-written schema for editor autocomplete / typo-checking of config.yaml. It intentionally does NOT re-validate every connector-type-specific field (server/allowed_users/attachments/agent_chain vary by connector 'type') \u2014 that stays the job of `agent-chat-gateway config validate`. See docs/migration-0.3.md for the format this schema describes (v0.3+: connector_templates/agent_templates/watcher_templates + per-entry 'inherits:', tool_presets, watcher rooms:).",
+  "description": "Hand-written schema for editor autocomplete / typo-checking of config.yaml. It intentionally does NOT re-validate every connector-type-specific field (server/allowed_users/attachments/agent_chain vary by connector 'type') \u2014 that stays the job of `coop config validate`. See docs/migration-0.3.md for the format this schema describes (v0.3+: connector_templates/agent_templates/watcher_templates + per-entry 'inherits:', tool_presets, watcher rooms:).",
   "type": "object",
   "additionalProperties": false,
   "required": [

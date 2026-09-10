@@ -1,6 +1,6 @@
 """The mark that keeps a refused message reachable — the rule, not either connector.
 
-`gateway/core/replay_window.py` is shared because the question is ACG's own: both
+`gateway/core/replay_window.py` is shared because the question is AgentCoop's own: both
 connectors refuse messages when their queues are full, and refusing is only honest if
 something remembers where to look. Everything platform-specific stays with the platform,
 so this file tests the rule and the connector suites test the wiring.

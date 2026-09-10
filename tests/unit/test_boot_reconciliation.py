@@ -2,7 +2,7 @@
 
 Seam: a real `SessionManager` (`make_manager`) booted through `sync_only`,
 observed through `dispatch_command` and the saved state — what an operator
-sees after `agent-chat-gateway restart` followed by `list`.
+sees after `coop restart` followed by `list`.
 """
 
 from tests.helpers import (
@@ -64,7 +64,7 @@ class TestRecordsNoRuleCoversAreExpired(IsolatedTestCase):
                                        dropped_at="2026-09-01T01:00:00-07:00")
         mgr, loaded = _booted([record], [])  # the rule was deleted
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()
 
         reply = await mgr.dispatch_command({"cmd": "list"})
@@ -96,7 +96,7 @@ class TestEveryReleasedSessionIsLoggedOnce(IsolatedTestCase):
 
     async def test_reset(self):
         mgr, record = await self._dormant("sess-reset-1111")
-        with self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with self.assertLogs("coop.core", level="INFO") as logs:
             reply = await mgr.dispatch_command({"cmd": "reset", "watcher_name": record.watcher_name})
         self.assertTrue(reply["ok"], reply)
         lines = _audit_lines(logs, "sess-reset-1111")
@@ -107,7 +107,7 @@ class TestEveryReleasedSessionIsLoggedOnce(IsolatedTestCase):
         """The membership-removal path (the operator's `expire` verb runs the
         same `reclaim_room`, and is refused on the eager script connector)."""
         mgr, record = await self._dormant("sess-removed-2222")
-        with self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with self.assertLogs("coop.core", level="INFO") as logs:
             await mgr._on_membership_removed(record.room_id)
         lines = _audit_lines(logs, "sess-removed-2222")
         self.assertEqual(len(lines), 1, logs.output)
@@ -117,7 +117,7 @@ class TestEveryReleasedSessionIsLoggedOnce(IsolatedTestCase):
         from datetime import datetime, timedelta
         mgr, record = await self._dormant("sess-idle-3333")
         far = datetime.fromisoformat("2026-09-01T01:00:00-07:00") + timedelta(days=400)
-        with self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with self.assertLogs("coop.core", level="INFO") as logs:
             expired = await mgr._lifecycle.expire_idle(record.watcher_name, now=far)
         self.assertTrue(expired)
         lines = _audit_lines(logs, "sess-idle-3333")
@@ -129,7 +129,7 @@ class TestEveryReleasedSessionIsLoggedOnce(IsolatedTestCase):
                                           connector="default", session_id="sess-static-4444",
                                           rule_name="", rule={}, config={})
         mgr, loaded = _booted([static], [])
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()
         lines = _audit_lines(logs, "sess-static-4444")
         self.assertEqual(len(lines), 1, logs.output)
@@ -147,7 +147,7 @@ class TestReconciliationEdges(IsolatedTestCase):
         above = make_rule(room="eng-*", name="all-eng", agent="b")
         mgr, loaded = _booted([record], [above, eng])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()
 
         row = await _listed(mgr, "eng-backend")
@@ -162,7 +162,7 @@ class TestReconciliationEdges(IsolatedTestCase):
                                        dropped_at="2026-09-01T01:00:00-07:00")
         mgr, loaded = _booted([record], [eng])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="INFO") as logs:
             await mgr.sync_only()
 
         summary = [line for line in logs.output if "Reconciliation" in line]
@@ -190,7 +190,7 @@ class TestReconciliationEdges(IsolatedTestCase):
         record.rule = "not a dict"
         mgr, loaded = _booted([record], [eng])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="INFO") as logs:
             await mgr.sync_only()
 
         self.assertTrue(any("re-materialized from rule 'eng' to rule 'eng'" in line
@@ -226,7 +226,7 @@ class TestSessionsAcrossReMaterialization(IsolatedTestCase):
             "a": AgentConfig(), "b": AgentConfig(working_directory="/elsewhere")})
         mgr, loaded = _booted([record], [moved], config=config)
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()  # the eager loop starts the room under agent b
 
         row = await _listed(mgr, "eng-backend")
@@ -249,7 +249,7 @@ class TestSessionsAcrossReMaterialization(IsolatedTestCase):
         rewritten = mgr._lifecycle.record_for_room("eng-backend")
 
         mgr2, loaded2 = _booted([rewritten], [after])
-        with loaded2, self.assertLogs("agent-chat-gateway.core.session_manager", level="INFO") as logs:
+        with loaded2, self.assertLogs("coop.core.session_manager", level="INFO") as logs:
             await mgr2.sync_only()
 
         self.assertTrue(any("nothing to change" in line for line in logs.output), logs.output)
@@ -259,7 +259,7 @@ class TestSessionsAcrossReMaterialization(IsolatedTestCase):
         record = make_record_from_rule(eng, ROOM, session_id="sess-paused-gone", paused=True)
         mgr, loaded = _booted([record], [])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()
 
         reply = await mgr.dispatch_command({"cmd": "list"})
@@ -276,7 +276,7 @@ class TestSessionsAcrossReMaterialization(IsolatedTestCase):
         record.room_name = ""
         mgr, loaded = _booted([record], [])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="WARNING") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="WARNING") as logs:
             await mgr.sync_only()
 
         row = await _listed(mgr, "eng-backend")
@@ -298,7 +298,7 @@ class TestAnExpiryThatDidNotApplyIsLoud(IsolatedTestCase):
         mgr, loaded = _booted([record], [])
         mgr._lifecycle.reclaim_room = AsyncMock(side_effect=OSError("disk full"))
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="ERROR") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="ERROR") as logs:
             await mgr.sync_only()
 
         row = await _listed(mgr, "eng-backend")
@@ -320,7 +320,7 @@ class TestAuditFollowsTheDurableStep(IsolatedTestCase):
         mgr, loaded = _booted([static], [])
         mgr._lifecycle._state_store.save = MagicMock(side_effect=OSError("disk full"))
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             with self.assertRaises(OSError):
                 await mgr.sync_only()
 
@@ -340,7 +340,7 @@ class TestAuditFollowsTheDurableStep(IsolatedTestCase):
         mgr, loaded = _booted([record], [moved], config=config)
         mgr._lifecycle._agents["b"].create_session = AsyncMock(side_effect=RuntimeError("backend down"))
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()  # the eager start fails; boot survives it
 
         self.assertEqual(_audit_lines(logs, "sess-kept-on-failure"), [],
@@ -376,7 +376,7 @@ class TestSessionlessRecordsReleaseNothing(IsolatedTestCase):
                                        dropped_at="2026-09-01T01:00:00-07:00")
         mgr, loaded = _booted([record], [])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()
 
         reply = await mgr.dispatch_command({"cmd": "list"})
@@ -395,7 +395,7 @@ class TestRecordsThatCannotBeReMatchedHonestly(IsolatedTestCase):
         record.room_kind = "channel_typo"
         mgr, loaded = _booted([record], [])  # nothing would match a channel either
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="WARNING") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="WARNING") as logs:
             await mgr.sync_only()
 
         row = await _listed(mgr, "eng-backend")
@@ -426,7 +426,7 @@ class TestRecordsThatCannotBeReMatchedHonestly(IsolatedTestCase):
         record.room_kind = ""
         mgr, loaded = _booted([record], [])
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="WARNING") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="WARNING") as logs:
             await mgr.sync_only()
 
         self.assertEqual((await _listed(mgr, "eng-backend"))["session_id"], "sess-no-kind")
@@ -439,7 +439,7 @@ class TestRecordsThatCannotBeReMatchedHonestly(IsolatedTestCase):
         record.config_schema_version = 0  # written by a build with an older materialization
         mgr, loaded = _booted([record], [eng])  # the rule itself is unchanged
 
-        with loaded, self.assertLogs("agent-chat-gateway.core.session_manager", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core.session_manager", level="INFO") as logs:
             await mgr.sync_only()
 
         from gateway.core.state import CONFIG_SCHEMA_VERSION
@@ -467,7 +467,7 @@ class TestAbandonedIdsAreAuditedOnEveryPathThatReplacesTheRecord(IsolatedTestCas
         mgr, loaded = _booted([record], [moved], config=config)
         mgr._connector.subscribe_room = AsyncMock(side_effect=RuntimeError("subscribe down"))
 
-        with loaded, self.assertLogs("agent-chat-gateway.core", level="INFO") as logs:
+        with loaded, self.assertLogs("coop.core", level="INFO") as logs:
             await mgr.sync_only()  # the eager start fails at subscription; boot survives
 
         lines = _audit_lines(logs, "sess-old-on-subfail")

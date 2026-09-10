@@ -504,7 +504,7 @@ class TestRuleDelete:
             assert "3 persisted session record(s)" in message
             assert "2 scheduled job(s)" in message
             # The recovery instruction must be the PUBLIC CLI spelling —
-            # `agent-chat-gateway schedule delete <job_id>` (nested subcommand), not the
+            # `coop schedule delete <job_id>` (nested subcommand), not the
             # internal control-socket command name `schedule-delete`
             # (Codex round 3: following the displayed instruction failed
             # at argument parsing exactly when the operator needed it).

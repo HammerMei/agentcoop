@@ -1,4 +1,4 @@
-# Installing agent-chat-gateway
+# Installing AgentCoop
 
 ## Prerequisites
 
@@ -16,21 +16,21 @@
 ### Option A: One-line shell installer (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
 ```
 
 This will:
-1. Clone the repo to `~/agent-chat-gateway`
+1. Clone the repo to `~/agentcoop`
 2. Install dependencies with `uv sync`
-3. Create symlinks at `~/.local/bin/agent-chat-gateway` and `~/.local/bin/acg-provision`
+3. Create symlinks at `~/.local/bin/coop` and `~/.local/bin/coop-provision`
 4. Launch the interactive setup wizard
 
 ### Option B: AI-guided install with Claude Code
 
-Ask Claude Code to install agent-chat-gateway:
+Ask Claude Code to install AgentCoop:
 
 ```
-claude "Please install agent-chat-gateway by following the instructions at https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/docs/install-agent.md"
+claude "Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md"
 ```
 
 Claude will read the install guide and walk you through the setup interactively.
@@ -38,72 +38,12 @@ Claude will read the install guide and walk you through the setup interactively.
 ### Option C: AI-guided install with opencode
 
 ```
-opencode "Please install agent-chat-gateway by following the instructions at https://raw.githubusercontent.com/HammerMei/agent-chat-gateway/main/docs/install-agent.md"
+opencode "Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md"
 ```
 
 ### Option D: Manual install
 
 See the [Manual Steps](#manual-steps) section below.
-
-### Option E: Docker (no local dependencies)
-
-Run ACG as a container — no Python, Node.js, or Claude Code required on the host.
-
-**Prerequisites:** Docker with Compose plugin installed.
-
-**Setup:**
-
-1. **Copy the example directory** to your deployment location:
-   ```bash
-   cp -r docker/docker-compose.example my-acg
-   cd my-acg
-   ```
-   If you don't have the repo, download it:
-   ```bash
-   curl -fsSL https://github.com/HammerMei/agent-chat-gateway/archive/refs/heads/main.tar.gz \
-     | tar -xz --strip-components=2 agent-chat-gateway-main/docker/docker-compose.example
-   cd docker-compose.example
-   ```
-
-2. **Fill in `.env`** — Claude Code OAuth token (see the file for instructions on how to obtain it)
-
-3. **Fill in `config/.env`** — chat platform credentials. Rocket.Chat:
-   ```
-   RC_URL=https://your-rocketchat.example.com
-   RC_USERNAME=bot
-   RC_PASSWORD=yourpassword
-   ```
-   Mattermost (no `.env` convention is generated for you — the Docker example ships
-   with Rocket.Chat only; add your own vars here and reference them from
-   `config/config.yaml`'s `server:` block, e.g. `MM_URL`, `MM_TEAM`, `MM_BOT_TOKEN`):
-   ```
-   MM_URL=https://your-mattermost.example.com
-   MM_TEAM=yourteam
-   MM_BOT_TOKEN=yourbotaccesstoken
-   ```
-
-4. **Edit `config/config.yaml`** — set your owners, watcher rooms, and agent config.
-   A commented example is included in the file.
-
-5. *(Optional)* Customize agent personas:
-   - `agents/claude_agent/CLAUDE.md` — Claude Code persona & instructions
-   - `agents/opencode_agent/AGENTS.md` — OpenCode persona & instructions
-
-6. **Start:**
-   ```bash
-   docker compose up -d
-   docker compose logs -f
-   ```
-
-**Volume layout:**
-
-| Host path | Container path | Purpose |
-|-----------|---------------|---------|
-| `./config/` | `~/.agent-chat-gateway/config/` | `config.yaml` + `.env` (chat platform credentials) |
-| `./agents/` | `~/.agent-chat-gateway/work/` | Agent working directories |
-| `./contexts/` | `~/.agent-chat-gateway/contexts/` | Context files injected into agent sessions |
-
-**Image:** `ghcr.io/hammermei/agent-chat-gateway:latest`
 
 ---
 
@@ -112,26 +52,26 @@ Run ACG as a container — no Python, Node.js, or Claude Code required on the ho
 ### 1. Clone the repository
 
 ```bash
-mkdir -p ~/.agent-chat-gateway
-git clone https://github.com/HammerMei/agent-chat-gateway.git ~/.agent-chat-gateway/repo
+mkdir -p ~/.agentcoop
+git clone https://github.com/HammerMei/agentcoop.git ~/.agentcoop/repo
 ```
 
 ### 2. Install dependencies
 
 ```bash
-uv sync --project ~/.agent-chat-gateway/repo
+uv sync --project ~/.agentcoop/repo
 ```
 
 ### 3. Create the symlinks
 
 ```bash
 mkdir -p ~/.local/bin
-repo=~/.agent-chat-gateway/repo
+repo=~/.agentcoop/repo
 
 # Deliberately refuses rather than replaces: it never moves or deletes anything, so
 # there is no state in which your command could go missing. If a path is occupied,
 # it shows you what is there and leaves it alone — decide yourself, then re-run.
-for cmd in agent-chat-gateway acg-provision; do
+for cmd in AgentCoop coop-provision; do
   link=~/.local/bin/"$cmd"
   if [ -e "$link" ] || [ -L "$link" ]; then
     echo "already exists, leaving it alone:"
@@ -142,7 +82,7 @@ for cmd in agent-chat-gateway acg-provision; do
 done
 ```
 
-`acg-provision` creates Rocket.Chat / Mattermost users and channels; the loop links
+`coop-provision` creates Rocket.Chat / Mattermost users and channels; the loop links
 it alongside the gateway.
 
 > **Occupied path?** Look at what `ls -ld` printed. A stale symlink can just be
@@ -156,13 +96,13 @@ it alongside the gateway.
 >
 > **If a link ends up missing or wrong** — a full disk, a read-only home, an
 > interrupted run — nothing here needs unpicking by hand. Re-run `bash install.sh`
-> from the repo, or `agent-chat-gateway upgrade` on an existing install: both are
+> from the repo, or `coop upgrade` on an existing install: both are
 > idempotent and will put the links right. `ls -l ~/.local/bin/*.bak` shows anything
 > that was moved aside.
 
-> **Both commands are part of the installation.** `acg-provision` is not an
+> **Both commands are part of the installation.** `coop-provision` is not an
 > optional extra: `install.sh` links it alongside the gateway, and
-> `agent-chat-gateway upgrade` keeps both links current. Leaving it out here does
+> `coop upgrade` keeps both links current. Leaving it out here does
 > not stick — the next upgrade creates it — so link both, or link neither and use
 > `<repo>/.venv/bin/<command>` directly.
 >
@@ -177,21 +117,21 @@ export PATH="$HOME/.local/bin:$PATH"
 ### 4. Run the setup wizard
 
 ```bash
-agent-chat-gateway onboard --repo-path ~/.agent-chat-gateway/repo
+coop onboard --repo-path ~/.agentcoop/repo
 ```
 
 ---
 
 ## Configuration
 
-The `onboard` wizard creates two files in `~/.agent-chat-gateway/`:
+The `onboard` wizard creates two files in `~/.agentcoop/`:
 
 | File | Purpose |
 |------|---------|
 | `config.yaml` | Connector, agent, and watcher definitions — including credentials, stored directly as plain values |
 | `install_meta.json` | Install method and version (used by `upgrade`) |
 
-`config.yaml` is chmod'd `0600` automatically (by the wizard, by `agent-chat-gateway start`, and by the config TUI on every save), so putting credentials directly in it is safe as long as you don't commit your filled-in copy to version control. `$VAR`/`${VAR}` references are not expanded — if you're upgrading from an older setup that used a `.env` file, the next `agent-chat-gateway start` (or opening `agent-chat-gateway config`) migrates it into `config.yaml` automatically, one-time.
+`config.yaml` is chmod'd `0600` automatically (by the wizard, by `coop start`, and by the config TUI on every save), so putting credentials directly in it is safe as long as you don't commit your filled-in copy to version control. `$VAR`/`${VAR}` references are not expanded — if you're upgrading from an older setup that used a `.env` file, the next `coop start` (or opening `coop config`) migrates it into `config.yaml` automatically, one-time.
 
 **Mattermost:** the `onboard` wizard only walks through Rocket.Chat setup today — it does not
 yet generate a Mattermost `connectors:` block. To add a Mattermost connector, run the wizard
@@ -211,40 +151,40 @@ the user guide for the full field reference and a worked example (including the
 ## Upgrade
 
 ```bash
-agent-chat-gateway upgrade
+coop upgrade
 ```
 
 This stops the daemon, runs `git pull` + `uv sync`, runs the pulled release's
 post-upgrade steps, and restarts the daemon automatically.
 
-> **One-time note for installs that predate `acg-provision`:** the post-upgrade
+> **One-time note for installs that predate `coop-provision`:** the post-upgrade
 > step that puts new commands on your PATH is itself delivered by an upgrade, so
-> the first upgrade that lands it cannot run it. If `acg-provision` is not found
+> the first upgrade that lands it cannot run it. If `coop-provision` is not found
 > after upgrading, link it once:
 >
 > ```bash
 > # Locate the managed virtualenv. Two things this deliberately avoids:
-> #   * assuming ~/.agent-chat-gateway/repo — running `./install.sh` from a local
+> #   * assuming ~/.agentcoop/repo — running `./install.sh` from a local
 > #     checkout uses that checkout as the repo and records it in install_meta.json;
 > #   * needing a system `python3` — install.sh may have installed Python with
 > #     `uv python install`, which provides `python3.12` and not `python3`.
-> # Both cases describe installs that predate acg-provision, i.e. this note's readers.
-> bin=$(dirname "$(readlink ~/.local/bin/agent-chat-gateway 2>/dev/null)" 2>/dev/null)
-> if [ ! -x "$bin/acg-provision" ]; then
+> # Both cases describe installs that predate coop-provision, i.e. this note's readers.
+> bin=$(dirname "$(readlink ~/.local/bin/coop 2>/dev/null)" 2>/dev/null)
+> if [ ! -x "$bin/coop-provision" ]; then
 >   # The entrypoint is not a managed symlink (a wrapper of your own, say), so use
 >   # the path the installer recorded.
->   repo=$(sed -n 's/.*"repo_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ~/.agent-chat-gateway/install_meta.json)
+>   repo=$(sed -n 's/.*"repo_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ~/.agentcoop/install_meta.json)
 >   bin=$repo/.venv/bin
 > fi
 > echo "$bin"          # sanity-check this before continuing
 >
-> link=~/.local/bin/acg-provision
+> link=~/.local/bin/coop-provision
 > # Refuses rather than replaces, like the manual setup block above: nothing is moved
 > # or deleted, so nothing can go missing.
 > if [ -e "$link" ] || [ -L "$link" ]; then
 >   echo "already exists, leaving it alone:"; ls -ld "$link"
 > else
->   ln -s "$bin/acg-provision" "$link"
+>   ln -s "$bin/coop-provision" "$link"
 > fi
 > ```
 >
@@ -258,27 +198,27 @@ post-upgrade steps, and restarts the daemon automatically.
 
 ```bash
 # Stop the daemon
-agent-chat-gateway stop
+coop stop
 
 # Remove the symlinks this install created. The -L test leaves a hand-written
 # wrapper of your own at either path alone — uninstalling should remove what was
 # installed, not something you wrote.
-if [ -L ~/.local/bin/agent-chat-gateway ]; then rm -f ~/.local/bin/agent-chat-gateway; fi
-if [ -L ~/.local/bin/acg-provision ];     then rm -f ~/.local/bin/acg-provision;     fi
+if [ -L ~/.local/bin/coop ]; then rm -f ~/.local/bin/coop; fi
+if [ -L ~/.local/bin/coop-provision ];     then rm -f ~/.local/bin/coop-provision;     fi
 
 # If the installer ever moved something of yours aside, it is still here. Check
 # before deleting — this is the only copy, and nothing else cleans it up.
 ls -l ~/.local/bin/*.bak 2>/dev/null
 
 # Remove all data — repo, config, logs (this deletes everything!)
-rm -rf ~/.agent-chat-gateway
+rm -rf ~/.agentcoop
 ```
 
 ---
 
 ## Troubleshooting
 
-### `agent-chat-gateway: command not found`
+### `coop: command not found`
 
 `~/.local/bin` is not in your PATH. Add it:
 ```bash
@@ -290,14 +230,14 @@ Then add the same line to your `~/.zshrc` or `~/.bashrc` so it persists.
 
 Check the log file:
 ```bash
-tail -50 ~/.agent-chat-gateway/gateway.log
+tail -50 ~/.agentcoop/gateway.log
 ```
 
 Common causes:
-- Invalid config YAML — run `agent-chat-gateway config validate` to check syntax, cross-references,
+- Invalid config YAML — run `coop config validate` to check syntax, cross-references,
   and per-connector credentials without starting the daemon (add `--lint` to also flag redundant
   defaults)
-- Wrong Rocket.Chat credentials — verify RC_URL, RC_USERNAME, RC_PASSWORD in `~/.agent-chat-gateway/.env`
+- Wrong Rocket.Chat credentials — verify RC_URL, RC_USERNAME, RC_PASSWORD in `~/.agentcoop/.env`
 - Wrong Mattermost credentials — verify `server.url`/`server.team`/`server.token` (or `username`/`password`) in `config.yaml`
 - Bot account not added to the watched room in Rocket.Chat, or not a member of the configured `server.team` in Mattermost
 
@@ -305,7 +245,7 @@ Common causes:
 
 The `.env` file should be readable only by you:
 ```bash
-chmod 600 ~/.agent-chat-gateway/.env
+chmod 600 ~/.agentcoop/.env
 ```
 
 ### Running onboard again
@@ -316,5 +256,5 @@ Re-running `onboard` when a config already exists offers three options:
 3. Cancel
 
 ```bash
-agent-chat-gateway onboard
+coop onboard
 ```

@@ -20,7 +20,7 @@ adds two things `from_file` alone cannot catch, plus an optional lint pass:
    duplicate a value already inherited from the entry's own ``inherits:``
    template — noise that can be deleted without changing behavior.
 
-Used by the ``agent-chat-gateway config validate`` CLI command; written as a plain function
+Used by the ``coop config validate`` CLI command; written as a plain function
 (not a CLI-only code path) so a future config-editing tool can reuse the same
 save-time check.
 """
@@ -98,7 +98,7 @@ class Finding:
 
     Additive alongside ValidationResult's flat string lists (errors/
     warnings/lint_findings), which remain the source of truth for
-    `agent-chat-gateway config validate`'s CLI output — this exists so the config TUI can
+    `coop config validate`'s CLI output — this exists so the config TUI can
     attach a finding to the right row/screen without re-parsing message
     text. Not every finding can be attributed this precisely: a
     GatewayConfig.from_file load failure (bad structure, unknown reference,
@@ -206,7 +206,7 @@ def validate_config(config_path: str, lint: bool = False) -> ValidationResult:
     # (collect_config tolerates it into a ConfigIssue + an empty rule list),
     # and `len(5)` raised a TypeError out of the one function whose whole
     # contract is collecting problems instead of raising them — crashing
-    # both `agent-chat-gateway config validate` and the TUI's banner (Codex review of #129).
+    # both `coop config validate` and the TUI's banner (Codex review of #129).
     raw_watchers = raw.get("watcher_rules")
     result.entry_count = len(raw_watchers) if isinstance(raw_watchers, list) else 0
 
@@ -251,7 +251,7 @@ def _check_shadowed_rules(config: GatewayConfig, result: ValidationResult) -> No
     `ConfigIssue` is documented as "a from_file()-would-have-raised problem" and is
     converted to severity="error" unconditionally above — riding it would report
     dead-but-legal config as a load failure. `validate_config()` already emits
-    warnings, and is what both `agent-chat-gateway config validate` and the config TUI's banner
+    warnings, and is what both `coop config validate` and the config TUI's banner
     read.
 
     Nothing warns at daemon startup, because until the watcher manager lands
@@ -425,7 +425,7 @@ def _check_session_uniqueness(config: GatewayConfig, result: ValidationResult) -
 
     `GatewayService` runs `check_session_uniqueness()` before anything is built, so a
     state file binding one session to two rooms stops the daemon. Adding that refusal
-    without teaching this command about it would have left `agent-chat-gateway config validate`
+    without teaching this command about it would have left `coop config validate`
     reporting success on exactly the fault it exists to find first — the operator's only
     way to learn about it would be a failed start.
 

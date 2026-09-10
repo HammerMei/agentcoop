@@ -275,7 +275,7 @@ class TestSessionReuseRequiresMatchingIdentity(unittest.IsolatedAsyncioTestCase)
         old_id = "01234567-89ab-cdef-0123-456789abcdef"
         state = self._stored(old_id, backend_identity("claude", "/srv/work"))
 
-        with self.assertLogs("agent-chat-gateway.core.watcher_lifecycle", "WARNING") as logs:
+        with self.assertLogs("coop.core.watcher_lifecycle", "WARNING") as logs:
             await self._start(lifecycle, wc, state)
 
         self.assertTrue(

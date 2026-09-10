@@ -274,7 +274,7 @@ class TestTheTwoFailureShapesStayApart(unittest.IsolatedAsyncioTestCase):
 
         manager = _manager(record=None, resolved=None)
 
-        with self.assertLogs("agent-chat-gateway.core.session_manager",
+        with self.assertLogs("coop.core.session_manager",
                              level=logging.INFO) as logs:
             await manager.inject_message("room-1", "poke")
 
@@ -287,7 +287,7 @@ class TestTheTwoFailureShapesStayApart(unittest.IsolatedAsyncioTestCase):
         manager = _manager(record=None, resolved=None)
         manager._connector.room_ref_by_id = AsyncMock(side_effect=OSError("net"))
 
-        with self.assertLogs("agent-chat-gateway.core.session_manager",
+        with self.assertLogs("coop.core.session_manager",
                              level=logging.WARNING) as logs:
             result = await manager.inject_message("room-1", "poke")
 

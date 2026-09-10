@@ -1,8 +1,8 @@
-# Example profile file for the standalone gateway.admin CLI (acg-provision).
+# Example profile file for the standalone gateway.admin CLI (coop-provision).
 #
 # Copy to admin-profiles.yaml (gitignored) and fill in real credentials, or
-# point --config / $ACG_ADMIN_CONFIG at a copy kept elsewhere. This is a
-# separate, standalone config — NOT read by ACG's own config.yaml/daemon.
+# point --config / $COOP_ADMIN_CONFIG at a copy kept elsewhere. This is a
+# separate, standalone config — NOT read by AgentCoop's own config.yaml/daemon.
 #
 # The admin credentials here should be a distinct, higher-privilege account
 # from whatever bot account a Connector uses — see gateway/admin/mattermost_admin.py.
