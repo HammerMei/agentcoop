@@ -21,7 +21,7 @@ documented format each connector's agent-facing context actually describes.
 
 ## Multi-Agent Deployment Model
 
-The canonical multi-agent setup in ACG is: **each agent has its own RC account.**
+The canonical multi-agent setup in AgentCoop is: **each agent has its own RC account.**
 When discussing multi-agent communication, collaboration, or message routing,
 assume this model unless stated otherwise.
 
@@ -200,3 +200,32 @@ The commit check matters: a PR can carry two reviews that both predate the push
 which fixed their findings. Commits written *in response to* a review are the ones
 most in need of another pass, so "a review exists" is the weakest possible
 evidence there.
+
+## Agent skills
+
+Per-repo configuration the engineering skills read. Each file is this repo's own; they
+started as skill templates and have been trimmed to what AgentCoop actually uses, so
+re-running `/setup-matt-pocock-skills` would overwrite the edits — it is only needed to
+switch issue trackers or start over.
+
+### Domain docs
+
+`CONTEXT.md` at the repo root is the glossary, and it is the thing to read before working
+in an unfamiliar area: it settles the product's naming (AgentCoop / Coop / gateway) and
+lists the synonyms to avoid. Use its terms in issue titles, test names and proposals
+rather than drifting to a near-synonym. ADRs go in `docs/adr/`, created lazily when a
+decision first needs recording; if that directory is not there, proceed silently rather
+than flagging it. See `docs/agents/domain.md`.
+
+### Issue tracker
+
+Issues and specs live in this repo's GitHub Issues, driven by the `gh` CLI; external PRs
+are not a triage surface. See `docs/agents/issue-tracker.md` for the command each
+operation uses.
+
+### Triage labels
+
+The five canonical roles — `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix` — are used verbatim as label strings, and all five already
+exist in the repo. Apply the existing label rather than creating a near-duplicate. See
+`docs/agents/triage-labels.md`.
