@@ -71,7 +71,7 @@ repo=~/.agentcoop/repo
 # Deliberately refuses rather than replaces: it never moves or deletes anything, so
 # there is no state in which your command could go missing. If a path is occupied,
 # it shows you what is there and leaves it alone — decide yourself, then re-run.
-for cmd in AgentCoop coop-provision; do
+for cmd in coop coop-provision; do
   link=~/.local/bin/"$cmd"
   if [ -e "$link" ] || [ -L "$link" ]; then
     echo "already exists, leaving it alone:"

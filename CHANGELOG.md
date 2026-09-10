@@ -69,7 +69,7 @@ Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
   `<connector>:<room>`, which is what `list` shows and the operator verbs act
   on. **The static shape — a `room:` key, or `rooms:` as a list — is a hard
   load error** naming the migration guide; see
-  `docs/migration-dynamic-watchers.md`, and note the upgrade **resets every
+  `docs/migration-v1.md`, and note the upgrade **resets every
   existing watcher session**: static-era state records are pruned at the first
   post-rewrite start (logged per record), and each room begins a fresh session
   on its first message.
@@ -128,7 +128,7 @@ Both changes are clean breaks: upgrading from any 0.x is a reinstall — see
   `user_removed`. A **periodic membership reconciliation** (daily) backstops a
   missed removal event for paused and idle records, which nothing else ever
   touches; an unanswerable membership probe keeps everything (fail = keep).
-- **`docs/migration-dynamic-watchers.md`** — the rewrite procedure, the field
+- **`docs/migration-v1.md`** — the rewrite procedure, the field
   notes (a DM entry cannot be named; `direct: true` replaces `room: "@user"`),
   and the accepted losses, stated as such.
 - **Two connectors may no longer run as one bot account.** Each connector

@@ -20,7 +20,7 @@ INSTALL_SH = Path(__file__).resolve().parents[2] / "install.sh"
 def _is_foreign(link: Path) -> int:
     """Exit status of is_foreign_command: 0 = foreign, 1 = ours or absent."""
     script = (
-        f'eval "$(sed -n \'/^is_foreign_command() {{/,/^}}/p\' "{INSTALL_SH}")"\n'
+        f'eval "$(sed -n \'/^is_ours_console_script() {{/,/^}}/p; /^is_foreign_command() {{/,/^}}/p\' "{INSTALL_SH}")"\n'
         f'is_foreign_command "{link}"'
     )
     return subprocess.run(["bash", "-c", script]).returncode
@@ -86,3 +86,12 @@ class TestIsForeignCommand(unittest.TestCase):
         self.assertIn("use --force", text)
         # The --force wording is honest about symlinks: only a regular file gets a .bak.
         self.assertIn("a symlink is replaced outright", text)
+
+    def test_installer_warns_when_another_coop_is_earlier_on_path(self):
+        """~/.local/bin/coop may be free while /usr/local/bin/coop exists: our
+        link is made cleanly and then never runs. A warning with the
+        alternate-name way out, not a refusal — nothing is clobbered (Codex)."""
+        text = INSTALL_SH.read_text()
+        self.assertIn('SHADOWING_COOP="$(command -v coop', text)
+        self.assertIn("ahead of ~/.local/bin", text)
+        self.assertLess(text.index("SHADOWING_COOP="), text.index('uv sync --project "$REPO_DIR"'))

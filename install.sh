@@ -121,14 +121,19 @@ fi
 # the installer is how it gets repaired). Anything else at that path belongs to
 # something else. gateway/upgrade.py applies the same test.
 # ---------------------------------------------------------------------------
+is_ours_console_script() {
+  # $1 = a path. 0 = a symlink shaped like AgentCoop's console script.
+  [ -L "$1" ] || return 1
+  case "$(readlink "$1")" in
+    */.venv/bin/coop) return 0 ;;
+  esac
+  return 1
+}
+
 is_foreign_command() {
   # $1 = path on PATH. 0 = foreign (someone else's), 1 = ours or nothing there.
   [ -e "$1" ] || [ -L "$1" ] || return 1
-  if [ -L "$1" ]; then
-    case "$(readlink "$1")" in
-      */.venv/bin/coop) return 1 ;;
-    esac
-  fi
+  is_ours_console_script "$1" && return 1
   return 0
 }
 
@@ -142,6 +147,18 @@ if [ "$FORCE" != true ] && is_foreign_command "$COOP_LINK"; then
   warn "or re-run the installer with --force to replace it (a regular file is kept as a .bak;"
   warn "a symlink is replaced outright)."
   error "Refusing to replace a command that is not ours (use --force)."
+fi
+# A `coop` found EARLIER on PATH than ~/.local/bin (say /usr/local/bin/coop) is a
+# different problem: our link would be created cleanly and then never run,
+# because the shell resolves the other one first. Nothing is clobbered, so this
+# is a warning with the same alternate-name way out, not a refusal.
+SHADOWING_COOP="$(command -v coop 2>/dev/null || true)"
+if [ -n "$SHADOWING_COOP" ] && [ "$SHADOWING_COOP" != "$COOP_LINK" ] \
+   && ! is_ours_console_script "$SHADOWING_COOP"; then
+  warn "Another \`coop\` is on your PATH ahead of ~/.local/bin: $SHADOWING_COOP"
+  warn "After installing, typing \`coop\` will run THAT program, not AgentCoop."
+  warn "Either put ~/.local/bin earlier in PATH, or link AgentCoop under another name:"
+  warn "    ln -s $VENV_BIN \$HOME/.local/bin/agentcoop"
 fi
 
 # ---------------------------------------------------------------------------

@@ -611,7 +611,7 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
                 "and its session. To keep serving that room, add a rule "
                 "under 'watcher_rules:' whose rooms match it — it will start a "
                 "new session on the room's next message. See "
-                "docs/migration-dynamic-watchers.md."
+                "docs/migration-v1.md."
             )
             result.warnings.append(msg)
             result.findings.append(

@@ -289,7 +289,7 @@ class TestValidateConfigStateOrphans(_ValidateConfigTestBase):
         self.assertIn("stale", result.warnings[0])
         self.assertIn("older version", result.warnings[0])
         self.assertIn("discard", result.warnings[0])
-        self.assertIn("migration-dynamic-watchers.md", result.warnings[0])
+        self.assertIn("migration-v1.md", result.warnings[0])
 
     def test_a_record_bound_to_a_removed_agent_is_reported(self):
         """Matrix sweep after Codex round 6: the runtime is fail-closed and

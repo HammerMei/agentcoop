@@ -184,7 +184,7 @@ async def _resolve_room_id(entry, job: ScheduledJob) -> tuple[str, str]:
         # startup warning went quiet and every later fire delivered into the
         # wrong room, silently. Measured, not reasoned.
         #
-        # `migration-dynamic-watchers.md` step 7 already says these jobs must be
+        # `migration-v1.md` step 7 already says these jobs must be
         # deleted and recreated. Saying so here is what makes that instruction
         # hold for an operator who skipped it.
         return "", (

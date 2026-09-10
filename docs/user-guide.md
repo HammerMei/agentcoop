@@ -540,7 +540,7 @@ Valid top-level keys are: ... 'watcher_rules', 'watcher_templates'.
 Rename the key first; only then do the per-entry errors become visible
 (`room: general` is refused as an unknown key of a rule, and a list-shaped
 `rooms:` is refused as the wrong type). See
-[docs/migration-dynamic-watchers.md](migration-dynamic-watchers.md) for the
+[docs/migration-v1.md](migration-v1.md) for the
 rest of the rewrite.
 
 > ⚠️ **One watcher per room, per connector.** Two rules cannot both serve a
@@ -641,7 +641,7 @@ of the later ones is dead. It loads, and `config validate` warns:
 > are already handled by 'eng', which is listed above it.
 
 Give DMs their own rule that does not inherit the template, as in the
-[migration guide's example](migration-dynamic-watchers.md#the-rewrite).
+[migration guide's example](migration-v1.md#the-rewrite).
 
 ### Tool Allow-Lists
 

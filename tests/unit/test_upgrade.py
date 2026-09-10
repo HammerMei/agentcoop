@@ -1386,7 +1386,7 @@ class TestForeignCoopIsLeftAlone:
             link.symlink_to(target)
             assert _looks_like_our_console_script(link.readlink()) is ours, target
             rc = subprocess.run(["bash", "-c",
-                f'eval "$(sed -n \'/^is_foreign_command() {{/,/^}}/p\' "{install_sh}")"; '
+                f'eval "$(sed -n \'/^is_ours_console_script() {{/,/^}}/p; /^is_foreign_command() {{/,/^}}/p\' "{install_sh}")"; '
                 f'is_foreign_command "{link}"']).returncode
             assert (rc == 1) is ours, (target, rc)   # 1 = ours/absent, 0 = foreign
 

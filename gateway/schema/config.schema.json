@@ -301,7 +301,7 @@
       }
     },
     "watcher": {
-      "description": "A 'watchers:' entry \u2014 a watcher RULE (docs/design/dynamic-watcher-design.md \u00a72.1). The static shape ('room:', or 'rooms:' as an array) was removed at cutover; the loader refuses it with a pointer at docs/migration-dynamic-watchers.md, and this schema matches that refusal rather than dual-accepting a shape nothing runs.",
+      "description": "A 'watchers:' entry \u2014 a watcher RULE (docs/design/dynamic-watcher-design.md \u00a72.1). The static shape ('room:', or 'rooms:' as an array) was removed at cutover; the loader refuses it with a pointer at docs/migration-v1.md, and this schema matches that refusal rather than dual-accepting a shape nothing runs.",
       "$ref": "#/$defs/watcherRule"
     },
     "dmOptIn": {
