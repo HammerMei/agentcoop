@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0]
+## [1.0.0] - 2026-09-10
 
 The first release under the new name. Everything below the *Renamed* section
 is the dynamic-watcher cutover that had accumulated on `main` since v0.5.2.
