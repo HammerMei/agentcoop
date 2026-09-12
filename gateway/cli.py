@@ -371,6 +371,7 @@ def main():
 
     if args.command == "start":
         from .daemon import start_daemon
+        _validate_or_exit(args.config)
         start_daemon(args.config)
 
     elif args.command == "stop":
@@ -379,6 +380,10 @@ def main():
 
     elif args.command == "restart":
         from .daemon import start_daemon, stop_daemon
+        # Before stop_daemon(), not after: validating inside the start half
+        # would stop a healthy running gateway and then refuse to restart it,
+        # leaving the operator worse off than before the command.
+        _validate_or_exit(args.config)
         stop_daemon()
         start_daemon(args.config)
 
@@ -755,6 +760,34 @@ def _run_config(args) -> None:
     else:
         print(f"Unknown config subcommand: {args.config_cmd}", file=sys.stderr)
         sys.exit(1)
+
+
+def _validate_or_exit(config_path: str) -> None:
+    """Refuse to start a gateway on a config `config validate` rejects.
+
+    `start` used to hand the path straight to the daemon, which loads it with
+    `GatewayConfig.from_file()` — parsing and dataclass construction, none of
+    the cross-checks (state orphans, room/session uniqueness, rule shadowing)
+    that `validate_config()` runs. A config the operator could see rejected by
+    `coop config validate` still started a gateway.
+
+    The condition mirrors the reload path's (`GatewayService._handle_config_reload`)
+    exactly: errors refuse, warnings and lint findings do not. Callers run this
+    BEFORE forking (and, for `restart`, before stopping the running daemon), so
+    the errors land on the terminal rather than in the log the daemon redirects
+    into.
+    """
+    from .config_validate import validate_config
+
+    result = validate_config(config_path)
+    if result.ok and result.config is not None:
+        return
+
+    print(f"[ERROR] {config_path}: {len(result.errors)} error(s) — not starting",
+          file=sys.stderr)
+    for err in result.errors:
+        print(f"  [ERROR] {err}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _run_config_validate(args) -> None:

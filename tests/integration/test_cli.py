@@ -1902,3 +1902,104 @@ class TestCLIStatusConfigLine(_ConfigCLIBase):
         self.assertEqual(code, 0)
         self.assertIn("Config:   abcdef012345 (loaded 2026-09-04T10:00:00-07:00)", stdout)
         self.assertIn("[ERROR] Degraded: connector 'mm' — refused", stdout)
+
+
+class TestStartValidatesConfig(unittest.TestCase):
+    """`start`/`restart` refuse a config `config validate` rejects (#156).
+
+    `start` used to hand the path straight to `start_daemon()`, whose only check
+    is `GatewayConfig.from_file()` — parsing, not the cross-checks. A config the
+    operator could watch `coop config validate` reject still started a gateway.
+    """
+
+    # A connector that can discover rooms, which the shared `gateway_config_text`
+    # helper does not build (it emits `type: script`, where a `*` include is
+    # itself an error rather than the shadowing warning this needs). Kept local
+    # for that reason, not for size.
+    _MM_HEADER = textwrap.dedent("""\
+        connectors:
+          - name: mm
+            type: mattermost
+            server: {url: http://localhost:8065, token: t, team: lab}
+        agents:
+          default:
+            type: claude
+            working_directory: /tmp
+        watcher_rules:
+        """)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _write(self, text: str) -> str:
+        path = self.tmp / "config.yaml"
+        path.write_text(text)
+        return str(path)
+
+    def _bad_config(self) -> str:
+        """An error: a rule bound to an agent that is not in `agents:`."""
+        from tests.helpers import gateway_config_text
+        return self._write(gateway_config_text(
+            rules=[{"name": "w1", "agent": "nope", "connector": "script",
+                    "rooms": {"include": ["script"]}}],
+            working_directory=str(self.tmp)))
+
+    def _warning_only_config(self) -> str:
+        """Warnings but no errors: a second rule shadowed by a `*` first one."""
+        return self._write(self._MM_HEADER + textwrap.dedent("""\
+          - name: everything
+            agent: default
+            connector: mm
+            rooms: {include: ["*"]}
+          - name: never-fires
+            agent: default
+            connector: mm
+            rooms: {include: ["eng-*"]}
+        """))
+
+    def _run(self, argv):
+        main = _import_main()
+        out, err = io.StringIO(), io.StringIO()
+        code = 0
+        with patch.object(sys, "argv", ["coop"] + argv), \
+                redirect_stdout(out), redirect_stderr(err):
+            try:
+                main()
+            except SystemExit as e:
+                code = e.code or 0
+        return out.getvalue(), err.getvalue(), code
+
+    def test_start_refuses_a_config_with_errors_and_never_forks(self):
+        cfg = self._bad_config()
+        with patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["start", "--config", cfg])
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn("[ERROR]", err)
+        self.assertIn("unknown agent 'nope'", err)
+
+    def test_start_proceeds_when_the_config_only_has_warnings(self):
+        cfg = self._warning_only_config()
+        with patch("gateway.daemon.start_daemon") as start:
+            self._run(["start", "--config", cfg])
+        start.assert_called_once_with(cfg)
+
+    def test_restart_validates_before_stopping_the_running_gateway(self):
+        """The ordering half: validating inside the start would stop a healthy
+        gateway and then refuse to bring it back."""
+        cfg = self._bad_config()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["restart", "--config", cfg])
+        self.assertEqual(code, 1)
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_restart_stops_and_starts_when_the_config_is_valid(self):
+        cfg = self._warning_only_config()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            self._run(["restart", "--config", cfg])
+        stop.assert_called_once()
+        start.assert_called_once_with(cfg)
