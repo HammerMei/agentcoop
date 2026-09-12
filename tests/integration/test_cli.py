@@ -2102,7 +2102,8 @@ class TestStartValidatesConfig(_PreflightBase):
         load — the outage the validate-before-stop order exists to prevent."""
         (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
         cfg = self._bad_config()
-        with patch("gateway.daemon.stop_daemon") as stop, \
+        with patch("gateway.daemon.is_running", return_value=(True, 4242)), \
+                patch("gateway.daemon.stop_daemon") as stop, \
                 patch("gateway.daemon.start_daemon") as start:
             _, err, code = self._run(["restart", "--config", cfg])
         self.assertEqual(code, 1)
@@ -2117,7 +2118,8 @@ class TestStartValidatesConfig(_PreflightBase):
         operator is shown the file and can delete it."""
         (self.tmp / ".env").write_text("")
         cfg = self._warning_only_config()
-        with patch("gateway.daemon.stop_daemon") as stop, \
+        with patch("gateway.daemon.is_running", return_value=(True, 4242)), \
+                patch("gateway.daemon.stop_daemon") as stop, \
                 patch("gateway.daemon.start_daemon") as start:
             _, err, code = self._run(["restart", "--config", cfg])
         self.assertEqual(code, 1)
@@ -2207,15 +2209,26 @@ class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
         self.assertIn("[ERROR]", r["err"])
         self.assertNotIn("Traceback", r["err"])
 
-    def test_a_pending_migration_defers_on_start_and_refuses_on_restart(self):
+    def test_a_pending_migration_crossed_with_whether_a_gateway_is_running(self):
+        """The cross this table originally missed, which is how round 4 found a
+        defect the enumeration was supposed to prevent: the first version of
+        this row asserted that `restart` refuses, full stop, and so wrote the
+        bug in as the specification. Refusal is only correct when there is a
+        running gateway to protect."""
         (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
         cfg = self._write(self._ENV_BACKED)
-        start = self._case("start", cfg)
-        self.assertTrue(start["started"], "start defers to the daemon's migration")
-        restart = self._case("restart", cfg)
-        self.assertEqual(restart["code"], 1)
-        self.assertFalse(restart["stopped"], "a healthy gateway must not be stopped")
-        self.assertIn("migrate-env", restart["err"])
+
+        r = self._case("start", cfg)
+        self.assertTrue(r["started"], "start defers to the daemon's own migration")
+
+        r = self._case("restart", cfg)
+        self.assertTrue(r["started"], "nothing to protect — restart is a start")
+        self.assertTrue(r["stopped"], "stop_daemon() still runs; with nothing up it no-ops")
+
+        r = self._case("restart", cfg, running=(True, 4242))
+        self.assertEqual(r["code"], 1)
+        self.assertFalse(r["stopped"], "a healthy gateway must not be stopped")
+        self.assertIn("migrate-env", r["err"])
 
     def test_malformed_yaml_is_a_controlled_error_for_both_verbs(self):
         cfg = self._write("connectors: [unclosed\nagents: {\n")

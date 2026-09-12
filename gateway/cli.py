@@ -388,11 +388,16 @@ def main():
         stop_daemon()
 
     elif args.command == "restart":
-        from .daemon import start_daemon, stop_daemon
+        from .daemon import is_running, start_daemon, stop_daemon
         # Before stop_daemon(), not after: validating inside the start half
         # would stop a healthy running gateway and then refuse to restart it,
         # leaving the operator worse off than before the command.
-        _validate_or_exit(args.config, stops_a_running_gateway=True)
+        # Asked, not assumed: with nothing running, stop_daemon() no-ops and
+        # start_daemon() can complete a pending migration exactly as `start`
+        # would, so refusing there would demand a separate command for no gain.
+        # The flag means what its name says only if it is measured.
+        running, _pid = is_running()
+        _validate_or_exit(args.config, stops_a_running_gateway=running)
         stop_daemon()
         start_daemon(args.config)
 
