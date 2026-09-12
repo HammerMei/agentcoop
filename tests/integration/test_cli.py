@@ -2086,3 +2086,44 @@ class TestStartValidatesConfig(unittest.TestCase):
             self._run(["restart", "--config", cfg])
         stop.assert_called_once()
         start.assert_called_once_with(cfg)
+
+    # ── Round 2 landed inside round 1's fix: the migration skip was written for
+    # `start`, where nothing is running to damage, and `restart` inherited it.
+
+    def test_restart_refuses_a_pending_migration_instead_of_stopping_first(self):
+        """`restart` runs stop_daemon() next, so deferring validation the way
+        `start` does would take a healthy gateway down for a config that cannot
+        load — the outage the validate-before-stop order exists to prevent."""
+        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
+        cfg = self._bad_config()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["restart", "--config", cfg])
+        self.assertEqual(code, 1)
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertIn("coop config migrate-env", err)
+
+    def test_restart_refuses_a_pending_migration_even_when_the_config_is_valid(self):
+        """Deliberate: the preflight cannot judge the post-migration document
+        without resolving `.env` into the process environment, so it declines to
+        guess. A stale or empty `.env` lands here too, which is the point — the
+        operator is shown the file and can delete it."""
+        (self.tmp / ".env").write_text("")
+        cfg = self._warning_only_config()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["restart", "--config", cfg])
+        self.assertEqual(code, 1)
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertIn("delete it", err)
+
+    def test_start_still_defers_a_pending_migration(self):
+        """The refusal is `restart`'s alone — `start` has no running gateway to
+        take down, so the daemon's own fail-closed migration stays in charge."""
+        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
+        cfg = self._write(self._ENV_BACKED)
+        with patch("gateway.daemon.start_daemon") as start:
+            self._run(["start", "--config", cfg])
+        start.assert_called_once_with(cfg)

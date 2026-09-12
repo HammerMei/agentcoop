@@ -392,7 +392,7 @@ def main():
         # Before stop_daemon(), not after: validating inside the start half
         # would stop a healthy running gateway and then refuse to restart it,
         # leaving the operator worse off than before the command.
-        _validate_or_exit(args.config)
+        _validate_or_exit(args.config, stops_a_running_gateway=True)
         stop_daemon()
         start_daemon(args.config)
 
@@ -771,7 +771,7 @@ def _run_config(args) -> None:
         sys.exit(1)
 
 
-def _validate_or_exit(config_path: str) -> None:
+def _validate_or_exit(config_path: str, *, stops_a_running_gateway: bool = False) -> None:
     """Refuse to start a gateway on a config `config validate` rejects.
 
     `start` used to hand the path straight to the daemon, which loads it with
@@ -786,20 +786,42 @@ def _validate_or_exit(config_path: str) -> None:
     the errors land on the terminal rather than in the log the daemon redirects
     into.
 
-    **Skipped while a `.env` migration is pending.** `validate_config()` reads
-    the raw document, where an unmigrated `${RC_URL}` is still a literal string
-    and fails the URL check — so this preflight would reject every config the
-    daemon is about to migrate, and `migrate_env_to_config()` (which runs inside
-    the daemon, after the fork) could never run. The cost of skipping is exactly
-    one boot validated the way it was before this change — `from_file()` alone,
-    no cross-checks — because the migration moves `.env` away and every later
-    start validates in full.
+    **A pending `.env` migration is deferred for `start`, refused for `restart`.**
+    `validate_config()` reads the raw document, where an unmigrated `${RC_URL}`
+    is still a literal string that fails the URL check — so validating here would
+    reject every config the daemon is about to migrate, and
+    `migrate_env_to_config()` (which runs inside the daemon, after the fork)
+    could never run.
+
+    For `start` the answer is to defer: nothing is running to damage, so the
+    worst case is one boot validated the way it was before this change —
+    `from_file()` alone — and the daemon's own fail-closed migration handles the
+    rest. The migration then moves `.env` away, so every later start validates
+    in full.
+
+    For `restart` deferring is not safe, because `stop_daemon()` runs next. A
+    config that cannot load would take a healthy gateway down and leave it down,
+    which is the outage the validate-before-stop order exists to prevent. So
+    `restart` refuses instead, and names the way through.
     """
     from .config_migrate import has_pending_migration
     from .config_validate import validate_config
 
     if has_pending_migration(config_path):
-        return
+        if not stops_a_running_gateway:
+            return
+        print(
+            f"[ERROR] {config_path}: a .env file still sits beside it, so its "
+            f"secrets have not been folded in yet — refusing to restart, because "
+            f"stopping the gateway before that migration is what would leave it "
+            f"down.\n"
+            f"  [ERROR] Complete the migration first: 'coop config migrate-env', "
+            f"then 'coop restart'. (A 'coop stop' followed by 'coop start' does "
+            f"it too — the daemon migrates on its own at startup.)\n"
+            f"  [ERROR] If that .env is a leftover you no longer need, delete it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     try:
         result = validate_config(config_path)
