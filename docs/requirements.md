@@ -365,3 +365,68 @@ This specification does not define:
 - Binary file formats for internal state persistence
 - Implementation-specific connector or agent backend internals
 - Exact performance targets or throughput requirements
+
+---
+
+## 14. Operational Commitments
+
+This section records what the project undertakes to do, and where that
+undertaking stops short of a guarantee.
+
+**"Not guaranteed" here means best effort — it does not mean indifference.**
+Every item below is something the project actively works to preserve, tests for,
+and treats a regression in as a defect worth fixing. What is withheld is the
+promise that the outcome is always achieved, never the effort to achieve it.
+
+The distinction cuts both ways, and both directions matter when ranking a
+defect. A defect in a best-effort area is still a defect. A defect that breaches
+a stated guarantee is more than an inconvenience. Rank against what is written
+here rather than against an assumed standard.
+
+### 14.1 Upgrades
+
+The project SHALL:
+1. Exercise the upgrade path before release, and treat an upgrade that breaks a
+   supported configuration as a defect
+2. Name breaking changes in the release notes, with a migration path where one
+   exists
+3. Report the reason and a non-zero exit when an upgrade cannot bring the
+   gateway back up, rather than reporting success or failing silently
+
+Not guaranteed: that an upgrade never interrupts a running gateway. Operators
+SHOULD back up `config.yaml` and the runtime state directory before upgrading.
+
+### 14.2 Configuration compatibility
+
+The project SHALL:
+1. Make a best effort to keep an existing `config.yaml` loading across releases
+2. Provide an automatic migration where the change allows one
+3. Name a change that requires operator action in the release notes
+
+Not guaranteed: indefinite backward compatibility for every configuration key.
+
+### 14.3 Availability
+
+The project SHALL:
+1. Degrade rather than exit where a section of the system can be isolated (§9)
+2. Reconnect automatically after transient connector failures (§9.4)
+3. Retry a degraded section on a later reload rather than requiring a restart
+
+Not guaranteed: continuous availability. The gateway is a single daemon with no
+failover, clustering or high-availability mode, and the project offers no
+service-level objective. Stopping and starting it is an expected operation, not
+a last resort — an operator who can restart early is better served than one kept
+running through a fault.
+
+### 14.4 Message delivery
+
+Delivery is best effort, under the queue, timeout and recovery behaviour in §9.
+Messages can be lost when a connector or the daemon fails; that outcome is
+within what the system claims, and is not by itself a severe defect. Severity
+comes from whether the outcome is unreasonable given what triggered it.
+
+### 14.5 Deployment assumptions
+
+AgentCoop is designed for self-hosted deployments administered by a small number
+of operators who run their own instance. It is not a multi-tenant hosted
+service, and nothing here should be read as a commitment appropriate to one.
