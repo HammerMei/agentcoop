@@ -1904,7 +1904,7 @@ class TestCLIStatusConfigLine(_ConfigCLIBase):
         self.assertIn("[ERROR] Degraded: connector 'mm' — refused", stdout)
 
 
-class TestStartValidatesConfig(unittest.TestCase):
+class _PreflightBase(unittest.TestCase):
     """`start`/`restart` refuse a config `config validate` rejects (#156).
 
     `start` used to hand the path straight to `start_daemon()`, whose only check
@@ -1926,6 +1926,17 @@ class TestStartValidatesConfig(unittest.TestCase):
             type: claude
             working_directory: /tmp
         watcher_rules:
+        """)
+
+    _ENV_BACKED = textwrap.dedent("""\
+        connectors:
+          - name: rc
+            type: rocketchat
+            server: {url: "${RC_URL}", username: bot, password: pw}
+        agents:
+          default: {type: claude, working_directory: /tmp}
+        watcher_rules:
+          - {name: w1, agent: default, connector: rc, rooms: {include: [general]}}
         """)
 
     def setUp(self):
@@ -1977,6 +1988,11 @@ class TestStartValidatesConfig(unittest.TestCase):
                 code = e.code or 0
         return out.getvalue(), err.getvalue(), code
 
+
+class TestStartValidatesConfig(_PreflightBase):
+    """The behaviour of each individual guard; the enumeration of the
+    preconditions themselves lives in TestPreflightCoversEveryBootPrecondition."""
+
     def test_start_refuses_a_config_with_errors_and_never_forks(self):
         cfg = self._bad_config()
         with patch("gateway.daemon.start_daemon") as start:
@@ -2017,16 +2033,6 @@ class TestStartValidatesConfig(unittest.TestCase):
     # `.env`, no lock and valid YAML, so the preflight's blindness to all
     # three went unseen until review read it.
 
-    _ENV_BACKED = textwrap.dedent("""\
-        connectors:
-          - name: rc
-            type: rocketchat
-            server: {url: "${RC_URL}", username: bot, password: pw}
-        agents:
-          default: {type: claude, working_directory: /tmp}
-        watcher_rules:
-          - {name: w1, agent: default, connector: rc, rooms: {include: [general]}}
-        """)
 
     def test_a_pending_env_migration_skips_validation_rather_than_blocking_it(self):
         """An unmigrated `${VAR}` is a literal string to `validate_config()`, so
@@ -2127,3 +2133,101 @@ class TestStartValidatesConfig(unittest.TestCase):
         with patch("gateway.daemon.start_daemon") as start:
             self._run(["start", "--config", cfg])
         start.assert_called_once_with(cfg)
+
+
+class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
+    """One case per precondition the daemon inspects before `from_file()`.
+
+    The boot sequence in `gateway/daemon.py` is the spec:
+
+        is_running → runtime lock → migrate_env_to_config
+                                      (config exists? → `.env`? → resolve)
+                                    → chmod → GatewayConfig.from_file
+
+    Three review rounds each surfaced another entry the preflight did not know
+    about — is_running and the migration, then the migration again on the
+    `restart` path, then a missing config and a `resolve()` failure mode. Every
+    one was the same defect wearing a different hat, so the answer is this table
+    rather than a fourth patch: an uncovered precondition now fails here instead
+    of in a review.
+
+    Assertions are on the OUTCOME — exit code, whether the daemon was stopped or
+    started, and a fragment of what the operator reads — never on an exception
+    type, so each row means the same thing on every supported runtime.
+    """
+
+    def _case(self, verb, cfg, *, running=(False, None)):
+        with patch("gateway.daemon.is_running", return_value=running), \
+                patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            out, err, code = self._run([verb, "--config", cfg])
+        return {"out": out, "err": err, "code": code,
+                "stopped": stop.called, "started": start.called}
+
+    # ── the preconditions, in the order the daemon checks them ──────────────
+
+    def test_a_gateway_already_running_short_circuits_start(self):
+        r = self._case("start", self._bad_config(), running=(True, 4242))
+        self.assertEqual((r["code"], r["started"]), (1, False))
+        self.assertIn("already running (pid=4242)", r["out"])
+
+    def test_a_missing_config_is_a_controlled_error_for_both_verbs(self):
+        cfg = str(self.tmp / "nope.yaml")
+        for verb in ("start", "restart"):
+            with self.subTest(verb=verb):
+                r = self._case(verb, cfg)
+                self.assertEqual(r["code"], 1)
+                self.assertFalse(r["started"] or r["stopped"])
+                self.assertIn("Config file not found", r["err"])
+                self.assertNotIn("Traceback", r["err"])
+
+    def test_a_missing_config_beside_an_env_file_still_reads_as_missing(self):
+        """Not as a pending migration: `coop config migrate-env` cannot succeed
+        on a file that is not there, so recommending it would misdirect."""
+        (self.tmp / ".env").write_text("X=1\n")
+        cfg = str(self.tmp / "nope.yaml")
+        for verb in ("start", "restart"):
+            with self.subTest(verb=verb):
+                r = self._case(verb, cfg)
+                self.assertEqual(r["code"], 1)
+                self.assertIn("Config file not found", r["err"])
+                self.assertNotIn("migrate-env", r["err"])
+
+    def test_a_symlink_loop_on_the_config_path_is_a_controlled_error(self):
+        """`Path.resolve()` raises `RuntimeError` on 3.12 and returns the
+        unresolved path on 3.13, so this asserts the outcome rather than the
+        exception: on 3.13 it is close to a no-op, on 3.12 it is the regression
+        guard for the predicate's "never raises" contract."""
+        a, b = self.tmp / "a", self.tmp / "b"
+        a.symlink_to(b)
+        b.symlink_to(a)
+        r = self._case("start", str(a / "config.yaml"))
+        self.assertEqual(r["code"], 1)
+        self.assertFalse(r["started"])
+        self.assertIn("[ERROR]", r["err"])
+        self.assertNotIn("Traceback", r["err"])
+
+    def test_a_pending_migration_defers_on_start_and_refuses_on_restart(self):
+        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
+        cfg = self._write(self._ENV_BACKED)
+        start = self._case("start", cfg)
+        self.assertTrue(start["started"], "start defers to the daemon's migration")
+        restart = self._case("restart", cfg)
+        self.assertEqual(restart["code"], 1)
+        self.assertFalse(restart["stopped"], "a healthy gateway must not be stopped")
+        self.assertIn("migrate-env", restart["err"])
+
+    def test_malformed_yaml_is_a_controlled_error_for_both_verbs(self):
+        cfg = self._write("connectors: [unclosed\nagents: {\n")
+        for verb in ("start", "restart"):
+            with self.subTest(verb=verb):
+                r = self._case(verb, cfg)
+                self.assertEqual(r["code"], 1)
+                self.assertFalse(r["started"] or r["stopped"])
+                self.assertNotIn("Traceback", r["err"])
+
+    def test_a_validation_error_refuses_and_a_warning_does_not(self):
+        bad = self._case("start", self._bad_config())
+        self.assertEqual((bad["code"], bad["started"]), (1, False))
+        warn = self._case("start", self._warning_only_config())
+        self.assertTrue(warn["started"], "warnings and lint findings never block")

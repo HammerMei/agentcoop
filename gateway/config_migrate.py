@@ -95,9 +95,18 @@ def has_pending_migration(config_path: str | Path) -> bool:
     """
     try:
         resolved = Path(config_path).resolve()
-    except OSError:
+    except (OSError, RuntimeError):
+        # RuntimeError, not only OSError: on Python 3.12 a cyclic symlink makes
+        # `Path.resolve()` raise `RuntimeError("Symlink loop from ...")`, and
+        # 3.12 is a supported runtime (`requires-python = ">=3.12"`, and CI runs
+        # it). 3.13 returns the unresolved path instead of raising at all.
         return False
-    return (resolved.parent / ".env").exists()
+    # The config itself must exist. Without this, a missing config.yaml whose
+    # DIRECTORY happens to hold a `.env` reported a pending migration: `start`
+    # skipped validation to fail after the fork, and `restart` recommended
+    # `coop config migrate-env`, which cannot succeed on a file that is not
+    # there. Nothing is pending when there is nothing to migrate into.
+    return resolved.exists() and (resolved.parent / ".env").exists()
 
 
 def migrate_env_to_config(config_path: str | Path) -> MigrationResult:
