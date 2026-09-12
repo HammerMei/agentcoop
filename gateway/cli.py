@@ -370,7 +370,16 @@ def main():
         sys.exit(1)
 
     if args.command == "start":
-        from .daemon import start_daemon
+        from .daemon import is_running, start_daemon
+        # Asked here as well as inside start_daemon(): with only the daemon-side
+        # check, a bare `start` while a gateway runs from some OTHER config path
+        # reported whatever was wrong with the default config instead of "already
+        # running". The daemon keeps its own check, which is the one that closes
+        # the race between this line and the fork.
+        running, pid = is_running()
+        if running:
+            print(f"Gateway already running (pid={pid})")
+            sys.exit(1)
         _validate_or_exit(args.config)
         start_daemon(args.config)
 
@@ -776,10 +785,35 @@ def _validate_or_exit(config_path: str) -> None:
     BEFORE forking (and, for `restart`, before stopping the running daemon), so
     the errors land on the terminal rather than in the log the daemon redirects
     into.
+
+    **Skipped while a `.env` migration is pending.** `validate_config()` reads
+    the raw document, where an unmigrated `${RC_URL}` is still a literal string
+    and fails the URL check — so this preflight would reject every config the
+    daemon is about to migrate, and `migrate_env_to_config()` (which runs inside
+    the daemon, after the fork) could never run. The cost of skipping is exactly
+    one boot validated the way it was before this change — `from_file()` alone,
+    no cross-checks — because the migration moves `.env` away and every later
+    start validates in full.
     """
+    from .config_migrate import has_pending_migration
     from .config_validate import validate_config
 
-    result = validate_config(config_path)
+    if has_pending_migration(config_path):
+        return
+
+    try:
+        result = validate_config(config_path)
+    except Exception as exc:
+        # Malformed YAML reaches here as a `yaml.YAMLError` from `collect_config()`;
+        # a missing file as `FileNotFoundError`. Before this preflight existed the
+        # daemon caught both and reported a controlled failure, so letting them
+        # escape would regress a traceback onto the most ordinary config mistake
+        # there is. Converting them here rather than inside `validate_config()`
+        # keeps the change to the path this increment owns — `config validate`
+        # and `config show` raise on the same input today, and that is theirs.
+        print(f"[ERROR] {config_path}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     if result.ok and result.config is not None:
         return
 
