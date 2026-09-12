@@ -15,7 +15,9 @@ from pathlib import Path
 
 import yaml
 
-from gateway.config_migrate import migrate_env_to_config
+from unittest.mock import patch
+
+from gateway.config_migrate import has_pending_migration, migrate_env_to_config
 
 
 class TestMigrateEnvToConfig(unittest.TestCase):
@@ -254,3 +256,61 @@ class TestMigrateEnvToConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHasPendingMigration(unittest.TestCase):
+    """The predicate both the CLI preflight and the migration itself answer with.
+
+    Its docstring promises two things — never raises, and a missing config is
+    "nothing pending". Both are asserted here rather than left to the caller,
+    because the CLI calls it BEFORE its own exception guard: a raise here
+    reaches the operator as a traceback, and a wrong `True` sends `restart` to
+    recommend `coop config migrate-env` on a file that does not exist.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, ignore_errors=True)
+
+    def test_a_config_beside_an_env_file_is_pending(self):
+        (self.tmp / ".env").write_text("X=1\n")
+        cfg = self.tmp / "config.yaml"
+        cfg.write_text("{}\n")
+        self.assertTrue(has_pending_migration(cfg))
+
+    def test_a_config_with_no_env_beside_it_is_not_pending(self):
+        cfg = self.tmp / "config.yaml"
+        cfg.write_text("{}\n")
+        self.assertFalse(has_pending_migration(cfg))
+
+    def test_a_missing_config_is_not_pending_even_with_an_env_alongside(self):
+        """A directory's stray `.env` is not a migration: there is nothing to
+        migrate into, and `coop config migrate-env` would fail on the missing
+        file it was recommended for."""
+        (self.tmp / ".env").write_text("X=1\n")
+        self.assertFalse(has_pending_migration(self.tmp / "absent.yaml"))
+
+    def test_it_resolves_symlinks_before_looking_for_the_env_file(self):
+        """The migration resolves first, so the predicate must too — otherwise a
+        symlinked config.yaml puts the CLI's answer and the daemon's in
+        different directories."""
+        real_dir = self.tmp / "real"
+        real_dir.mkdir()
+        (real_dir / "config.yaml").write_text("{}\n")
+        (real_dir / ".env").write_text("X=1\n")
+        link_dir = self.tmp / "link"
+        link_dir.mkdir()
+        link = link_dir / "config.yaml"
+        link.symlink_to(real_dir / "config.yaml")
+        self.assertTrue(has_pending_migration(link),
+                        "the `.env` beside the RESOLVED path is the one that counts")
+
+    def test_a_resolve_failure_is_not_pending_rather_than_an_exception(self):
+        """`Path.resolve()` raises `RuntimeError` on a symlink loop under Python
+        3.12 and `OSError` for other path failures. Injected rather than built
+        from real symlinks because 3.13 stopped raising for loops entirely, and
+        the contract must hold on both."""
+        for exc in (RuntimeError("Symlink loop from '/x'"), OSError("boom")):
+            with self.subTest(exc=type(exc).__name__):
+                with patch.object(Path, "resolve", side_effect=exc):
+                    self.assertFalse(has_pending_migration(self.tmp / "config.yaml"))

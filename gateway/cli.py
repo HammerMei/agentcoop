@@ -370,7 +370,17 @@ def main():
         sys.exit(1)
 
     if args.command == "start":
-        from .daemon import start_daemon
+        from .daemon import is_running, start_daemon
+        # Asked here as well as inside start_daemon(): with only the daemon-side
+        # check, a bare `start` while a gateway runs from some OTHER config path
+        # reported whatever was wrong with the default config instead of "already
+        # running". The daemon keeps its own check, which is the one that closes
+        # the race between this line and the fork.
+        running, pid = is_running()
+        if running:
+            print(f"Gateway already running (pid={pid})")
+            sys.exit(1)
+        _validate_or_exit(args.config)
         start_daemon(args.config)
 
     elif args.command == "stop":
@@ -378,7 +388,16 @@ def main():
         stop_daemon()
 
     elif args.command == "restart":
-        from .daemon import start_daemon, stop_daemon
+        from .daemon import is_running, start_daemon, stop_daemon
+        # Before stop_daemon(), not after: validating inside the start half
+        # would stop a healthy running gateway and then refuse to restart it,
+        # leaving the operator worse off than before the command.
+        # Asked, not assumed: with nothing running, stop_daemon() no-ops and
+        # start_daemon() can complete a pending migration exactly as `start`
+        # would, so refusing there would demand a separate command for no gain.
+        # The flag means what its name says only if it is measured.
+        running, _pid = is_running()
+        _validate_or_exit(args.config, stops_a_running_gateway=running)
         stop_daemon()
         start_daemon(args.config)
 
@@ -755,6 +774,81 @@ def _run_config(args) -> None:
     else:
         print(f"Unknown config subcommand: {args.config_cmd}", file=sys.stderr)
         sys.exit(1)
+
+
+def _validate_or_exit(config_path: str, *, stops_a_running_gateway: bool = False) -> None:
+    """Refuse to start a gateway on a config `config validate` rejects.
+
+    `start` used to hand the path straight to the daemon, which loads it with
+    `GatewayConfig.from_file()` — parsing and dataclass construction, none of
+    the cross-checks (state orphans, room/session uniqueness, rule shadowing)
+    that `validate_config()` runs. A config the operator could see rejected by
+    `coop config validate` still started a gateway.
+
+    The condition mirrors the reload path's (`GatewayService._handle_config_reload`)
+    exactly: errors refuse, warnings and lint findings do not. Callers run this
+    BEFORE forking (and, for `restart`, before stopping the running daemon), so
+    the errors land on the terminal rather than in the log the daemon redirects
+    into.
+
+    **A pending `.env` migration is deferred for `start`, refused for `restart`.**
+    `validate_config()` reads the raw document, where an unmigrated `${RC_URL}`
+    is still a literal string that fails the URL check — so validating here would
+    reject every config the daemon is about to migrate, and
+    `migrate_env_to_config()` (which runs inside the daemon, after the fork)
+    could never run.
+
+    For `start` the answer is to defer: nothing is running to damage, so the
+    worst case is one boot validated the way it was before this change —
+    `from_file()` alone — and the daemon's own fail-closed migration handles the
+    rest. The migration then moves `.env` away, so every later start validates
+    in full.
+
+    For `restart` deferring is not safe, because `stop_daemon()` runs next. A
+    config that cannot load would take a healthy gateway down and leave it down,
+    which is the outage the validate-before-stop order exists to prevent. So
+    `restart` refuses instead, and names the way through.
+    """
+    from .config_migrate import has_pending_migration
+    from .config_validate import validate_config
+
+    if has_pending_migration(config_path):
+        if not stops_a_running_gateway:
+            return
+        print(
+            f"[ERROR] {config_path}: a .env file still sits beside it, so its "
+            f"secrets have not been folded in yet — refusing to restart, because "
+            f"stopping the gateway before that migration is what would leave it "
+            f"down.\n"
+            f"  [ERROR] Complete the migration first: 'coop config migrate-env', "
+            f"then 'coop restart'. (A 'coop stop' followed by 'coop start' does "
+            f"it too — the daemon migrates on its own at startup.)\n"
+            f"  [ERROR] If that .env is a leftover you no longer need, delete it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        result = validate_config(config_path)
+    except Exception as exc:
+        # Malformed YAML reaches here as a `yaml.YAMLError` from `collect_config()`;
+        # a missing file as `FileNotFoundError`. Before this preflight existed the
+        # daemon caught both and reported a controlled failure, so letting them
+        # escape would regress a traceback onto the most ordinary config mistake
+        # there is. Converting them here rather than inside `validate_config()`
+        # keeps the change to the path this increment owns — `config validate`
+        # and `config show` raise on the same input today, and that is theirs.
+        print(f"[ERROR] {config_path}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.ok and result.config is not None:
+        return
+
+    print(f"[ERROR] {config_path}: {len(result.errors)} error(s) — not starting",
+          file=sys.stderr)
+    for err in result.errors:
+        print(f"  [ERROR] {err}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _run_config_validate(args) -> None:
