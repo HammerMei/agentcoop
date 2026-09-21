@@ -52,7 +52,10 @@ Three terms are added to `CONTEXT.md` and used throughout:
 - **profile** — one server's administrative credentials in
   `admin-profiles.yaml`, used by `coop-provision` to create accounts and
   memberships. Named after the server host (`mm-labpig`, `rc-labpig`) unless
-  the operator renames it.
+  the operator renames it; `coop-provision init` accepts the same single
+  path component as an agent name (§3.5), and a hand-written profile whose
+  name falls outside it is usable but not for naming — the keeper asks for
+  the connector name instead of deriving one.
 
 An operator saying "create an agent named Bob on Mattermost" is asking for an
 agent and one bot. The keeper's instructions state this translation.
@@ -83,7 +86,7 @@ Runtime layout:
       AGENTS.md                     # the keeper's instructions, in full
       CLAUDE.md                     # one line: @AGENTS.md
       .claude/skills/<name>/SKILL.md
-      .claude/settings.json         # Claude Code permission rules (§3.8)
+      .claude/settings.json         # Claude Code permission rules (§3.9)
     user/<agent>/                   # one per operator-created agent
       CLAUDE.md                     # the persona
 ```
@@ -118,7 +121,7 @@ backends there too.
 At the start of every session the keeper establishes the machine's state
 with four commands: `coop-provision profiles --json` (the servers it can
 administer, credentials masked), `coop config show --raw --json` (the file
-as written, credentials masked — §3.9), `coop status`, and `coop config
+as written, credentials masked — §3.10), `coop status`, and `coop config
 backends --json`.
 There is no aggregate "doctor" command; one is added only if these four
 prove insufficient in use.
@@ -137,7 +140,7 @@ Bootstrap also creates, if absent, the `tool_presets` the agent template
 refers to and one `default` entry in each of `connector_templates`,
 `agent_templates` and `watcher_templates`, as one `coop config patch --file`.
 A `config.yaml` holding only these — no connector, agent or rule — is a valid
-*empty deployment* (§3.9), so the write validates. These hold the settings the
+*empty deployment* (§3.10), so the write validates. These hold the settings the
 operator wants applied to every bot; the keeper never overwrites them
 afterwards, and an operator asking for "all bots" to change is asking for a
 change to a template. The templates carry only fields that are the same on
@@ -145,7 +148,7 @@ every server and every backend:
 
 | Template | Carries | Never carries |
 |---|---|---|
-| `connector_templates.default` | attachments, `reply_in_thread`, `filter_sender: false`, `agent_chain` (§3.6) | `type`, `server`, `allowed_users` |
+| `connector_templates.default` | attachments, `reply_in_thread`, `filter_sender: false`, `agent_chain` (§3.7) | `type`, `server`, `allowed_users` |
 | `agent_templates.default` | `permissions`, `timeout`, tool allow-lists (by preset name) | `type`, `command`, `working_directory` |
 | `watcher_templates.default` | session TTLs | `rooms` — a `direct: true` in a template reaches only the first rule that inherits it |
 
@@ -153,9 +156,10 @@ A hand-written `config.yaml` that already has templates under other names is
 left alone; keeper-created entries still inherit `default`, which the keeper
 adds.
 
-The operator's username is not stored anywhere of its own. It is read from
-`allowed_users.owners` of an existing connector on the same server, and asked
-for only when a server has no connector yet.
+The operator's username is not stored anywhere of its own. It is reused from
+the connectors of the same server (§3.4) only when they agree on exactly one
+owner; when the server has no connector yet, or its connectors list no owner
+or several, the keeper asks.
 
 ### 3.3 Credentials
 
@@ -166,24 +170,50 @@ password or token. Administrative credentials are typed by the operator into
 the umask and produce `0644`) with `openssl rand -hex 24 > <file>`, and passed
 to both CLIs by path —
 `coop-provision … create-user --password-file` and `coop config add
-connector --password-file` — after which the file is deleted. The value never
-appears in the conversation, and therefore never in the CLI's session
+connector --password-file` — and deleted once the plan has completed. It is
+kept, still `0600`, when the plan fails between those two steps: the account
+then exists with that password, and a retry that generated a fresh one would
+be told by `create-user` that the user already exists and save a connector
+that cannot log in (rotation is out of scope, §5). The failure report names
+the file, and a resumed plan reuses it. There is no rollback of the created
+account — the report says what exists, and the operator decides. The value
+never appears in the conversation, and therefore never in the CLI's session
 transcript or the shell history.
 
 This is an instruction-level guarantee, backed by two mechanical measures:
 the shipped `.claude/settings.json` denies the `Read` and `Edit` tools on
 `config.yaml`, `admin-profiles.yaml` and `.config-backups/**`, and the
 keeper reads configuration only through `coop config show --json` and
-`--raw --json`, whose output is secret-masked (§3.9). The deny rules do not govern the shell: a `cat` of
+`--raw --json`, whose output is secret-masked (§3.10). The deny rules do not govern the shell: a `cat` of
 either file is an unlisted command, which on Claude Code prompts the operator
 and on OpenCode — whose defaults allow everything — runs. That residual risk
 is documented rather than engineered away in this version.
 
-### 3.4 Creating a bot
+### 3.4 Scoping a step to a server or to an agent
+
+Several steps below act on "the other bots on this server" or "every bot of
+this agent". Neither is read from names: a hand-written `config.yaml` may
+name its connectors and rules however it likes. Both are derived from the
+resolved configuration (`coop config show --json`):
+
+- **The connectors of a server** are those whose `server.url` (and, for
+  Mattermost, `server.team`) match the profile's. Room discovery, owner
+  inference and the agent-chain list are scoped this way.
+- **The connectors of an agent** are those named by a rule whose `agent` is
+  that agent. Persona resets and last-bot detection are scoped this way.
+
+The `<agent>@<profile>` naming convention is for entries the keeper creates;
+nothing relies on it when reading.
+
+### 3.5 Creating a bot
 
 Inputs: the agent name; the platform (a profile — the keeper offers to add a
-server when none matches); the backend, chosen from `coop config backends
---json` every time, since one deployment may mix backends; and the persona.
+server when none matches); and, only when the agent does not exist yet, the
+backend — chosen from `coop config backends --json` every time, since one
+deployment may mix backends — and the persona. Adding an existing agent to a
+further server reuses its `agents:` entry, working directory and persona
+unchanged, and creates only the connector and the rule; the keeper says so
+in the plan rather than asking for a persona it will not use.
 
 The persona is written to `~/.agentcoop/agents/user/<agent>/CLAUDE.md`. Its
 content is determined by what the operator said: text supplied verbatim is
@@ -209,8 +239,10 @@ Defaults, each overridable by the operator's wording:
 
 Room membership is separate from the rule: a rule with `include: ["*"]`
 serves any room the account is in, and joining is done with `coop-provision
-add-to-channel`. The keeper adds the new account to every room another rule
-in `config.yaml` names literally; a glob in an existing rule cannot be
+add-to-channel`. The keeper adds the new account to every room a rule of another connector
+**of the same server** (§3.4) names literally; rules of other servers say
+nothing about this one, even when a channel name happens to repeat. A glob in
+an existing rule cannot be
 expanded (there is no `list-channels`, and glob expansion is deliberately not
 added to `coop-provision`), so the keeper asks which rooms it stands for.
 When that discovery yields nothing — the first bot on a server has no
@@ -223,7 +255,7 @@ Ordering: the agent's directory and persona file first, because
 (`gateway/config.py`, `_parse_one_agent`); then connector, agent and rule,
 each through `coop config add`, which validates the whole file after every
 write. The ordering is sufficient from the very first bot because an empty
-deployment is valid (§3.9): a file with one connector and nothing else passes,
+deployment is valid (§3.10): a file with one connector and nothing else passes,
 so no step needs to skip validation or bundle several entries.
 
 An agent name becomes a directory name under `agents/user/`, so `coop
@@ -237,11 +269,11 @@ generated by convention — `<agent>@<profile>`, so `bob@mm-labpig` — and the
 operator is not expected to know them. `@` is permitted in connector names;
 `:` and glob characters are not, and the convention avoids both.
 
-### 3.5 Changing and removing a bot
+### 3.6 Changing and removing a bot
 
 A room change is a `coop config patch` on the rule, plus
 `coop-provision add-to-channel` for every literal room the change adds that
-the account is not yet in, followed by the apply step (§3.7). Membership in a
+the account is not yet in, followed by the apply step (§3.8). Membership in a
 room the change drops is left as it is: the rule no longer serves it, and
 leaving a room is a visible act in chat that the operator can do deliberately. A persona change rewrites the agent's `CLAUDE.md` and changes
 nothing in `config.yaml`, so `reload` has nothing to apply. On Claude Code
@@ -250,28 +282,34 @@ the gateway launches a fresh `claude` process for every turn with
 rewritten file is read on the bot's next turn without further action. Whether
 an OpenCode session re-reads its instruction file mid-session is not
 established; the plan for a persona change therefore offers
-`coop reset '<agent>@*:*'` — every watcher of every connector of that agent,
-since all of them share the one persona file; a fresh session does read it —
-as a confirmed runtime step, and states that on Claude Code it is optional.
+`coop reset '<connector>:*'` for each connector of the agent (§3.4) — all of
+them share the one persona file, and a fresh session does read it — as a
+confirmed runtime step, and states that on Claude Code it is optional.
 For an agent whose working directory is outside `agents/user/`, the keeper
 reports that it does not manage that agent's persona file and leaves the
 operator to edit it.
 
 Removing a bot is confirmed once and then done in full: the account's
-username is removed from the agent-chain list (§3.6) and the rule and
-connector are removed — the agent too, when this was its last bot — in one
-edit; the daemon is reloaded once, so the surviving connectors pick up the
+username is removed from the agent-chain list (§3.7) — unless another
+surviving bot still uses that username, which the default of naming accounts
+after the agent makes the ordinary case for an agent on two servers — and the
+rule and connector are removed — the agent too, when no rule names it any
+more (§3.4) — in one edit; the daemon is reloaded once, so the surviving connectors pick up the
 shortened chain list in the same apply, and reconciliation expires the
 records no rule covers; the server account is deleted with `coop-provision
 delete-user`. Removing the deployment's last bot leaves a valid empty
 deployment — presets and templates only — that the daemon will not run
-(§3.9), so in that case the plan stops the daemon instead of reloading it and
+(§3.10), so in that case the plan stops the daemon instead of reloading it and
 says the deployment is now empty. Only when the agent itself was removed — its last bot — is its
-directory under `agents/user/` deleted; an agent that still has a bot on
-another server keeps its working directory and persona, and a directory
-anywhere outside `agents/user/` is never touched.
+directory under `agents/user/` deleted, and only after checking that no
+surviving agent's resolved `working_directory` is that directory, inside it,
+or a parent of it (a hand-written configuration may share directories; the
+keeper does not assume otherwise). When the check fails the directory is
+kept and the report says which agent still uses it. An agent that still has
+a bot on another server keeps its working directory and persona, and a
+directory anywhere outside `agents/user/` is never touched.
 
-### 3.6 Agent-to-agent chains
+### 3.7 Agent-to-agent chains
 
 With the defaults above, the second bot on a server would see the first
 bot's messages as ordinary user messages and answer them, and vice versa,
@@ -290,26 +328,39 @@ receives the shared list is decided from its resolved `agent_usernames` in
 `coop config show --json`, not from its `inherits:` value — an entry-level
 list replaces the template's wholesale, so a hand-written connector that
 inherits `default` and also sets its own list is as unaffected as one that
-inherits nothing. Every connector whose resolved list lacks the new username
-is patched individually, and the plan says so.
+inherits nothing. Every connector of the server whose resolved list lacks the
+new username is patched individually, and the plan says so. Removal is the
+mirror image: every connector whose resolved list still carries a username no
+surviving bot uses is patched to drop it — the shared template and any
+entry-level override alike — so a deleted account cannot keep bypassing the
+sender allow-list through a list the keeper once added it to.
 
-### 3.7 The plan is the unit of confirmation
+### 3.8 The plan is the unit of confirmation
 
 The keeper expands each request into one plan — accounts to create or
 delete, rooms to join, the persona text, the configuration entries, and the
-runtime effect (`reload`, `start`) — prints it, and asks once. On yes it
-executes the whole plan without further questions; on a failure it stops and
-reports what was completed. Steps that only read state, write a persona
-file, or change `config.yaml` without applying it are not confirmed on their
-own, because they do not change what is running. The apply step is
-`coop config validate` → `coop config reload --dry-run` → the plan →
-`coop config reload` (or `coop start` when the daemon is not running).
+runtime effect (`reload`, `start`) — prints it, and asks once. **Nothing is
+written before the yes**: the plan is built from the resolved configuration
+and from `coop config add|remove|patch --dry-run --json`, which validate the
+merged result and report it without touching the file, so a declined plan
+leaves no edit on disk waiting for a later `start` to apply it. On yes the
+keeper executes the whole plan without further questions; on a failure it
+stops and reports what was completed. Steps that only read state need no
+confirmation. A persona write does: on Claude Code the bot reads the file on
+its next turn (§3.6), so a persona-only request is its own plan.
+
+The apply step, after the yes, is the write → `coop config reload --dry-run`
+→ `coop config reload` (or `coop start` when the daemon is not running). The
+dry run here is a guard, not the preview: it is the daemon's own account of
+what the confirmed edit will do, and if it names anything the plan did not —
+a connector restart the operator was not told about — the keeper stops and
+shows it before reloading.
 
 The keeper assumes it is the only session editing `config.yaml` at a time.
 Two keeper sessions, or a keeper and the config TUI, writing concurrently
 can corrupt the file; the user guide says so.
 
-### 3.8 Permissions for the keeper itself
+### 3.9 Permissions for the keeper itself
 
 OpenCode allows every operation by default; nothing is shipped for it.
 Claude Code's `auto` permission mode cannot be selected from a project-local
@@ -323,7 +374,7 @@ list is derived from what the four skills actually execute, so a skill that
 gains a new command adds it here in the same change. The permission file is the one place where a provider-specific file
 is shipped; `AGENTS.md` refers to no provider-specific feature.
 
-### 3.9 Command surface
+### 3.10 Command surface
 
 Added to `coop config`, each with `--json`:
 
@@ -355,7 +406,10 @@ never be written back, `config add` and `config patch` refuse any value equal
 to the sentinel, whether it arrives through `--set` or inside `--file`; the
 keeper edits by path and never round-trips a whole document.
 
-`add` writes one entry and validates the whole file; an invalid result is
+`add`, `remove` and `patch` take `--dry-run`: the merged result is validated
+and returned (with `--json`, the resulting entries and any findings) and the
+file is not touched — the keeper builds its plan from this. Without it, `add`
+writes one entry and validates the whole file; an invalid result is
 not written and the findings are returned in the same format as
 `config validate --json`. An existing name is refused rather than replaced.
 `add agent` also checks that `command` resolves on PATH and refuses when it
@@ -388,7 +442,7 @@ of `admin-profiles.yaml` moves from the current directory to
 `~/.agentcoop/admin-profiles.yaml`; `--config` and `COOP_ADMIN_CONFIG` still
 override it.
 
-### 3.10 Skills
+### 3.11 Skills
 
 Four skills, for the flows that have order and consequences: `bootstrap`,
 `add-bot`, `remove-bot`, `apply-config`. Single-step operations — a persona
@@ -399,7 +453,7 @@ agent, not a separate skill. `AGENTS.md` itself is kept short in this version
 session-start checks and the plan rule — and grows from what testing shows it
 needs.
 
-### 3.11 Removed
+### 3.12 Removed
 
 `gateway/onboard.py`, the `coop onboard` command, `make onboard`,
 `tests/unit/test_onboard.py` and `detect_agent_backends()` are deleted; the
@@ -440,14 +494,14 @@ behaviour.
 This document and the `CONTEXT.md` glossary entries land first, on their
 own. Then two pull requests, in order:
 
-1. **Command surface** — §3.9 in full: `coop config add/remove/patch/backends`
+1. **Command surface** — §3.10 in full: `coop config add/remove/patch/backends`
    and `show --raw`, the empty-deployment validation change, the `***`
    write-back refusal, `coop-provision init`/`check`/`profiles` and
    `--password-file`, the `admin-profiles.yaml` default path. Independently
    testable and useful without the keeper.
 2. **The keeper** — `agents/coop-keeper/` with `AGENTS.md`, `CLAUDE.md`,
    the four skills and `.claude/settings.json`; `install.sh` and
-   `coop upgrade` changes; the removals in §3.11; the documentation
+   `coop upgrade` changes; the removals in §3.12; the documentation
    changes.
 
 ## 7. Testing
@@ -469,6 +523,10 @@ pull request:
    that is not installed, a credential pasted into the conversation, a patch
    carrying the `***` sentinel, and — after the second bot on a server —
    `agent_usernames` containing both.
-9. Remove the last remaining bot: the daemon is stopped, `config.yaml` keeps
+9. Decline a plan after it is shown: `config.yaml`, `admin-profiles.yaml`
+   and the server are unchanged. Fail a plan between `create-user` and
+   `config add connector`: the report names the kept password file, and a
+   resumed plan completes with the account able to log in.
+10. Remove the last remaining bot: the daemon is stopped, `config.yaml` keeps
    its presets and templates and still validates, and `coop start` refuses
    with the empty-deployment message.
