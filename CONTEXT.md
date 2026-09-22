@@ -22,6 +22,24 @@ _Avoid_: the server, the service (in prose), "the coop" (for the process)
 The header block injected at the top of every agent session that tells the agent it is running under Coop and names its watcher and room. The name is deliberate: it lets an agent tell this environment apart from any other session or context it may hold.
 _Avoid_: ACG Session Identity, Session Identity
 
+### Agents and bots
+
+**agent**:
+One `agents:` entry in `config.yaml`: a backend process (`claude` or `opencode`), a working directory and a persona. One agent can be present on several chat servers. When an operator says "agent" in conversation they usually mean an agent and its first bot.
+_Avoid_: persona (for the entry — the persona is the agent's instruction file), watcher, bot (for the `agents:` entry)
+
+**bot**:
+An agent's presence on one chat server: the connector (the server account), the agent, and the watcher rule binding them. An agent has at most one bot per server; the same agent on Mattermost and Rocket.Chat is two bots.
+_Avoid_: account (that is only the connector's half), agent (for the whole triple)
+
+**profile**:
+One chat server's administrative credentials in `admin-profiles.yaml`, read by `coop-provision`. Named after the server host (`mm-labpig`) unless renamed. Distinct from a connector, which holds a bot's own credentials.
+_Avoid_: admin config, server config
+
+**coop-keeper**:
+The built-in admin agent, installed at `~/.agentcoop/agents/builtin/coop-keeper/` once it ships, which an operator runs with their own `claude` or `opencode` CLI to create, change and remove bots (`docs/design/coop-keeper-design.md`). Replaces the removed `coop onboard` wizard.
+_Avoid_: onboarding agent, the wizard, keeper (in documentation — fine in speech)
+
 ### Permissions
 
 **permission broker**:
