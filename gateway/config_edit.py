@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -666,7 +667,9 @@ def connector_fragment(
         if username is not None or password_file is not None:
             raise PatchError("--credentials-from copies the username and credential; "
                              "do not also pass --username or --password-file")
-        server.update(_credentials_of(document, config_path, credentials_from))
+        server.update(_credentials_of(
+            document, config_path, credentials_from,
+            connector_type=connector_type, server_url=server_url))
     else:
         if username is None or password_file is None:
             raise PatchError("--username and --password-file are required "
@@ -682,9 +685,24 @@ def connector_fragment(
     return {"connectors": [{OP_KEY: "add", **entry}]}
 
 
-def _credentials_of(document: dict, config_path: Path, source: str) -> dict:
+def _canonical_origin(url: object) -> str:
+    """Scheme and host lower-cased, trailing slash dropped — the reading of
+    "the same server" §3.4 gives (the connector parsers `rstrip("/")`)."""
+    parts = urlsplit(str(url))
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+
+
+def _credentials_of(
+    document: dict, config_path: Path, source: str, *, connector_type: str, server_url: str,
+) -> dict:
     """`server.username` plus the password or token of connector `source`,
-    read from its raw entry resolved against its own `inherits:` template."""
+    read from its raw entry resolved against its own `inherits:` template.
+
+    Only within one installation: the flag exists for a second Mattermost team
+    on a server where the agent already has an account (§3.10), and §3.4 makes
+    the installation "the URL alone". A different origin or platform is
+    refused — the copied credential is a LIVE one, and the next start would
+    send it to whatever host `--server-url` named."""
     from .configtool.model import EditableConfig
 
     raw = next((c for c in _raw_connectors(document) if c.get("name") == source), None)
@@ -697,6 +715,17 @@ def _credentials_of(document: dict, config_path: Path, source: str) -> dict:
     server = merged.get("server")
     if not isinstance(server, dict):
         raise PatchError(f"--credentials-from: connector '{source}' has no 'server' block to copy")
+    if merged.get("type") != connector_type:
+        raise PatchError(
+            f"--credentials-from: connector '{source}' is type {merged.get('type')!r}, not "
+            f"{connector_type!r} — a credential is copied within one platform only"
+        )
+    if _canonical_origin(server.get("url", "")) != _canonical_origin(server_url):
+        raise PatchError(
+            f"--credentials-from: connector '{source}' is on {server.get('url')!r}, not "
+            f"{server_url!r} — a credential is copied within one installation only "
+            "(a second team on the same server); another server gets its own account"
+        )
     out: dict = {}
     if server.get("username"):
         out["username"] = server["username"]

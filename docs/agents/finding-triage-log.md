@@ -186,3 +186,49 @@ Notes:
 
 **Status: open.** Settles when a round on the swept code finds no further member of the
 class, or finds one (which would say the sweep was incomplete).
+
+---
+
+## 2026-09-23 — PR #181 round 5
+
+**Chain detector:** 32 findings over 5 rounds, no chain (unchanged from round 4).
+**Control finding:** none — still no settled entry. Agreement in this round is *not*
+evidence of independence; recorded as **uncorroborated**.
+
+Both findings decided at Step 1 by both raters; no scoring arithmetic.
+
+### F1 — `--credentials-from` copies a live credential to whatever `--server-url` names
+
+Codex P1, `gateway/config_edit.py` `_credentials_of`. Reproduced by rater 2: a
+Mattermost token copied under a typo'd host, and a Rocket.Chat password copied into a
+Mattermost connector, both `ok: true`.
+
+| | rater 1 (author) | rater 2 (blind) |
+|---|---|---|
+| `cheap` | yes — same canonical origin (§3.4: scheme/host lower-cased, trailing slash dropped) and same type, ~8–10 lines, no new concept; deriving the URL from the source is the expensive form (conditional `required`) | yes — same fix, ~8 lines; flagged that two existing tests copied across servers (`localhost:3000` → `rc-2:3000`) and read the design text over the tests |
+| `cannot-occur` | no — expressible (a typo) | no — reproduced |
+| `silent` | no — login fails loudly on the wrong host, but the token has been sent | partial: disclosure silent, symptom loud |
+| severity vs Codex P1 | P2 — needs a hand-typed flag the keeper derives from one profile | P2 — ADR 0001's security definition is cross-agent reach; a mistyped private hostname is far more often NXDOMAIN than an attacker; the one real point is that the credential is *live* |
+| layer | add-time gate owns "same installation" | same — the file knows both URLs, as it does for `remove`'s referential check |
+| verdict | **FIX** | **FIX** |
+
+Verdicts agree. The two cross-server tests were the author's own convenience, not a
+requirement: on Rocket.Chat the validator already refuses two connectors on one
+account, so the flag can only ever produce a valid file on Mattermost with a second
+team — exactly §3.10's stated purpose. Tests retargeted to that.
+
+### F2 — `--set 'server.password=!!int hunter2'` escapes `parse_set`
+
+Codex P2, citing commit `85cfa53`, no current line. Both raters: **`cannot-occur` at
+HEAD** — fixed by round 4's `load_yaml` sweep (`d22f24d`), traced
+`parse_set → load_yaml → _YamlLoadFailure → PatchError → ok:false`, covered by
+`TestTaggedScalarsNeverEcho`. **DROP as stale**; the actionable item is CLAUDE.md's
+"check which commit was reviewed".
+
+Notes:
+- Adoption: 1 of 2 acted on.
+- Both raters and the detector: F1 is first contact on a flag from the feature commit,
+  not a finding on a previous round's fix; the stop signal is not live. Continue.
+
+**Status: open.** Settles with round 4's entry.
+

@@ -2241,13 +2241,50 @@ class TestCLIConfigAdd(_EditCLIBase):
         self.assertEqual(code, 1)
         self.assertIn("already exists", doc["error"])
 
+    def _mattermost_config(self, server_block: str) -> None:
+        # `--credentials-from` can only ever produce a valid file on
+        # Mattermost — a second TEAM on one installation. Two Rocket.Chat
+        # connectors on one account are an identity conflict validation refuses.
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: mm
+                type: mattermost
+                {server_block}
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
+        """))
+
     def test_credentials_from_copies_the_username_and_password_of_an_existing_connector(self):
+        self._mattermost_config(
+            "server: {url: http://mm:8065, team: lab, username: bot, password: hunter2}")
+        # Same installation, compared canonically: the source says
+        # http://mm:8065, this spells it with caps and a trailing slash.
         doc, _, code = self._edit(
-            "add", "connector", "rc-2", "--type", "rocketchat", "--server-url", "http://rc-2:3000",
-            "--credentials-from", "rc")
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://MM:8065/",
+            "--team", "ops", "--credentials-from", "mm")
         self.assertEqual(code, 0, doc)
         server = self._doc()["connectors"][1]["server"]
-        self.assertEqual(server, {"url": "http://rc-2:3000", "username": "bot", "password": "hunter2"})
+        self.assertEqual(server, {"url": "http://MM:8065/", "team": "ops",
+                                  "username": "bot", "password": "hunter2"})
+        self.assertNotIn("hunter2", json.dumps(doc))
+
+    def test_credentials_from_refuses_another_server_or_another_platform(self):
+        # The copied credential is live; the next start would send it to
+        # whatever --server-url named. Within one installation only (§3.4).
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit(
+            "add", "connector", "rc-2", "--type", "rocketchat", "--server-url", "http://typo.example:3000",
+            "--credentials-from", "rc")
+        self.assertEqual(code, 1)
+        self.assertIn("one installation only", doc["error"])
+        doc, _, code = self._edit(
+            "add", "connector", "mm-x", "--type", "mattermost", "--server-url", "http://localhost:3000",
+            "--team", "lab", "--credentials-from", "rc")
+        self.assertEqual(code, 1)
+        self.assertIn("one platform only", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
         self.assertNotIn("hunter2", json.dumps(doc))
         doc, _, code = self._edit(
             "add", "connector", "rc-3", "--type", "rocketchat", "--server-url", "http://x",
@@ -2285,22 +2322,22 @@ class TestCLIConfigAdd(_EditCLIBase):
         # The credentials live in a connector_templates entry the source inherits.
         Path(self.cfg_path).write_text(textwrap.dedent(f"""\
             connector_templates:
-              shared: {{server: {{url: http://localhost:3000, username: bot, password: hunter2}}}}
+              shared: {{server: {{url: http://mm:8065, team: lab, username: bot, password: hunter2}}}}
             connectors:
-              - name: rc
-                type: rocketchat
+              - name: mm
+                type: mattermost
                 inherits: shared
             agents:
               default: {{type: claude, working_directory: {self.agent_dir}}}
             watcher_rules:
-              - {{name: w1, connector: rc, agent: default, rooms: {{include: [general]}}}}
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
         """))
         doc, _, code = self._edit(
-            "add", "connector", "rc-2", "--type", "rocketchat", "--server-url", "http://rc-2:3000",
-            "--credentials-from", "rc")
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "ops", "--credentials-from", "mm")
         self.assertEqual(code, 0, doc)
         self.assertEqual(self._doc()["connectors"][1]["server"],
-                         {"url": "http://rc-2:3000", "username": "bot", "password": "hunter2"})
+                         {"url": "http://mm:8065", "team": "ops", "username": "bot", "password": "hunter2"})
         self.assertNotIn("hunter2", json.dumps(doc))
 
     def test_add_agent_checks_the_name_and_the_command_on_path(self):
