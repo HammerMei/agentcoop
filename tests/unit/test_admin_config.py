@@ -524,6 +524,15 @@ class TestMaskedProfiles(unittest.TestCase):
         self.assertEqual(listed[1]["team"], "lab")
         self.assertNotIn("pw", str(listed))
 
+    def test_a_credential_mis_indented_into_metadata_is_never_rendered(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "p.yaml"
+            path.write_text("profiles:\n  rc:\n    type: {password: hunter2}\n"
+                            "    server_url: https://rc\n    team: [hunter2]\n")
+            listed = masked_profiles(path)
+        self.assertEqual((listed[0]["type"], listed[0]["team"]), ("<dict>", "<list>"))
+        self.assertNotIn("hunter2", str(listed))
+
     def test_a_missing_file_is_an_admin_config_error_unless_missing_ok(self):
         with self.assertRaises(AdminConfigError):
             masked_profiles("/nonexistent/p.yaml")
@@ -619,6 +628,18 @@ class TestInitProfile(unittest.TestCase):
         with patch("gateway.admin.config.yaml.safe_dump", side_effect=spying_dump):
             init_profile(self.path, "rc-2", profile_type="rocketchat", server_url="https://x", team=None)
         self.assertEqual(modes, [0o600])
+
+    def test_init_through_a_symlink_writes_the_target_and_keeps_the_link(self):
+        real_dir = self.path.parent / "store"
+        real_dir.mkdir(parents=True)
+        real = real_dir / "admin-profiles.yaml"
+        real.write_text(TestLoadProfileIsLazy._FILE)
+        self.path.symlink_to(real)
+        init_profile(self.path, "rc-2", profile_type="rocketchat", server_url="https://x", team=None)
+        self.assertTrue(self.path.is_symlink())
+        import yaml
+        self.assertEqual(list(yaml.safe_load(real.read_text())["profiles"]), ["rc", "mm", "rc-2"])
+        self.assertEqual(real.stat().st_mode & 0o777, 0o600)
 
     def test_a_failed_write_leaves_the_existing_file_intact(self):
         self.path.parent.mkdir()

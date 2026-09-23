@@ -544,7 +544,7 @@ class TestFileCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, 0)
         listed = json.loads(out)["profiles"][0]
         self.assertEqual(listed["type"], "2026-01-01")
-        self.assertEqual(listed["team"], "{datetime.date(2026, 1, 1): 'x'}")
+        self.assertEqual(listed["team"], "<dict>", "a container is named by type, never rendered")
 
     async def test_a_malformed_profiles_file_does_not_echo_its_lines(self):
         with open(self.path, "w") as f:

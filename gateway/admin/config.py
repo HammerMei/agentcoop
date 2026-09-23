@@ -408,7 +408,13 @@ def masked_profiles(path: str | Path | None = None, *, missing_ok: bool = False)
         # value may be any YAML type; the view renders non-strings as text
         # (a mapping with a date key would otherwise break the JSON encoder).
         def as_text(value: object) -> object:
-            return value if value is None or isinstance(value, str) else str(value)
+            if value is None or isinstance(value, str):
+                return value
+            if isinstance(value, (dict, list)):
+                # A mis-indented credential lands here (`team: {token: …}`);
+                # a container is named by its type, never rendered.
+                return f"<{type(value).__name__}>"
+            return str(value)
 
         entry = {
             "name": name,
@@ -472,8 +478,12 @@ def init_profile(
     # Serialize beside the file and replace it only once the write succeeded:
     # `open(path, "w")` would truncate the store of every administrative
     # credential before the dump ran, and a disk-full or interruption there
-    # would leave nothing behind.
-    tmp = config_path.with_name(config_path.name + ".tmp")
+    # would leave nothing behind. On the TARGET of a symlinked profiles file,
+    # so the link stays a link and a mounted or secret-managed store is the
+    # one edited; nothing in this file is directory-relative, so resolving
+    # changes no other meaning.
+    target = config_path.resolve()
+    tmp = target.with_name(target.name + ".tmp")
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         # 0600 from the first byte, exclusively created — every existing
@@ -483,7 +493,7 @@ def init_profile(
             tmp.unlink()  # a stale .tmp from an interrupted earlier write is ours
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.safe_dump({"profiles": raw_profiles}, f, sort_keys=False, allow_unicode=True)
-        os.replace(tmp, config_path)
+        os.replace(tmp, target)
     except OSError as e:
         with contextlib.suppress(OSError):
             tmp.unlink()

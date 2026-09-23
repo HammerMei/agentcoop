@@ -320,3 +320,29 @@ Notes:
 - Both raters: one more round, then stop regardless.
 
 **Status: open.** Settles with the round-4 entry.
+
+---
+
+## 2026-09-23 — PR #181 round 9
+
+**Chain detector:** 49 findings over 9 rounds, round 9 `--`, no chain by its rule. **Its
+all-clear does not cover F1**: the finding's line (`validate_config(str(tmp_path))`) is
+unchanged, but what `tmp_path` means changed in the round-8 fix `175aa6d` one line
+above — F1 is a finding on the previous round's fix by inspection, streak 1 for
+`configtool/model.py`. The CLAUDE.md tell for a chain (each fix creates the next
+finding's precondition) is present even though the "twice consecutively" rule has not
+fired. Recorded as a detector limitation: a blame on the finding's own line misses a
+finding whose *meaning* the previous fix changed.
+**Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `save()` now validates beside the resolved target, so a relative `working_directory` through a symlink into another directory resolves against the wrong directory (Codex P1) | leaning FIX (a): validate beside the link, copy to a temp beside the target, replace (~8 lines) | **FILE**: (a) is a probe in the wrong layer (Step 3 — the loader's `config_dir` policy owns this); the naive form risks EXDEV across a bind mount; (b) revert restores a *silent* loss (edit lands on a container-local file the entrypoint re-links away) — worse; (c) refusal blocks every mode-1 save. Reachability: the CLI pre-validates through the link path, so accept-then-fail is unreachable from it and the refuse direction is loud; the shipped Docker mode-1 config uses absolute paths. `hits_per_year` 0.006–0.15 · `hours_per_hit` 1 · `discount` 0.56 → ≤ 0.08 h/yr | **FILE, decay 6 months** — rater 1 conceded on reachability (the CLI's own pre-validation) and on Step 3. Owning-layer fix for the issue: `config_dir = Path(path).resolve().parent` in the loader, a released-semantics change (§14.2) for its own increment. Thread left open pending the owner's OK to file |
+| **F2** `masked_profiles` renders a mis-indented `team: {token: …}` verbatim | `cheap` yes | `cheap` yes, 1 line | **FIX** — containers render as `<dict>`/`<list>` |
+| **F3** `init` through a symlinked profiles file replaces the link | `cheap` yes | `cheap` yes, ~3 lines; `silent` yes; safe to resolve here (nothing directory-relative in that file) | **FIX** — write to the resolved target |
+
+Notes:
+- Adoption: 2 of 3; 1 FILE.
+- Both raters: one confirming round on the two one-liners, then stop regardless.
+
+**Status: open.** F1's decay date: 2027-03-23.
