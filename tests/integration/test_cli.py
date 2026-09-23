@@ -2107,6 +2107,16 @@ class TestCLIConfigPatch(_EditCLIBase):
         self.assertEqual(code, 0, doc)
         self.assertEqual(self._doc()["watcher_rules"][0]["session_idle_days"], 3)
 
+    def test_unset_of_an_absent_parent_is_refused_and_writes_nothing(self):
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit("patch", "--unset", "watcher_templates.typo.rooms")
+        self.assertEqual(code, 1)
+        self.assertIn("a deletion does not create it", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
+        doc, _, code = self._edit("patch", "--set", "connectors=[]", "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("means nothing", doc["error"])
+
     def test_a_file_fragment_adds_removes_and_reads_a_credential_from_a_file(self):
         pw = self._secret_file("s3cret\n")
         fragment = Path(self.tmp) / "fragment.yaml"
@@ -2623,6 +2633,17 @@ class TestStartValidatesConfig(_PreflightBase):
         start.assert_not_called()
         self.assertIn("[ERROR]", err)
         self.assertIn("no watcher rules", err)
+
+    def test_start_refuses_connectors_and_agents_with_no_rule_and_says_rules_not_deployment(self):
+        # Not "empty deployment": the file has a connector and an agent, just no rule.
+        from tests.helpers import gateway_config_text
+        cfg = self._write(gateway_config_text(rules=[], working_directory=str(self.tmp)))
+        with patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["start", "--config", cfg])
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn("no watcher rules — nothing to run", err)
+        self.assertNotIn("empty deployment", err)
 
     def test_restart_refuses_an_empty_deployment_before_stopping(self):
         cfg = self._empty_deployment()

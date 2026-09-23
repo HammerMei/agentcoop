@@ -185,6 +185,26 @@ class TestPathsAndEntry(unittest.TestCase):
         with self.assertRaises(PatchError):
             fragment_from_paths([], ["name"], parse_entry("rule:w1"), doc)
 
+    def test_unset_never_creates_the_parent_it_would_delete_from(self):
+        doc = {"agents": {"bob": {"timeout": 1}}, "connectors": [{"name": "rc", "server": {"url": "u"}}]}
+        # absent parent → refused (merge-patch would have written `watcher_templates: {typo: {}}`)
+        with self.assertRaises(PatchError) as ctx:
+            fragment_from_paths([], ["watcher_templates.typo.rooms"], None, doc)
+        self.assertIn("nothing at 'watcher_templates'", str(ctx.exception))
+        with self.assertRaises(PatchError):
+            fragment_from_paths([], ["attachments.foo.bar"], parse_entry("connector:rc"), doc)
+        # absent LEAF on a present parent stays the RFC no-op
+        fragment = fragment_from_paths([], ["agents.bob.nothing"], None, doc)
+        self.assertEqual(apply_fragment(doc, fragment), doc)
+        fragment = fragment_from_paths([], ["server.nothing"], parse_entry("connector:rc"), doc)
+        self.assertEqual(apply_fragment(doc, fragment)["connectors"], doc["connectors"])
+
+    def test_an_empty_list_for_a_named_block_is_refused_not_a_silent_no_op(self):
+        for block in ("connectors", "watcher_rules"):
+            with self.assertRaises(PatchError) as ctx:
+                apply_fragment({block: [{"name": "x"}]}, {block: []})
+            self.assertIn("means nothing", str(ctx.exception))
+
     def test_without_entry_the_paths_are_top_level_and_a_later_set_wins(self):
         fragment = fragment_from_paths([("a.b", 1), ("a.b", 2), ("a.c", 3)], ["d"], None)
         self.assertEqual(fragment, {"a": {"b": 2, "c": 3}, "d": None})
@@ -503,6 +523,19 @@ class TestEditDocument(unittest.TestCase):
         outcome = self._edit(["not a mapping"], dry_run=True)
         self.assertFalse(outcome.ok)
         self.assertIn("mapping", outcome.error)
+
+    def test_the_first_write_through_a_dangling_symlink_creates_the_target_and_keeps_the_link(self):
+        # The third write site (save() and init_profile are the other two): a
+        # link whose target does not exist yet is "the file does not exist yet".
+        real = self.tmp / "store" / "config.yaml"
+        link = self.tmp / "link.yaml"
+        link.symlink_to(real)
+        fragment = {"agents": {"a": {"type": "claude", "working_directory": str(self.tmp)}}}
+        outcome = edit_document(str(link), lambda d: apply_fragment(d, fragment), dry_run=False)
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertTrue(link.is_symlink(), "the link is still a link")
+        self.assertEqual(yaml.safe_load(real.read_text()), fragment)
+        self.assertEqual(real.stat().st_mode & 0o777, 0o600)
 
     def test_the_first_write_creates_the_file_with_no_backup_and_mode_0600(self):
         # Bootstrap (§3.2, §7 test 1): the first plan's patch on a machine

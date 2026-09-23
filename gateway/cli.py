@@ -996,8 +996,8 @@ def _validate_or_exit(config_path: str, *, stops_a_running_gateway: bool = False
             # empty (coop-keeper design §3.10) — it is the state between
             # installing and the first bot — but a daemon with no watcher
             # rule would sit there answering nothing.
-            print(f"[ERROR] {config_path}: no watcher rules — an empty deployment has "
-                  f"nothing to run. Add a bot (coop config add …) and start again.",
+            print(f"[ERROR] {config_path}: no watcher rules — nothing to run. "
+                  f"Add a rule (coop config add rule …) and start again.",
                   file=sys.stderr)
             sys.exit(1)
         return

@@ -346,3 +346,31 @@ Notes:
 - Both raters: one confirming round on the two one-liners, then stop regardless.
 
 **Status: open.** F1 filed as #182 (ready-for-agent) with the owner's decision: relative paths resolve against `$COOP_HOME` (default `~/.agentcoop`) for config and runtime alike — the owning-layer fix, with a constant base rather than a resolved one. Decay 2027-03-23.
+
+---
+
+## 2026-09-23 — PR #181 final internal review (code-reviewer agent)
+
+Codex round 10 (a confirming round after the quota returned) completed on `15d2c83`
+with zero findings and, unusually, no 👍 reaction either — CLAUDE.md's clean signal
+never arrived. The owner asked for one independent internal look with the question
+"anything more critical than the previous rounds found?", to decide between shipping
+and another round. **Chain detector:** no chain. **Control finding:** none.
+
+Verdict from the reviewer: nothing that holds the PR. Five findings, all outside
+rounds 1–10; all decided at Step 1 (`cheap`), one rater — the owner chose to fix and
+wrap rather than run a second rater or another Codex round.
+
+| | outcome |
+|---|---|
+| **F1** `--unset a.b.c` with `a.b` absent CREATED `a: {b: {}}` and reported ok (merge-patch is right for a fragment, wrong for the CLI's own deletion verb); `silent` | **FIX** — an absent parent is refused; an absent leaf on a present parent stays the RFC no-op |
+| **F2** first write through a *dangling* symlink replaced the link (rounds 8/9 fixed `save()` and `init_profile`; `_create_file` was the third write site, unswept); `silent` | **FIX** — write the resolved target, as the other two do; not reachable from the shipped Docker path (it links only when the target exists) |
+| **F3** `--set connectors=[]` was a silent no-op (nothing to merge by name) | **FIX** — an empty list for a named block is refused with the pointer to `op: remove` |
+| **F4** masking is by key name; a credential in `server.url` userinfo or `new_session_args` is not a credential field and prints as written | documented in the user guide, one sentence — outside "the schema's credential fields" the contract names |
+| **F5** the zero-rule start refusal said "empty deployment" for any rule-less file | **FIX** — message says what it checks |
+
+Notes:
+- Adoption: 4 of 5 fixed, 1 documented.
+- Owner's ruling: no further Codex round; ship on green tests + CI.
+
+**Status: open.** Settles with the round-4 entry.

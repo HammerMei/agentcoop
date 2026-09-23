@@ -273,6 +273,12 @@ def apply_fragment(document: dict, fragment: Any) -> dict:
     if hit:
         raise PatchError(f"{hit} is the masked value {REDACTED!r} — a masked view is never written back")
     lists = {k: v for k, v in fragment.items() if k in NAMED_LISTS and isinstance(v, list)}
+    for block, items in lists.items():
+        if not items:
+            raise PatchError(
+                f"{block}: an empty list means nothing here — entries merge by name, so "
+                f"there is nothing to merge; remove entries with op: remove or 'config remove'"
+            )
     merged = merge_patch(document, {k: v for k, v in fragment.items() if k not in lists})
     for block, items in lists.items():
         merged[block] = merge_named_list(document.get(block), items, block)
@@ -340,15 +346,32 @@ def fragment_from_paths(
     for path in unsets:
         body = _nest_into(body, path, None)
     if entry is None:
+        if document is not None:
+            _unsets_have_parents(document, unsets)
         return body
     block, name = entry
     if "name" in body:
         # `--entry rule:w1 --set name=w2` would pass the check below for w1
         # and then match — and edit — w2. A rename is a different operation.
         raise PatchError("--entry: 'name' is the selector and cannot be set through --set/--unset")
-    if document is not None and name not in _raw_named(document, block):
-        raise PatchError(f"--entry: no {NAMED_LISTS[block]} named '{name}'")
+    if document is not None:
+        if name not in _raw_named(document, block):
+            raise PatchError(f"--entry: no {NAMED_LISTS[block]} named '{name}'")
+        target = next(e for e in document.get(block, []) if isinstance(e, dict) and e.get("name") == name)
+        _unsets_have_parents(target, unsets)
     return {block: [{"name": name, **body}]}
+
+
+def _unsets_have_parents(document: dict, unsets: list[str]) -> None:
+    """`--unset a.b.c` is a deletion; merge-patch would CREATE `a: {b: {}}` when
+    `a.b` is absent and report success. An absent leaf on a present parent
+    stays the RFC no-op; an absent parent is refused."""
+    for path in unsets:
+        cursor: Any = document
+        for key in _segments(path)[:-1]:
+            if not isinstance(cursor, dict) or key not in cursor:
+                raise PatchError(f"--unset {path}: nothing at {key!r} — a deletion does not create it")
+            cursor = cursor[key]
 
 
 def _nest_into(body: dict, path: str, value: Any) -> dict:
@@ -576,8 +599,11 @@ def _create_file(path: Path, document: dict) -> None:
     """The first write to a config.yaml that does not exist yet: the same
     temp-beside-then-replace as `EditableConfig.save`, minus the backup there
     is nothing to take, and 0600 because the file is about to hold secrets."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    # A dangling symlink is "the file does not exist yet" too: write its
+    # TARGET, as save() and init_profile do, so the link stays a link.
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
     try:
         # 0600 from the first byte, exclusively created: the document holds
         # the secrets, and a chmod after the write would leave a window. A
@@ -586,7 +612,7 @@ def _create_file(path: Path, document: dict) -> None:
             tmp.unlink()
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.dump(document, f, sort_keys=False, allow_unicode=True)
-        os.replace(tmp, path)
+        os.replace(tmp, target)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(tmp)

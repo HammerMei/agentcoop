@@ -884,6 +884,10 @@ watcher_rules:
 itself, so plain merge-patch addresses one entry there and `agents: {alice: null}`
 removes it.
 
+Masking is by key name — `password`, `token`, `secret` and keys containing
+them. A credential placed elsewhere (userinfo in a `server.url`, an API key in
+`new_session_args`) is not a credential field and is printed as written.
+
 `config show --raw` prints the file as written — templates, `inherits:`,
 `description`, key order — with credentials masked, its **file digest** (over
 the file's bytes; the `digest` plain `show` reports is over the resolved
