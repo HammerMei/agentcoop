@@ -345,4 +345,4 @@ Notes:
 - Adoption: 2 of 3; 1 FILE.
 - Both raters: one confirming round on the two one-liners, then stop regardless.
 
-**Status: open.** F1's decay date: 2027-03-23.
+**Status: open.** F1 filed as #182 (ready-for-agent) with the owner's decision: relative paths resolve against `$COOP_HOME` (default `~/.agentcoop`) for config and runtime alike — the owning-layer fix, with a constant base rather than a resolved one. Decay 2027-03-23.
