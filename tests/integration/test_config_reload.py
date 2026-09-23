@@ -649,6 +649,26 @@ class TestConnectorChanges(_ReloadCase):
         self.assertTrue(any("AUDIT: session released" in line and session in line
                             and "connector-removed" in line for line in logs.output))
 
+    async def test_reloading_to_an_empty_deployment_stops_the_last_connector(self):
+        """Removing the last bot (coop-keeper design §3.6 step 2): the file keeps
+        only what is shared, `reload` accepts it, stops the last connector and
+        expires its records, and the daemon still answers so `stop` can follow."""
+        await self._boot()
+        session = (await self._rows())["script:script"]["session_id"]
+        self._rewrite(self._text(connectors=(), agents={}, rules=[]))
+
+        result = await self._reload()
+
+        self.assertEqual(result["exit_code"], 0, result)
+        self.assertEqual(result["changes"]["connectors"]["removed"], ["script"])
+        self.assertEqual(result["changes"]["agents"]["removed"], ["default"])
+        self.assertEqual([(w["action"], w["session_id"]) for w in result["watchers"]],
+                         [("expire", session)])
+        self.assertEqual(await self._rows(), {})
+        self.assertFalse((self.runtime / "state.script.json").exists())
+        shown = await self._dispatch(cmd="config-show", include_config=False)
+        self.assertTrue(shown["ok"], shown)
+
     async def test_a_changed_connector_restarts_as_a_unit_with_records_kept(self):
         await self._boot()
         old = self.service._entries[0]

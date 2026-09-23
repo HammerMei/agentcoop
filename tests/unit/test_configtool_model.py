@@ -500,6 +500,62 @@ class TestEditableConfigSave(_EditableConfigTestBase):
         self.assertEqual(oct(backup_dir.stat().st_mode)[-3:], "700")
         self.assertEqual(oct(backups[0].stat().st_mode)[-3:], "600")
 
+    def test_two_saves_in_one_second_keep_two_backups(self):
+        path = self._write(self._valid_cfg_text())
+        first_text = path.read_text()
+        cfg = EditableConfig.load(path)
+        cfg.save()
+        cfg.document["agents"]["default"]["timeout"] = 7
+        cfg.mark_dirty()
+        cfg.save()
+        backups = sorted((path.parent / ".config-backups").glob("config.yaml.bak.*"))
+        self.assertEqual(len(backups), 2, "the second save must not overwrite the first snapshot")
+        self.assertEqual(backups[0].read_text(), first_text)
+
+    def test_the_temp_file_is_owner_only_from_the_first_byte(self):
+        # The chmod on config.yaml after the replace is not enough: under
+        # umask 022 the temp file held every secret world-readable meanwhile.
+        path = self._write(self._valid_cfg_text())
+        cfg = EditableConfig.load(path)
+        modes: list[int] = []
+        real_dump = yaml.dump
+
+        def spying_dump(data, stream, **kw):
+            modes.append(os.fstat(stream.fileno()).st_mode & 0o777)
+            return real_dump(data, stream, **kw)
+
+        from unittest.mock import patch
+        with patch("gateway.configtool.model.yaml.dump", side_effect=spying_dump):
+            cfg.save()
+        self.assertEqual(modes, [0o600])
+
+    def test_saving_through_a_symlink_writes_the_target_and_keeps_the_link(self):
+        # Docker mode 1 symlinks config.yaml to a bind mount; a repointed link
+        # is followed on reload. Replacing the LINK with a file would leave the
+        # real config untouched and every later edit through the link lost.
+        real_dir = Path(self.tmp) / "real"
+        real_dir.mkdir()
+        real = real_dir / "config.yaml"
+        real.write_text(textwrap.dedent(self._valid_cfg_text()))
+        link = Path(self.tmp) / "config.yaml"
+        link.symlink_to(real)
+        cfg = EditableConfig.load(link)
+        cfg.document["agents"]["default"]["timeout"] = 9
+        cfg.mark_dirty()
+        cfg.save()
+        self.assertTrue(link.is_symlink(), "the link is still a link")
+        self.assertEqual(yaml.safe_load(real.read_text())["agents"]["default"]["timeout"], 9)
+        self.assertTrue((real_dir / ".config-backups").is_dir(), "backup beside the target")
+        self.assertFalse((Path(self.tmp) / ".config-backups").exists())
+        self.assertEqual(real.stat().st_mode & 0o777, 0o600)
+
+    def test_a_stale_temp_file_from_an_interrupted_save_does_not_block_the_next(self):
+        path = self._write(self._valid_cfg_text())
+        path.with_name("config.yaml.tmp").write_text("left behind")
+        cfg = EditableConfig.load(path)
+        cfg.save()
+        self.assertFalse(path.with_name("config.yaml.tmp").exists())
+
     def test_save_chmods_config_yaml_to_owner_only(self):
         path = self._write(self._valid_cfg_text())
         cfg = EditableConfig.load(path)

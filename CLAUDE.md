@@ -111,6 +111,18 @@ Useful separators when ranking:
 
 Fixing all of them is not the goal; deciding about all of them is.
 
+**Triage every round with the `finding-triage` skill.** Before reading a single
+finding, run `chain-check.py <owner/repo> <pr> chatgpt-codex` from the working tree;
+then apply the skill's three gates (`cheap`, `cannot-occur`, `silent`), get a blind
+second rater, and log the round in `docs/agents/finding-triage-log.md`. The
+project's constants — discount ladder, decision bands, anchors — are in
+`docs/agents/finding-triage.md`. The two questions below are the summary of that
+method, not a substitute for it: this section is always in front of you and the
+skill is not, and on PR #181 that was enough for three rounds to be triaged by the
+summary alone. **If the skill is not available in the session, say so explicitly**
+— "the `finding-triage` skill is missing" — report your own take on each finding to
+the user, and let them decide; do not present a summary-only triage as the method.
+
 **Two questions, in this order, and both must pass before you fix anything:**
 
 1. **Is it true?** Trace it to an observable outcome — what an operator sees,
@@ -162,11 +174,14 @@ Two mechanical defences, both cheap:
 - **Put the increment's one-line definition at the top of the PR description,
   verbatim from the plan.** It is then in front of you every time you touch the
   body, and in front of the reviewer too.
-- **Stop when findings start landing in the previous round's fix.** Once is
-  noise. **Twice consecutively is the signal**, and the response is not another
-  patch: re-read the increment's definition and ask which of the last few fixes
-  were in it. That signal fired at round three of the four above and was noted
-  rather than acted on.
+- **Stop when findings start landing in the previous round's fix, as measured by
+  `chain-check.py`** — a finding on code written since the last round in the same
+  file, from metadata, never from how the findings read. Once is noise. **Twice
+  consecutively is the signal**, and the response is not another patch: re-read
+  the increment's definition and ask which of the last few fixes were in it. That
+  signal fired at round three of the four above and was noted rather than acted
+  on. The opposite mistake happened on PR #181: rounds judged "half on the previous
+  fix" by reading them had, by the detector, no chain at all.
 
 Related and distinct: a fix that is in scope but keeps producing findings means
 the *design* is undescribed (see below). A fix that is out of scope produces

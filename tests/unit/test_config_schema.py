@@ -176,6 +176,28 @@ class TestRuleShapedWatchersValidate:
         })
 
 
+class TestEmptyDeploymentValidates:
+    """The loaders accept a file with no connector, agent or rule (coop-keeper
+    design §3.10); the schema must agree, or an editor would flag as invalid a
+    file `coop config validate` accepts."""
+
+    def test_an_empty_document_is_valid(self, validator):
+        assert not list(validator.iter_errors({}))
+
+    def test_explicitly_empty_blocks_are_valid(self, validator):
+        assert not list(validator.iter_errors(
+            {"connectors": [], "agents": {}, "watcher_rules": []}))
+
+    def test_bare_keys_are_valid_as_the_loaders_read_them(self, validator):
+        assert not list(validator.iter_errors({"connectors": None, "agents": None}))
+
+    def test_templates_only_is_valid(self, validator):
+        assert not list(validator.iter_errors({
+            "tool_presets": {"readonly": [{"tool": "Read"}]},
+            "connector_templates": {"default": {"reply_in_thread": False}},
+        }))
+
+
 class TestSchemaCatchesKnownMistakes:
     """Negative controls — if these stop failing, the schema became too
     permissive (e.g. a stray additionalProperties: true) to catch anything."""

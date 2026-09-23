@@ -1,11 +1,21 @@
 """Standalone argparse entrypoint for the RC/MM admin CLI.
 
 Usage:
-    coop-provision [--config PATH] [--log-file PATH] <profile> create-user <username> <email> <password> [--full-name NAME]
+    coop-provision [--config PATH] [--log-file PATH] <profile> create-user <username> <email> [<password> | --password-file PATH] [--full-name NAME]
+    coop-provision [--config PATH] [--log-file PATH] <profile> reactivate-user <username> --password-file PATH
     coop-provision [--config PATH] [--log-file PATH] <profile> create-channel <name> [--private]
     coop-provision [--config PATH] [--log-file PATH] <profile> add-to-channel <username> <channel>
     coop-provision [--config PATH] [--log-file PATH] <profile> delete-user <username>
     coop-provision [--config PATH] [--log-file PATH] <profile> delete-channel <channel>
+    coop-provision [--config PATH] [--log-file PATH] <profile> check
+    coop-provision [--config PATH] [--log-file PATH] init <profile> --type TYPE --server-url URL [--team TEAM]
+    coop-provision [--config PATH] [--log-file PATH] profiles [--json]
+
+`init` and `profiles` act on the profiles file itself rather than through a
+profile, so they take the place of the `<profile>` word; a profile literally
+named `init` or `profiles` cannot be addressed by this CLI. The profiles file
+defaults to ~/.agentcoop/admin-profiles.yaml and the error log to
+~/.agentcoop/coop-provision.log (coop-keeper design §3.10).
 
 Not wired into gateway/cli.py — see gateway/admin/__init__.py for why.
 
@@ -21,26 +31,40 @@ API failures (httpx.HTTPStatusError, e.g. a 400 from creating a user whose
 email already exists) print a short, platform-specific message extracted
 from the response body (see gateway/admin/_errors.py) rather than httpx's
 own generic "Client error '400 Bad Request' for url '...'" — the full raw
-response body is preserved in --log-file (default: ./coop-provision.log) for
-troubleshooting.
+response body is preserved in --log-file (default:
+~/.agentcoop/coop-provision.log) for troubleshooting.
 """
 
 import argparse
 import asyncio
 import errno
+import json
 import logging
 import os
 import signal
 import sys
+from pathlib import Path
 
 import httpx
 
 from gateway.admin._errors import friendly_error_message, log_error_response
 from gateway.admin.base import ChannelAlreadyExistsError, UserAlreadyExistsError
-from gateway.admin.config import AdminConfigError, get_profile, load_profiles
+from gateway.admin.config import (
+    DEFAULT_CONFIG_PATH,
+    AdminConfigError,
+    init_profile,
+    load_profile,
+    masked_profiles,
+)
 from gateway.admin.factory import admin_factory
+from gateway.config_edit import PatchError, read_secret_file
+from gateway.paths import RUNTIME_DIR
 
-DEFAULT_LOG_FILE = "coop-provision.log"
+DEFAULT_LOG_FILE = str(RUNTIME_DIR / "coop-provision.log")
+
+# The first positional words that are commands on the profiles FILE, not
+# profile names (see the module docstring).
+FILE_COMMANDS = ("init", "profiles")
 
 _error_logger = logging.getLogger("coop.admin.errors")
 
@@ -143,20 +167,32 @@ def _configure_error_log(path: str) -> None:
             os.close(probe)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="coop-provision",
-        description="Standalone admin CLI for Rocket.Chat / Mattermost user & channel provisioning.",
-    )
+def _add_common_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
-        help="Path to the profiles YAML file (default: ./admin-profiles.yaml, or $COOP_ADMIN_CONFIG)",
+        help=f"Path to the profiles YAML file (default: {DEFAULT_CONFIG_PATH}, "
+             "or $COOP_ADMIN_CONFIG)",
     )
     parser.add_argument(
         "--log-file", default=DEFAULT_LOG_FILE,
         help=f"Path to append full API error bodies to for troubleshooting "
-        f"(default: ./{DEFAULT_LOG_FILE})",
+        f"(default: {DEFAULT_LOG_FILE})",
     )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The parser for `<profile> <command> ...` — every command that acts
+    through a profile. `init` and `profiles` have their own (`build_file_parser`),
+    chosen by `parse_argv` from the first positional word."""
+    parser = argparse.ArgumentParser(
+        prog="coop-provision",
+        description="Standalone admin CLI for Rocket.Chat / Mattermost user & channel provisioning.",
+        epilog="Two commands act on the profiles file itself and take the place of "
+               "<profile>: 'init <profile> --type ... --server-url ... [--team ...]' writes "
+               "a profile with empty credential fields; 'profiles [--json]' lists every "
+               "profile with its credentials masked.",
+    )
+    _add_common_flags(parser)
     parser.add_argument("profile", help="Profile name from the config file")
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -164,8 +200,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("create-user", help="Create a user account")
     p.add_argument("username")
     p.add_argument("email")
-    p.add_argument("password")
+    p.add_argument("password", nargs="?", help="The password, or use --password-file")
+    p.add_argument(
+        "--password-file", metavar="PATH",
+        help="File holding the password (one trailing newline ignored); keeps the value "
+             "off the command line and out of shell history",
+    )
     p.add_argument("--full-name")
+
+    p = sub.add_parser(
+        "reactivate-user",
+        help="Re-enable a deactivated account and set a new password (Mattermost; "
+             "Rocket.Chat deletion is permanent and this reports so)",
+    )
+    p.add_argument("username")
+    p.add_argument("--password-file", required=True, metavar="PATH",
+                   help="File holding the new password")
 
     p = sub.add_parser("create-channel", help="Create a channel")
     p.add_argument("name")
@@ -181,14 +231,79 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("delete-channel", help="Delete (or archive) a channel")
     p.add_argument("channel")
 
+    sub.add_parser(
+        "check",
+        help="Authenticate with the profile's credentials (and resolve its team) — "
+             "exit 0 when the profile works, non-zero when it does not",
+    )
+
     return parser
 
 
-async def _dispatch(admin, args) -> None:
+def build_file_parser() -> argparse.ArgumentParser:
+    """The parser for `init` and `profiles`, which act on the profiles file."""
+    parser = argparse.ArgumentParser(prog="coop-provision")
+    _add_common_flags(parser)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser(
+        "init",
+        help="Write a profile with empty credential fields, for the operator to fill",
+    )
+    p.add_argument("profile")
+    p.add_argument("--type", required=True, help="rocketchat or mattermost")
+    p.add_argument("--server-url", required=True)
+    p.add_argument("--team", help="Mattermost team (required for mattermost)")
+
+    p = sub.add_parser(
+        "profiles",
+        help="List every profile's name, type, server URL and team; credential fields "
+             "show as '' when unfilled and '***' when filled",
+    )
+    p.add_argument("--json", action="store_true")
+    return parser
+
+
+def parse_argv(argv: list[str]) -> argparse.Namespace:
+    """Pick the parser from the first positional word: `init`/`profiles` are
+    file commands, anything else is a profile name. The common flags may come
+    first in either form (`--config x init ...`), so they are skimmed off
+    before the word is looked at."""
+    skim = argparse.ArgumentParser(add_help=False)
+    _add_common_flags(skim)
+    _, rest = skim.parse_known_args(argv)
+    first = next((a for a in rest if not a.startswith("-")), None)
+    parser = build_file_parser() if first in FILE_COMMANDS else build_parser()
+    return parser.parse_args(argv)
+
+
+def _read_password_file(path: str) -> str:
+    """The same reader `coop config add --password-file` and `{from_file:}`
+    use: one trailing newline stripped, empty refused, errors name the path
+    and never the content. Re-raised as RuntimeError, which _run() reports
+    as a clean `Error:` line."""
+    try:
+        return read_secret_file(path)
+    except PatchError as e:
+        raise RuntimeError(str(e)) from e
+
+
+def _password_from_args(args: argparse.Namespace) -> str:
+    given = getattr(args, "password", None)
+    if given is not None and args.password_file:
+        raise RuntimeError("pass either a password argument or --password-file, not both")
+    if args.password_file:
+        return _read_password_file(args.password_file)
+    if given is None:
+        raise RuntimeError("a password is required: pass it as an argument or with --password-file")
+    return given
+
+
+async def _dispatch(admin, args, password: str | None) -> None:
     if args.command == "create-user":
         try:
             user = await admin.create_user(
-                args.username, args.email, args.password, full_name=args.full_name,
+                args.username, args.email, password, full_name=args.full_name,
             )
             print(f"Created user '{user.username}' (id={user.id})")
         except UserAlreadyExistsError as e:
@@ -247,9 +362,65 @@ async def _dispatch(admin, args) -> None:
         await admin.delete_channel(args.channel)
         print(f"Deleted channel '{args.channel}'")
 
+    elif args.command == "reactivate-user":
+        user = await admin.reactivate_user(args.username, password)
+        print(f"Reactivated user '{user.username}' (id={user.id}) with the new password")
+
+    elif args.command == "check":
+        # connect() already ran (authenticated, and for Mattermost resolved
+        # the team) before dispatch — reaching here IS the check passing.
+        print(f"Profile '{args.profile}' works: authenticated with {admin.profile.server_url}")
+
+
+def _run_file_command(args: argparse.Namespace) -> int:
+    """`init` and `profiles`: no server, no log file, no profile to load."""
+    try:
+        if args.command == "init":
+            if args.profile in FILE_COMMANDS:
+                raise AdminConfigError(
+                    f"'{args.profile}' is a coop-provision command and cannot be a profile "
+                    "name — it could never be selected afterwards"
+                )
+            path = init_profile(
+                args.config, args.profile, profile_type=args.type,
+                server_url=args.server_url, team=args.team,
+            )
+            print(f"Wrote profile '{args.profile}' to {path} with empty credential fields — "
+                  f"fill them in an editor, then run 'coop-provision {args.profile} check'.")
+        elif args.command == "profiles":
+            listed = masked_profiles(args.config, missing_ok=True)
+            if args.json:
+                # default=str: hand-written metadata may be a YAML date or
+                # !!binary; listed as its string, not a TypeError.
+                print(json.dumps({"ok": True, "profiles": listed}, indent=2, default=str))
+            elif not listed:
+                print("No profiles defined.")
+            else:
+                for entry in listed:
+                    filled = [k for k in ("username", "password", "token") if entry[k]]
+                    creds = ", ".join(filled) if filled else "no credentials filled in"
+                    team = f" team={entry['team']}" if entry.get("team") else ""
+                    # str() first: a hand-written `type: [a]` is listed, not a
+                    # TypeError out of the width specifier.
+                    print(f"{entry['name']:<20} {str(entry['type']):<11} {entry['server_url']}{team}"
+                          f"  ({creds})")
+    except AdminConfigError as e:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(e)}, indent=2))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
 
 async def _run(args: argparse.Namespace) -> int:
+    if args.command in FILE_COMMANDS:
+        return _run_file_command(args)
     try:
+        if args.log_file == DEFAULT_LOG_FILE:
+            # The default lives beside config.yaml; an explicit --log-file is
+            # the operator's path and is not created for them.
+            Path(DEFAULT_LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
         _configure_error_log(args.log_file)
     except OSError as e:
         # logging.FileHandler opens the file immediately (not lazily) — an
@@ -261,16 +432,25 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        profiles = load_profiles(args.config)
-        profile = get_profile(profiles, args.profile)
+        # Only the named profile is validated: a skeleton `init` wrote and the
+        # operator has not filled yet must not stop another profile working.
+        profile = load_profile(args.config, args.profile)
         admin = admin_factory(profile)
     except AdminConfigError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
     try:
+        # The password is resolved BEFORE connect(): a missing file or a
+        # both-forms mistake is the operator's to fix, and should not wait
+        # behind (or hide behind) a network error.
+        password = None
+        if args.command == "create-user":
+            password = _password_from_args(args)
+        elif args.command == "reactivate-user":
+            password = _read_password_file(args.password_file)
         await admin.connect()
-        await _dispatch(admin, args)
+        await _dispatch(admin, args, password)
     except httpx.HTTPStatusError as e:
         # httpx's own str(e) is generic ("Client error '400 Bad Request' for
         # url '...'") and never shows *why* — the platform's actual message
@@ -316,8 +496,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
+    args = parse_argv(sys.argv[1:])
     try:
         sys.exit(asyncio.run(_run(args)))
     except KeyboardInterrupt:

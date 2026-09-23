@@ -1887,6 +1887,612 @@ class TestCLIConfigShow(_ConfigCLIBase):
         self.assertEqual(doc["config"]["connectors"][0]["raw"]["server"]["password"], "***")
 
 
+class TestCLIConfigShowRaw(_ConfigCLIBase):
+    """`config show --raw`: the file as written, masked, with its file digest —
+    printed even when the file does not validate (coop-keeper design §3.2/§3.10)."""
+
+    def test_json_is_the_masked_file_with_its_file_digest(self):
+        import hashlib
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["file_digest"],
+                         hashlib.sha256(Path(self.cfg_path).read_bytes()).hexdigest())
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["password"], "***")
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["username"], "bot")
+        self.assertEqual(list(doc["config"]), ["connectors", "agents", "watcher_rules"])
+        self.assertEqual(doc["findings"], [])
+        self.assertNotIn("hunter2", stdout)
+
+    def test_an_invalid_file_is_still_shown_with_its_findings_and_exit_one(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["config"]["watcher_rules"][0]["agent"], "nobody",
+                         "the file is shown as written, for the keeper to fix")
+        self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
+        self.assertNotIn("hunter2", stdout)
+
+    def test_text_mode_prints_masked_yaml_and_findings_on_stderr(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw"], running=False)
+        self.assertEqual(code, 1)
+        self.assertRegex(stdout, r"File digest:  [0-9a-f]{64}")
+        self.assertIn("password: '***'", stdout)
+        self.assertNotIn("hunter2", stdout + stderr)
+        self.assertIn("[ERROR]", stderr)
+        self.assertIn("nobody", stderr)
+
+    def test_a_file_that_is_not_yaml_is_an_error_not_a_traceback(self):
+        Path(self.cfg_path).write_text("connectors: [")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIn("invalid YAML", doc["error"])
+        self.assertEqual((doc["exists"], doc["file_digest"], doc["config"], doc["findings"]),
+                         (True, None, None, []), "one shape whether or not the file parses")
+
+    def test_a_validator_crash_still_shows_the_document_with_an_error_finding(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "url: http://localhost:3000", "url: []"))
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1, stderr)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["url"], [])
+        self.assertIn("could not check this file", doc["findings"][0]["message"])
+
+    def test_a_date_key_in_the_file_is_shown_in_json(self):
+        Path(self.cfg_path).write_text("2026-01-01: value\nconnectors: []\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["config"]["2026-01-01"], "value")
+
+    def test_colliding_keys_are_reported_beside_the_document_not_dropped_in_silence(self):
+        Path(self.cfg_path).write_text("connectors:\n  - {name: rc, 1: a, '1': b}\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        doc = json.loads(stdout)
+        self.assertTrue(any("collide" in f["message"] for f in doc["findings"]), doc["findings"])
+
+    def test_a_recursive_alias_is_a_clean_refusal_in_both_modes(self):
+        Path(self.cfg_path).write_text("connectors: &loop [*loop]\n")
+        for argv in (["config", "show", "--config", self.cfg_path, "--raw", "--json"],
+                     ["config", "show", "--config", self.cfg_path, "--raw"]):
+            stdout, stderr, code = self._run_with(argv, running=False)
+            self.assertEqual(code, 1, argv)
+            self.assertNotIn("Traceback", stderr)
+            self.assertIn("recursive alias", stdout + stderr)
+
+    def test_an_unreadable_path_is_a_structured_refusal_not_a_traceback(self):
+        # Path.exists() itself raises on an overlong name; the error branch
+        # must not repeat the probe that just failed.
+        overlong = str(Path(self.tmp) / ("x" * 5000 + ".yaml"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", overlong, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIsNone(doc["exists"])
+
+    def test_a_tagged_credential_in_the_file_never_reaches_any_output(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "password: hunter2", "password: !!int hunter2"))
+        for argv in (["config", "show", "--config", self.cfg_path, "--raw", "--json"],
+                     ["config", "show", "--config", self.cfg_path, "--raw"],
+                     ["config", "patch", "--config", self.cfg_path, "--set", "a=1", "--dry-run", "--json"],
+                     ["config", "patch", "--config", self.cfg_path, "--set", "a=1", "--dry-run"]):
+            stdout, stderr, code = self._run_with(argv, running=False)
+            self.assertEqual(code, 1, argv)
+            self.assertNotIn("hunter2", stdout + stderr, argv)
+            self.assertNotIn("Traceback", stderr, argv)
+
+    def test_a_yaml_error_on_a_credential_line_does_not_echo_it(self):
+        Path(self.cfg_path).write_text("server:\n  password: hunter2: oops\n")
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        self.assertNotIn("hunter2", stdout + stderr)
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text("server:\n  password: hunter2: oops\n")
+        self._write_config()
+        stdout, stderr, code = self._run_with(
+            ["config", "patch", "--config", self.cfg_path, "--file", str(fragment), "--json"],
+            running=False)
+        self.assertEqual(code, 1)
+        self.assertNotIn("hunter2", stdout + stderr)
+
+    def test_a_file_that_does_not_exist_yet_is_shown_as_the_empty_deployment(self):
+        fresh = str(Path(self.tmp) / "fresh" / "config.yaml")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", fresh, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0, stdout)
+        doc = json.loads(stdout)
+        self.assertEqual((doc["ok"], doc["exists"], doc["config"], doc["findings"]),
+                         (True, False, {}, []))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", fresh, "--raw"], running=False)
+        self.assertEqual(code, 0)
+        self.assertIn("does not exist yet", stdout)
+
+    def test_an_empty_deployment_is_valid_and_shown(self):
+        Path(self.cfg_path).write_text("connectors: []\nagents: {}\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["config"], {"connectors": [], "agents": {}})
+
+
+class _EditCLIBase(_ConfigCLIBase):
+    """`config add/remove/patch` against a real file (coop-keeper design §3.10)."""
+
+    def _doc(self) -> dict:
+        return yaml.safe_load(Path(self.cfg_path).read_text())
+
+    def _digest(self) -> str:
+        import hashlib
+        return hashlib.sha256(Path(self.cfg_path).read_bytes()).hexdigest()
+
+    def _edit(self, *args: str) -> tuple[dict, str, int]:
+        stdout, stderr, code = self._run_with(
+            ["config", *args, "--config", self.cfg_path, "--json"], running=False)
+        return json.loads(stdout), stderr, code
+
+    def _secret_file(self, content: str, name="pw") -> str:
+        from tests.helpers import write_secret_file
+        return write_secret_file(self.tmp, content, name)
+
+
+class TestCLIConfigPatch(_EditCLIBase):
+
+    def test_set_writes_a_yaml_typed_value_through_the_atomic_save(self):
+        before = self._digest()
+        doc, _, code = self._edit("patch", "--set", "agents.default.timeout=500")
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(doc["ok"])
+        self.assertFalse(doc["dry_run"])
+        self.assertEqual(self._doc()["agents"]["default"]["timeout"], 500)
+        self.assertEqual(doc["file_digest"], self._digest())
+        self.assertNotEqual(doc["file_digest"], before)
+        self.assertEqual(len(list((Path(self.tmp) / ".config-backups").iterdir())), 1)
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["password"], "***")
+        self.assertNotIn("hunter2", json.dumps(doc))
+
+    def test_dry_run_returns_the_masked_merged_document_and_the_digest_it_read(self):
+        before = self._digest()
+        doc, _, code = self._edit("patch", "--set", "agents.default.timeout=500", "--dry-run")
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(doc["dry_run"])
+        self.assertEqual(doc["file_digest"], before)
+        self.assertEqual(doc["config"]["agents"]["default"]["timeout"], 500)
+        self.assertEqual(self._digest(), before, "nothing written")
+        self.assertFalse((Path(self.tmp) / ".config-backups").exists())
+
+    def test_if_digest_refuses_a_file_that_changed_since_the_plan(self):
+        planned = self._digest()
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text() + "# hand edit\n")
+        doc, _, code = self._edit("patch", "--set", "agents.default.timeout=500",
+                                  "--if-digest", planned)
+        self.assertEqual(code, 1)
+        self.assertFalse(doc["ok"])
+        self.assertIn("has changed since", doc["error"])
+        self.assertNotIn("timeout", Path(self.cfg_path).read_text())
+        doc, _, code = self._edit("patch", "--set", "agents.default.timeout=500",
+                                  "--if-digest", self._digest())
+        self.assertEqual(code, 0, doc)
+
+    def test_entry_addresses_a_list_entry_by_name_and_unset_deletes(self):
+        doc, _, code = self._edit("patch", "--entry", "connector:rc",
+                                  "--set", "server.url=http://elsewhere:3000",
+                                  "--set", "description=moved",
+                                  "--unset", "server.password", "--dry-run")
+        self.assertEqual(code, 1, "no password left is a validation error, so it is refused")
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["url"], "http://elsewhere:3000")
+        self.assertNotIn("password", doc["config"]["connectors"][0]["server"])
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "session_idle_days=3")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["watcher_rules"][0]["session_idle_days"], 3)
+
+    def test_unset_of_an_absent_parent_is_refused_and_writes_nothing(self):
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit("patch", "--unset", "watcher_templates.typo.rooms")
+        self.assertEqual(code, 1)
+        self.assertIn("a deletion does not create it", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
+        doc, _, code = self._edit("patch", "--set", "connectors=[]", "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("means nothing", doc["error"])
+
+    def test_a_file_fragment_adds_removes_and_reads_a_credential_from_a_file(self):
+        pw = self._secret_file("s3cret\n")
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: mm
+                op: add
+                type: mattermost
+                server: {{url: http://mm:8065, team: lab, username: bot, password: {{from_file: {pw}}}}}
+            agents:
+              second: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - name: w1
+                op: remove
+              - name: w2
+                connector: mm
+                agent: second
+                rooms: {{include: [ops]}}
+        """))
+        doc, _, code = self._edit("patch", "--file", str(fragment))
+        self.assertEqual(code, 0, doc)
+        on_disk = self._doc()
+        self.assertEqual([c["name"] for c in on_disk["connectors"]], ["rc", "mm"])
+        self.assertEqual(on_disk["connectors"][1]["server"]["password"], "s3cret")
+        self.assertNotIn("op", on_disk["connectors"][1])
+        self.assertEqual([r["name"] for r in on_disk["watcher_rules"]], ["w2"])
+        self.assertEqual(sorted(on_disk["agents"]), ["default", "second"])
+        self.assertNotIn("s3cret", json.dumps(doc))
+        self.assertEqual(doc["config"]["connectors"][1]["server"]["password"], "***")
+
+    def test_entry_may_name_an_entry_the_same_invocations_file_adds(self):
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text("connectors:\n  - {name: rc-2, op: add, type: rocketchat,\n"
+                            "     server: {url: http://rc-2:3000, username: bot, password: pw}}\n")
+        doc, _, code = self._edit("patch", "--file", str(fragment),
+                                  "--entry", "connector:rc-2", "--set", "description=added-and-tuned")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["description"], "added-and-tuned")
+
+    def test_the_masked_sentinel_is_refused_from_set_and_from_a_fragment(self):
+        for spelling in ("server.password=***", "server.password='***'"):
+            doc, _, code = self._edit("patch", "--entry", "connector:rc", "--set", spelling)
+            self.assertEqual(code, 1, spelling)
+            self.assertIn("'***'", doc["error"])
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text("connectors:\n  - {name: rc, server: {password: '***'}}\n")
+        doc, _, code = self._edit("patch", "--file", str(fragment))
+        self.assertEqual(code, 1)
+        self.assertIn("connectors[0].server.password", doc["error"])
+        self.assertEqual(self._doc()["connectors"][0]["server"]["password"], "hunter2")
+
+    def test_an_invalid_result_is_refused_with_findings_and_the_file_untouched(self):
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "agent=nobody")
+        self.assertEqual(code, 1)
+        self.assertIn("does not validate", doc["error"])
+        self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
+
+    def test_set_to_null_deletes_and_an_undecodable_fragment_is_a_clean_error(self):
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "rooms.include=null",
+                                  "--set", "rooms.direct=true")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["watcher_rules"][0]["rooms"], {"direct": True})
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_bytes(b"\xff\xfe\x00\x00 not: [valid")
+        doc, _, code = self._edit("patch", "--file", str(fragment))
+        self.assertEqual(code, 1)
+        self.assertIn("not valid YAML", doc["error"])
+
+    def test_text_mode_says_what_happened_and_never_prints_the_document(self):
+        stdout, stderr, code = self._run_with(
+            ["config", "patch", "--config", self.cfg_path, "--set", "agents.default.timeout=5"],
+            running=False)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("Wrote", stdout)
+        self.assertRegex(stdout, r"File digest:  [0-9a-f]{64}")
+        self.assertNotIn("hunter2", stdout + stderr)
+        self.assertNotIn("timeout", stdout)
+        _, stderr, code = self._run_with(
+            ["config", "patch", "--config", self.cfg_path, "--entry", "rule:w1", "--set", "agent=nobody"],
+            running=False)
+        self.assertEqual(code, 1)
+        self.assertIn("[ERROR]", stderr)
+        self.assertIn("nobody", stderr)
+
+    def test_a_scoped_set_cannot_rename_its_way_onto_another_entry(self):
+        self._write_config(rules="  - name: w2\n    connector: rc\n    agent: default\n"
+                                 "    rooms:\n      include: [ops]\n")
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "name=w2",
+                                  "--set", "description=moved")
+        self.assertEqual(code, 1)
+        self.assertIn("selector", doc["error"])
+        self.assertNotIn("description", json.dumps(self._doc()["watcher_rules"]))
+
+    def test_from_file_under_a_non_credential_key_is_refused_and_never_printed(self):
+        secret = self._secret_file("the contents of some file\n")
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text(f"connectors:\n  - {{name: rc, description: {{from_file: {secret}}}}}\n")
+        doc, stderr, code = self._edit("patch", "--file", str(fragment), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("credential key", doc["error"])
+        self.assertNotIn("contents of some file", json.dumps(doc) + stderr)
+
+    def test_nothing_to_patch_and_a_bad_entry_are_errors(self):
+        doc, _, code = self._edit("patch")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing to patch", doc["error"])
+        doc, _, code = self._edit("patch", "--entry", "agent:x", "--set", "a=1")
+        self.assertEqual(code, 1)
+        self.assertIn("--entry", doc["error"])
+        # --entry addresses an entry; an absent name is said plainly, not appended.
+        doc, _, code = self._edit("patch", "--entry", "connector:nope", "--set", "timeout=1")
+        self.assertEqual(code, 1)
+        self.assertEqual(doc["error"], "--entry: no connector named 'nope'")
+        self.assertEqual([c["name"] for c in self._doc()["connectors"]], ["rc"])
+
+    def test_the_first_patch_creates_a_config_that_does_not_exist_yet(self):
+        # Bootstrap (§3.2): a plan against a machine with no config.yaml.
+        fresh = str(Path(self.tmp) / "fresh" / "config.yaml")
+        stdout, _, code = self._run_with(
+            ["config", "patch", "--config", fresh, "--set", "connector_templates.default.reply_in_thread=false",
+             "--json"], running=False)
+        self.assertEqual(code, 0, stdout)
+        self.assertEqual(yaml.safe_load(Path(fresh).read_text()),
+                         {"connector_templates": {"default": {"reply_in_thread": False}}})
+        self.assertEqual(Path(fresh).stat().st_mode & 0o777, 0o600)
+
+
+class TestCLIConfigAdd(_EditCLIBase):
+
+    def test_add_connector_reads_the_password_from_a_file_and_masks_it_in_the_report(self):
+        pw = self._secret_file("s3cret\n")
+        doc, _, code = self._edit(
+            "add", "connector", "bob@mm", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "lab", "--username", "bob", "--password-file", pw, "--owner", "glin")
+        self.assertEqual(code, 0, doc)
+        entry = self._doc()["connectors"][1]
+        self.assertEqual(entry, {"name": "bob@mm", "type": "mattermost",
+                                 "server": {"url": "http://mm:8065", "team": "lab",
+                                            "username": "bob", "password": "s3cret"},
+                                 "allowed_users": {"owners": ["glin"]}})
+        self.assertEqual(doc["entry"]["server"]["password"], "***")
+        self.assertNotIn("s3cret", json.dumps(doc))
+
+    def test_add_refuses_the_masked_sentinel_from_a_password_file_or_an_argument(self):
+        pw = self._secret_file("***\n")
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit(
+            "add", "connector", "bob@mm", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "lab", "--username", "bob", "--password-file", pw)
+        self.assertEqual(code, 1)
+        self.assertIn("'***'", doc["error"])
+        doc, _, code = self._edit(
+            "add", "connector", "bob@mm", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "lab", "--username", "***", "--password-file", self._secret_file("x\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("'***'", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
+
+    def test_add_connector_refuses_an_existing_name(self):
+        pw = self._secret_file("x\n")
+        doc, _, code = self._edit(
+            "add", "connector", "rc", "--type", "rocketchat", "--server-url", "http://rc:3000",
+            "--username", "bob", "--password-file", pw)
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", doc["error"])
+
+    def _mattermost_config(self, server_block: str) -> None:
+        # `--credentials-from` can only ever produce a valid file on
+        # Mattermost — a second TEAM on one installation. Two Rocket.Chat
+        # connectors on one account are an identity conflict validation refuses.
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: mm
+                type: mattermost
+                {server_block}
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
+        """))
+
+    def test_credentials_from_copies_the_username_and_password_of_an_existing_connector(self):
+        self._mattermost_config(
+            "server: {url: http://mm:8065, team: lab, username: bot, password: hunter2}")
+        # Same installation, compared canonically: the source says
+        # http://mm:8065, this spells it with caps and a trailing slash.
+        doc, _, code = self._edit(
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://MM:8065/",
+            "--team", "ops", "--credentials-from", "mm")
+        self.assertEqual(code, 0, doc)
+        server = self._doc()["connectors"][1]["server"]
+        self.assertEqual(server, {"url": "http://MM:8065/", "team": "ops",
+                                  "username": "bot", "password": "hunter2"})
+        self.assertNotIn("hunter2", json.dumps(doc))
+
+    def test_credentials_from_refuses_another_server_or_another_platform(self):
+        # The copied credential is live; the next start would send it to
+        # whatever --server-url named. Within one installation only (§3.4).
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit(
+            "add", "connector", "rc-2", "--type", "rocketchat", "--server-url", "http://typo.example:3000",
+            "--credentials-from", "rc")
+        self.assertEqual(code, 1)
+        self.assertIn("one installation only", doc["error"])
+        doc, _, code = self._edit(
+            "add", "connector", "mm-x", "--type", "mattermost", "--server-url", "http://localhost:3000",
+            "--team", "lab", "--credentials-from", "rc")
+        self.assertEqual(code, 1)
+        self.assertIn("one platform only", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
+        self.assertNotIn("hunter2", json.dumps(doc))
+        doc, _, code = self._edit(
+            "add", "connector", "rc-3", "--type", "rocketchat", "--server-url", "http://x",
+            "--credentials-from", "nope")
+        self.assertEqual(code, 1)
+        self.assertIn("no connector named 'nope'", doc["error"])
+
+    def test_add_connector_refuses_a_type_it_cannot_shape(self):
+        doc, _, code = self._edit(
+            "add", "connector", "v", "--type", "voice", "--server-url", "http://x",
+            "--username", "u", "--password-file", self._secret_file("x\n"), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown connector type 'voice'", doc["error"])
+
+    def test_credentials_from_copies_a_token_that_stands_alone(self):
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: mm
+                type: mattermost
+                server: {{url: http://mm:8065, team: lab, token: t0k}}
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
+        """))
+        doc, _, code = self._edit(
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "ops", "--credentials-from", "mm")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["server"],
+                         {"url": "http://mm:8065", "team": "ops", "token": "t0k"})
+        self.assertNotIn("t0k", json.dumps(doc))
+
+    def test_credentials_from_sees_through_the_source_connectors_template(self):
+        # The credentials live in a connector_templates entry the source inherits.
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connector_templates:
+              shared: {{server: {{url: http://mm:8065, team: lab, username: bot, password: hunter2}}}}
+            connectors:
+              - name: mm
+                type: mattermost
+                inherits: shared
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
+        """))
+        doc, _, code = self._edit(
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "ops", "--credentials-from", "mm")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["server"],
+                         {"url": "http://mm:8065", "team": "ops", "username": "bot", "password": "hunter2"})
+        self.assertNotIn("hunter2", json.dumps(doc))
+
+    def test_add_agent_checks_the_name_and_the_command_on_path(self):
+        with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "bob", "--type", "claude", "--command", "claude",
+                "--working-directory", str(self.agent_dir))
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["agents"]["bob"],
+                         {"type": "claude", "command": "claude", "working_directory": str(self.agent_dir)})
+        for bad in ("Bob", "a/b", "..", "x y", "a" * 65, "bob\n"):
+            doc, _, code = self._edit(
+                "add", "agent", bad, "--type", "claude", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+            self.assertEqual(code, 1, bad)
+            self.assertIn("path component", doc["error"])
+        with patch("gateway.config_edit.shutil.which", return_value=None):
+            doc, _, code = self._edit(
+                "add", "agent", "carol", "--type", "claude", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("not found on PATH", doc["error"])
+        doc, _, code = self._edit(
+            "add", "agent", "default", "--type", "claude", "--command", "claude",
+            "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", doc["error"])
+        with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "dave", "--type", "clade", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown agent type 'clade'", doc["error"])
+        # A bare name that PATH resolves through a relative entry (`bin`) is
+        # the same mismatch one step removed.
+        with patch("gateway.config_edit.shutil.which", return_value="bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("relative PATH entry", doc["error"])
+        # A relative path would be checked here against the caller's cwd and
+        # launched against working_directory; an absolute path is fine.
+        with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "./claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+            self.assertEqual(code, 1)
+            self.assertIn("relative path", doc["error"])
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "/opt/bin/claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+            self.assertEqual(code, 0, doc)
+
+    def test_add_rule_writes_rooms_only_when_asked_and_validates_the_whole_file(self):
+        doc, _, code = self._edit("add", "rule", "w2", "--connector", "rc", "--agent", "default",
+                                  "--include", "ops", "--include", "eng-*", "--direct")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["watcher_rules"][1],
+                         {"name": "w2", "connector": "rc", "agent": "default",
+                          "rooms": {"include": ["ops", "eng-*"], "direct": True}})
+        doc, _, code = self._edit("add", "rule", "w3", "--connector", "nope", "--agent", "default",
+                                  "--include", "x", "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertTrue(any("unknown connector 'nope'" in f["message"] for f in doc["findings"]))
+
+
+class TestCLIConfigRemove(_EditCLIBase):
+
+    def test_remove_is_refused_while_another_entry_still_refers_to_the_name(self):
+        for kind, name in (("connector", "rc"), ("agent", "default")):
+            doc, _, code = self._edit("remove", kind, name)
+            self.assertEqual(code, 1, (kind, doc))
+            self.assertIn("does not validate", doc["error"])
+            self.assertTrue(any(name in f["message"] for f in doc["findings"]), doc["findings"])
+        self.assertEqual([r["name"] for r in self._doc()["watcher_rules"]], ["w1"])
+
+    def test_removal_in_dependency_order_ends_in_an_empty_deployment(self):
+        for kind, name in (("rule", "w1"), ("connector", "rc"), ("agent", "default")):
+            doc, _, code = self._edit("remove", kind, name)
+            self.assertEqual(code, 0, (kind, doc))
+        self.assertEqual(self._doc(), {"connectors": [], "agents": {}, "watcher_rules": []})
+
+    def test_an_absent_name_is_an_error(self):
+        doc, _, code = self._edit("remove", "rule", "nope")
+        self.assertEqual(code, 1)
+        self.assertIn("no rule named 'nope'", doc["error"])
+
+
+class TestCLIConfigBackends(_ConfigCLIBase):
+
+    def test_reports_each_backend_with_its_command_and_whether_found(self):
+        def which(cmd):
+            return "/usr/local/bin/claude" if cmd == "claude" else None
+        with patch("gateway.config_edit.shutil.which", side_effect=which):
+            stdout, _, code = self._run_with(["config", "backends", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["backends"]["claude"],
+                         {"command": "claude", "found": True, "path": "/usr/local/bin/claude"})
+        self.assertEqual(doc["backends"]["opencode"],
+                         {"command": "opencode", "found": False, "path": None})
+
+    def test_text_mode_names_the_missing_ones(self):
+        with patch("gateway.config_edit.shutil.which", return_value=None):
+            stdout, _, code = self._run_with(["config", "backends"], running=False)
+        self.assertEqual(code, 0)
+        self.assertIn("claude", stdout)
+        self.assertIn("not found on PATH", stdout)
+
+
 class TestCLIStatusConfigLine(_ConfigCLIBase):
 
     def test_status_shows_the_active_digest_and_degraded_sections(self):
@@ -2011,6 +2617,43 @@ class TestStartValidatesConfig(_PreflightBase):
         with patch("gateway.daemon.start_daemon") as start:
             self._run(["start", "--config", cfg])
         start.assert_called_once_with(cfg)
+
+    def _empty_deployment(self) -> str:
+        """Valid, and nothing to run: no connector, agent or rule."""
+        from tests.helpers import gateway_config_text
+        return self._write(gateway_config_text(connectors=(), agents={}, rules=[]))
+
+    def test_start_refuses_an_empty_deployment_and_says_so(self):
+        # The FILE is valid (coop-keeper design §3.10) — `config validate`
+        # accepts it — but a daemon with no watcher rule would answer nothing.
+        cfg = self._empty_deployment()
+        with patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["start", "--config", cfg])
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn("[ERROR]", err)
+        self.assertIn("no watcher rules", err)
+
+    def test_start_refuses_connectors_and_agents_with_no_rule_and_says_rules_not_deployment(self):
+        # Not "empty deployment": the file has a connector and an agent, just no rule.
+        from tests.helpers import gateway_config_text
+        cfg = self._write(gateway_config_text(rules=[], working_directory=str(self.tmp)))
+        with patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["start", "--config", cfg])
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn("no watcher rules — nothing to run", err)
+        self.assertNotIn("empty deployment", err)
+
+    def test_restart_refuses_an_empty_deployment_before_stopping(self):
+        cfg = self._empty_deployment()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["restart", "--config", cfg])
+        self.assertEqual(code, 1)
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertIn("no watcher rules", err)
 
     def test_restart_validates_before_stopping_the_running_gateway(self):
         """The ordering half: validating inside the start would stop a healthy

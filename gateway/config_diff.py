@@ -276,7 +276,11 @@ SECRET_KEY_MARKERS = ("password", "token", "secret")
 REDACTED = "***"
 
 
-def is_secret_key(key: str) -> bool:
+def is_secret_key(key: object) -> bool:
+    """Only a string key can name a secret; `show --raw` walks hand-written
+    files where a YAML key may legally be an int or a date."""
+    if not isinstance(key, str):
+        return False
     lowered = key.lower()
     return any(marker in lowered for marker in SECRET_KEY_MARKERS)
 
@@ -317,6 +321,32 @@ def _redact_config(data: dict) -> dict:
 def redacted_config(config: GatewayConfig) -> dict:
     """The resolved config as plain values with secrets redacted, for `--json`."""
     return _redact_config(untagged(canonical(config)))
+
+
+# The top-level blocks of the RAW document (the file as written) whose immediate
+# keys are entity or template NAMES. `connectors` and `watcher_rules` are lists
+# there, so a name is a `name:` field's value and never a key.
+_RAW_NAMED_BLOCKS = (
+    "agents", "connector_templates", "agent_templates", "watcher_templates", "tool_presets",
+)
+
+
+def redact_raw_document(document: dict) -> dict:
+    """The file as written — templates, `inherits:`, `description`, key order —
+    with every value under a password, token or secret key replaced by
+    `REDACTED`, for `config show --raw` and the write commands' output
+    (coop-keeper design §3.10: masked, not missing).
+
+    Same walk as `_redact_config`, with the raw document's own named blocks
+    exempt from the key test: a template called `token-bots` or a preset called
+    `secret-tools` is shown, and only the fields under it are tested."""
+    out = {}
+    for key, value in document.items():
+        if key in _RAW_NAMED_BLOCKS and isinstance(value, dict):
+            out[key] = {name: _redact(entity) for name, entity in value.items()}
+        else:
+            out[key] = _redact(value, key)
+    return out
 
 
 def flatten_config(config: GatewayConfig) -> list[tuple[str, Any]]:

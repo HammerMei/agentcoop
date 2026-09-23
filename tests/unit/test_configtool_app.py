@@ -475,7 +475,7 @@ class TestValidationDetailsModal:
         # test's assertion focused on "exactly one real error, and 'v' shows
         # its message" rather than also exercising the (separately tested,
         # tests/unit/test_config_validate.py) "the only agent fails -> zero
-        # agents left -> a SECOND, global 'must define at least one agent'
+        # agents left -> a SECOND, global 'No agents parsed successfully'
         # finding too" edge case.
         config_path = _write_config(tmp_path, f"""\
             agents:

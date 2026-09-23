@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 
 from gateway.admin.base import (
+    AdminError,
     ChannelAlreadyExistsError,
     ChannelArchivedError,
     ChannelNotFoundError,
@@ -625,6 +626,38 @@ class TestDeleteUser(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(VerificationError):
             await admin.delete_user("alice")
+
+
+class TestReactivateUser(unittest.IsolatedAsyncioTestCase):
+    """Rocket.Chat has nothing this tool can reactivate — every outcome is an
+    error that says which case it is, so a plan that reached for this stops."""
+
+    async def test_not_found_says_deletion_is_permanent_and_points_at_create_user(self):
+        admin = _admin_with_mock_rest()
+        admin._rest._request = AsyncMock(side_effect=_http_error(400))
+        with self.assertRaises(UserNotFoundError) as ctx:
+            await admin.reactivate_user("alice", "n3w")
+        self.assertIn("permanent", str(ctx.exception))
+        self.assertIn("create-user", str(ctx.exception))
+
+    async def test_a_deactivated_account_is_reported_as_not_supported(self):
+        admin = _admin_with_mock_rest()
+        admin._rest._request = AsyncMock(return_value={
+            "success": True,
+            "user": {"_id": "u1", "username": "alice", "emails": [], "active": False}})
+        with self.assertRaises(AdminError) as ctx:
+            await admin.reactivate_user("alice", "n3w")
+        self.assertIn("not supported", str(ctx.exception))
+        self.assertEqual(admin._rest._request.await_count, 1, "lookup only, no write")
+
+    async def test_an_active_account_is_nothing_to_reactivate(self):
+        admin = _admin_with_mock_rest()
+        admin._rest._request = AsyncMock(return_value={
+            "success": True,
+            "user": {"_id": "u1", "username": "alice", "emails": [], "active": True}})
+        with self.assertRaises(AdminError) as ctx:
+            await admin.reactivate_user("alice", "n3w")
+        self.assertIn("nothing to reactivate", str(ctx.exception))
 
 
 class TestDeleteChannel(unittest.IsolatedAsyncioTestCase):
