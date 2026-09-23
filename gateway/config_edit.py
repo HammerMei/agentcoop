@@ -54,6 +54,32 @@ def yaml_error_summary(exc: yaml.YAMLError) -> str:
     return f"{problem}{where}"
 
 
+class _YamlLoadFailure(Exception):
+    """`load_yaml` could not produce a value; `str()` is a summary that never
+    carries source text or a constructed value."""
+
+
+def load_yaml(source: bytes | str | Any) -> Any:
+    """`yaml.safe_load` for this module's three entry points — the file, a
+    `--set` value, a `--file` fragment — with one failure summary.
+
+    Two exception families come out of PyYAML: `YAMLError` for syntax, whose
+    `str()` quotes the offending line, and the bare `ValueError`/`KeyError`/
+    `AttributeError` (and `RecursionError`) its constructors leak for a tagged
+    scalar such as `password: !!int hunter2`, whose message carries the value.
+    Neither may reach an operator, so both become a type-and-position summary.
+    The set is not enumerable across PyYAML releases (gateway/admin/config.py
+    reached the same conclusion), hence the broad clause on a one-call body."""
+    try:
+        return yaml.safe_load(source)
+    except yaml.YAMLError as exc:
+        raise _YamlLoadFailure(yaml_error_summary(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        raise _YamlLoadFailure(
+            f"{type(exc).__name__} while constructing a tagged value"
+        ) from exc
+
+
 def file_digest(data: bytes) -> str:
     """SHA-256 (hex) of the file's bytes — the `file_digest` the write commands
     report and `--if-digest` compares against."""
@@ -77,9 +103,9 @@ def read_document(path: str | Path) -> tuple[dict, str]:
     except OSError as exc:
         raise DocumentError(f"{path}: could not read: {exc}") from exc
     try:
-        document = yaml.safe_load(data)
-    except yaml.YAMLError as exc:
-        raise DocumentError(f"{path}: invalid YAML: {yaml_error_summary(exc)}") from exc
+        document = load_yaml(data)
+    except _YamlLoadFailure as exc:
+        raise DocumentError(f"{path}: invalid YAML: {exc}") from exc
     if document is None:
         document = {}
     if not isinstance(document, dict):
@@ -257,9 +283,9 @@ def parse_set(spec: str) -> tuple[str, object]:
         # for the wrong reason; the quoted form parses and is caught later.
         raise PatchError(f"{path} is the masked value {REDACTED!r} — a masked view is never written back")
     try:
-        value = yaml.safe_load(raw)
-    except yaml.YAMLError as exc:
-        raise PatchError(f"--set {path}: the value is not valid YAML ({type(exc).__name__})") from exc
+        value = load_yaml(raw)
+    except _YamlLoadFailure as exc:
+        raise PatchError(f"--set {path}: the value is not valid YAML ({exc})") from exc
     return path, value
 
 
@@ -397,11 +423,11 @@ def read_fragment_file(path: str) -> dict:
     file and the position, never a line of it."""
     try:
         with open(path, "rb") as f:
-            loaded = yaml.safe_load(f)
+            loaded = load_yaml(f)
     except OSError as exc:
         raise PatchError(f"could not read fragment {path!r}: {exc.strerror or exc}") from exc
-    except yaml.YAMLError as exc:
-        raise PatchError(f"fragment {path!r} is not valid YAML: {yaml_error_summary(exc)}") from exc
+    except _YamlLoadFailure as exc:
+        raise PatchError(f"fragment {path!r} is not valid YAML: {exc}") from exc
     return {} if loaded is None else loaded
 
 
@@ -477,9 +503,11 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
             # value of the wrong type can still reach a connector parser that
             # was never written for it (`server.url: []` meets `.rstrip`).
             # Here that is a refusal of the edit, not a traceback.
+            # Type only: the message of a constructor error carries the
+            # value it choked on, which may be a credential.
             raise PatchError(
-                f"the validator could not check the result ({type(exc).__name__}: {exc}) "
-                "— nothing written"
+                f"the validator could not check the result ({type(exc).__name__}) — "
+                "nothing written; 'coop config validate' on the file may say more"
             ) from exc
     finally:
         with contextlib.suppress(OSError):
@@ -706,6 +734,15 @@ def agent_fragment(
         raise PatchError(
             f"unknown agent type {agent_type!r} — one of "
             f"{', '.join(sorted(_AGENT_TYPE_DEFAULT_COMMAND))} (see 'coop config backends')"
+        )
+    if os.sep in command and not os.path.isabs(command):
+        # `./claude` would be checked here against the caller's directory and
+        # launched later against `working_directory` (§3.10: the command
+        # "resolves on PATH"). A bare name or an absolute path means one thing
+        # in both places.
+        raise PatchError(
+            f"command {command!r} is a relative path — give a bare command name found on "
+            "PATH, or an absolute path"
         )
     if resolve_command(command) is None:
         raise PatchError(

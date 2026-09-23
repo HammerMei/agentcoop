@@ -272,6 +272,39 @@ class TestFragmentFileAndJsonKeys(unittest.TestCase):
         json.dumps(out)
 
 
+class TestTaggedScalarsNeverEcho(unittest.TestCase):
+    """PyYAML's constructors leak bare ValueError/KeyError/AttributeError for a
+    tagged scalar, with the VALUE in the message. Every entry point loads
+    through `load_yaml`, so the value — here always a credential — never
+    reaches an error. The tags enumerate the constructor families PyYAML has;
+    a new one fails here, not in a review round."""
+
+    TAGGED = ("!!int hunter2", "!!float hunter2", "!!bool hunter2", "!!timestamp hunter2",
+              "!!binary hunter2!!", "!!python/object:os.system hunter2")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def test_the_file_the_set_value_and_the_fragment_file(self):
+        from gateway.config_edit import read_fragment_file
+        for tagged in self.TAGGED:
+            with self.subTest(tagged=tagged):
+                text = f"server:\n  password: {tagged}\n"
+                (self.tmp / "c.yaml").write_text(text)
+                with self.assertRaises(DocumentError) as ctx:
+                    read_document(self.tmp / "c.yaml")
+                self.assertNotIn("hunter2", str(ctx.exception))
+                with self.assertRaises(PatchError) as ctx:
+                    parse_set(f"server.password={tagged}")
+                self.assertNotIn("hunter2", str(ctx.exception))
+                (self.tmp / "f.yaml").write_text(text)
+                with self.assertRaises(PatchError) as ctx:
+                    read_fragment_file(str(self.tmp / "f.yaml"))
+                self.assertNotIn("hunter2", str(ctx.exception))
+
+
 class TestReadDocument(unittest.TestCase):
 
     def setUp(self):
@@ -394,6 +427,14 @@ class TestEditDocument(unittest.TestCase):
         self.assertIn("could not check the result", outcome.error)
         self.assertIn("AttributeError", outcome.error)
         self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_a_validator_crash_on_a_tagged_credential_in_the_file_does_not_echo_it(self):
+        # The file itself carries `password: !!int hunter2`: read_document
+        # refuses it before validation, and the refusal names no value.
+        self.path.write_text(self.path.read_text().replace("password: hunter2", "password: !!int hunter2"))
+        outcome = self._edit({"agents": {"default": {"timeout": 1}}}, dry_run=True)
+        self.assertFalse(outcome.ok)
+        self.assertNotIn("hunter2", json.dumps(outcome.to_dict()))
 
     def test_a_patch_error_is_reported_not_raised(self):
         outcome = self._edit(["not a mapping"], dry_run=True)

@@ -137,3 +137,52 @@ Notes:
 observed on a release that still carried the patterns (none should — they were dead
 there). F3 settles if a deny-mode bash hang with the legacy copy present is ever
 reported, which would show the experiment missed a plugin-order dependency.
+
+---
+
+## 2026-09-23 — PR #181 round 4
+
+Rounds 1–3 of this PR (25 findings) were triaged **without the skill**: CLAUDE.md's
+two questions and an ad-hoc severity re-rank, no chain detector, no second rater, no
+log entry. Recorded here as a process failure, not re-scored after the fact. The
+author's text-based framing had concluded that rounds 2 and 3 each landed ~half their
+findings "on the previous round's fix" and was about to stop the loop on that.
+
+**Chain detector** (run at round 4, from the working tree): 32 findings over 5 rounds,
+**no chain** — round 2 and round 4 each put one finding on the author's own last fix in
+one file (`gateway/admin/config.py`, `gateway/cli.py`), streak 1 both times; every
+other finding was new ground. The text framing and the detector disagree; the detector
+is the deterministic one and is what decides whether the loop continues.
+
+**Control finding:** none — no settled entry in this log yet. Agreement in this round
+is *not* evidence of independence; recorded as **uncorroborated**.
+
+All five findings were decided at Step 1 by both raters (gate `cheap`); no scoring
+arithmetic was needed. Codex labelled all five P2.
+
+| | F1 `!!int abc` escapes `read_document` | F2 `Path.exists()` in the `show --raw` error branch | F3 `--command ./claude` checked against cwd | F4 `password: !!int hunter2` in a fragment → traceback carrying the value | F5 `--entry` checked before `--file` is applied |
+|---|---|---|---|---|---|
+| rater 1 (author) `cheap` | yes — broad clause at the load, 2 lines | yes — try/except, 2 lines | yes — refuse a relative path with a separator, 3 lines | yes — same clause as F1 | yes — apply the file first, 3 lines |
+| rater 2 (blind) `cheap` | yes — 2 lines; class is 3 exception types, not 1 | yes — 2 lines, and a `chmod 000` parent is a realistic trigger Codex did not name | yes — refuse, 2–3 lines; do **not** thread `working_directory` through `resolve_command` (shared with `backends`) | yes — but fix at the three `safe_load` sites as one sweep; also found the same hole at `parse_set`, and the round-2 boundary echoing `{exc}` in a controlled-looking `ok: false` | yes — ~3 lines, and a simplification |
+| `cannot-occur` | no (both) | no (both) | no — rater 2 traced `adapter.py:537` `cwd=working_directory` | no (both; reproduced) | no (both; reproduced) |
+| `silent` | no | no | no — deferred to first use, but loud | no | no |
+| verdict | **FIX** / **FIX** | **FIX** / **FIX** | **FIX** / **FIX** | **FIX** / **FIX** | **FIX** / **FIX** |
+
+Verdicts agree on all five → settled per the Step 4 table, **uncorroborated**.
+
+Notes:
+- Rater 2's sweep was adopted over five patches: one `load_yaml` for the file, the
+  `--set` value and the `--file` fragment; both `{exc}` boundaries reduced to the
+  exception type; a test enumerating PyYAML's tag constructors at all three sites.
+- Layer, F3 (rater 2): the add-time gate owns the check; `resolve_command` stays the
+  one lookup `backends` shares.
+- Layer, F4 (rater 2): the load seam owns it, not the CLI branch the finding pointed at.
+- Adoption this round: 5 of 5 acted on — as the `cheap` gate predicts for a batch of
+  two-line fixes; not a sign the triage is idle, since the gate was applied to the
+  cheapest correct fix rather than the reviewer's proposal (F3, F4 differ from Codex's).
+- On continuing: rater 2 read the round as "two consecutive rounds landing in the
+  previous fix" from the *text*; the detector says otherwise from the *metadata*. Both
+  recommend one more round after the sweep. Owner's call.
+
+**Status: open.** Settles when a round on the swept code finds no further member of the
+class, or finds one (which would say the sweep was incomplete).

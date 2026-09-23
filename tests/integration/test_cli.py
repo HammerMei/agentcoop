@@ -1960,6 +1960,29 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         doc = json.loads(stdout)
         self.assertEqual(doc["config"]["2026-01-01"], "value")
 
+    def test_an_unreadable_path_is_a_structured_refusal_not_a_traceback(self):
+        # Path.exists() itself raises on an overlong name; the error branch
+        # must not repeat the probe that just failed.
+        overlong = str(Path(self.tmp) / ("x" * 5000 + ".yaml"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", overlong, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIsNone(doc["exists"])
+
+    def test_a_tagged_credential_in_the_file_never_reaches_any_output(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "password: hunter2", "password: !!int hunter2"))
+        for argv in (["config", "show", "--config", self.cfg_path, "--raw", "--json"],
+                     ["config", "show", "--config", self.cfg_path, "--raw"],
+                     ["config", "patch", "--config", self.cfg_path, "--set", "a=1", "--dry-run", "--json"],
+                     ["config", "patch", "--config", self.cfg_path, "--set", "a=1", "--dry-run"]):
+            stdout, stderr, code = self._run_with(argv, running=False)
+            self.assertEqual(code, 1, argv)
+            self.assertNotIn("hunter2", stdout + stderr, argv)
+            self.assertNotIn("Traceback", stderr, argv)
+
     def test_a_yaml_error_on_a_credential_line_does_not_echo_it(self):
         Path(self.cfg_path).write_text("server:\n  password: hunter2: oops\n")
         stdout, stderr, code = self._run_with(
@@ -2097,6 +2120,15 @@ class TestCLIConfigPatch(_EditCLIBase):
         self.assertEqual(sorted(on_disk["agents"]), ["default", "second"])
         self.assertNotIn("s3cret", json.dumps(doc))
         self.assertEqual(doc["config"]["connectors"][1]["server"]["password"], "***")
+
+    def test_entry_may_name_an_entry_the_same_invocations_file_adds(self):
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text("connectors:\n  - {name: rc-2, op: add, type: rocketchat,\n"
+                            "     server: {url: http://rc-2:3000, username: bot, password: pw}}\n")
+        doc, _, code = self._edit("patch", "--file", str(fragment),
+                                  "--entry", "connector:rc-2", "--set", "description=added-and-tuned")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["description"], "added-and-tuned")
 
     def test_the_masked_sentinel_is_refused_from_set_and_from_a_fragment(self):
         for spelling in ("server.password=***", "server.password='***'"):
@@ -2302,6 +2334,18 @@ class TestCLIConfigAdd(_EditCLIBase):
                 "--working-directory", str(self.agent_dir), "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("unknown agent type 'clade'", doc["error"])
+        # A relative path would be checked here against the caller's cwd and
+        # launched against working_directory; an absolute path is fine.
+        with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "./claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+            self.assertEqual(code, 1)
+            self.assertIn("relative path", doc["error"])
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "/opt/bin/claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+            self.assertEqual(code, 0, doc)
 
     def test_add_rule_writes_rooms_only_when_asked_and_validates_the_whole_file(self):
         doc, _, code = self._edit("add", "rule", "w2", "--connector", "rc", "--agent", "default",

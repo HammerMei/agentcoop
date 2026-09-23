@@ -1221,9 +1221,13 @@ def _run_config_show_raw(args) -> None:
     except DocumentError as exc:
         if args.json:
             # Same keys as the success document, so a consumer reads one shape.
+            try:
+                exists: bool | None = Path(args.config).exists()
+            except OSError:
+                exists = None  # the same unreadable path that just failed to read
             print(json.dumps({"ok": False, "error": str(exc),
                               "config_path": os.path.abspath(args.config),
-                              "exists": Path(args.config).exists(), "file_digest": None,
+                              "exists": exists, "file_digest": None,
                               "config": None, "findings": []}, indent=2))
         else:
             print(f"[ERROR] {exc}", file=sys.stderr)
@@ -1238,7 +1242,8 @@ def _run_config_show_raw(args) -> None:
             # becomes one error finding beside it rather than a traceback.
             ok, findings = False, [{
                 "level": "error", "entity_kind": "global", "entity_name": None, "field": None,
-                "message": f"the validator could not check this file ({type(exc).__name__}: {exc})",
+                # Type only: a constructor error's message carries the value.
+                "message": f"the validator could not check this file ({type(exc).__name__})",
             }]
         else:
             ok = result.ok
@@ -1292,12 +1297,13 @@ def _run_config_edit(args) -> None:
 
             def mutate(document: dict) -> dict:
                 # `--file` first, then the paths on top: an explicit --set is
-                # the more specific instruction. --entry is checked against
-                # the document, so the paths are built here.
+                # the more specific instruction, and --entry may name an entry
+                # the fragment just added — so the paths are checked against
+                # the fragment-applied document, not the original.
+                with_file = ce.apply_fragment(document, from_file) if from_file else document
                 paths = ce.prepare_fragment(
-                    ce.fragment_from_paths(sets, list(args.unset), entry, document))
-                fragment = ce.apply_fragment(from_file, paths) if paths else from_file
-                return ce.apply_fragment(document, fragment)
+                    ce.fragment_from_paths(sets, list(args.unset), entry, with_file))
+                return ce.apply_fragment(with_file, paths) if paths else with_file
 
         elif args.config_cmd == "remove":
             def mutate(document: dict) -> dict:
@@ -1344,7 +1350,8 @@ def _run_config_edit(args) -> None:
             # review rounds each found one more such input; this ends the class.
             outcome = ce.EditOutcome(
                 ok=False, dry_run=args.dry_run, config_path=os.path.abspath(args.config),
-                error=f"could not apply the edit ({type(exc).__name__}: {exc}) — nothing written")
+                error=f"could not apply the edit ({type(exc).__name__}) — nothing written; "
+                      "'coop config validate' on the file may say more")
     _report_edit(outcome, json_mode=args.json)
 
 
