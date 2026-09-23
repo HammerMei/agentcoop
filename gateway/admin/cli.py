@@ -57,6 +57,7 @@ from gateway.admin.config import (
     masked_profiles,
 )
 from gateway.admin.factory import admin_factory
+from gateway.config_edit import PatchError, read_secret_file
 from gateway.paths import RUNTIME_DIR
 
 DEFAULT_LOG_FILE = str(RUNTIME_DIR / "coop-provision.log")
@@ -277,19 +278,14 @@ def parse_argv(argv: list[str]) -> argparse.Namespace:
 
 
 def _read_password_file(path: str) -> str:
-    """One trailing newline stripped (what `openssl rand -hex > file` leaves),
-    nothing else; empty is refused. The error names the path, never content."""
+    """The same reader `coop config add --password-file` and `{from_file:}`
+    use: one trailing newline stripped, empty refused, errors name the path
+    and never the content. Re-raised as RuntimeError, which _run() reports
+    as a clean `Error:` line."""
     try:
-        text = Path(path).expanduser().read_text()
-    except OSError as e:
-        raise RuntimeError(f"could not read password file '{path}': {e.strerror or e}") from e
-    if text.endswith("\r\n"):
-        text = text[:-2]
-    elif text.endswith("\n"):
-        text = text[:-1]
-    if not text:
-        raise RuntimeError(f"password file '{path}' is empty")
-    return text
+        return read_secret_file(path)
+    except PatchError as e:
+        raise RuntimeError(str(e)) from e
 
 
 def _password_from_args(args: argparse.Namespace) -> str:
@@ -375,7 +371,7 @@ async def _dispatch(admin, args) -> None:
     elif args.command == "check":
         # connect() already ran (authenticated, and for Mattermost resolved
         # the team) before dispatch — reaching here IS the check passing.
-        print(f"Profile '{args.profile}' works: authenticated with {args.server_url_for_check}")
+        print(f"Profile '{args.profile}' works: authenticated with {admin.profile.server_url}")
 
 
 def _run_file_command(args: argparse.Namespace) -> int:
@@ -435,7 +431,6 @@ async def _run(args: argparse.Namespace) -> int:
     except AdminConfigError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    args.server_url_for_check = profile.server_url
 
     try:
         await admin.connect()

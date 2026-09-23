@@ -9,8 +9,12 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .paths import RUNTIME_DIR
+
+if TYPE_CHECKING:
+    from .config_edit import EditOutcome
 
 CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 
@@ -1203,7 +1207,7 @@ def _run_config_show_raw(args) -> None:
 
     The file as written, credentials masked as `***`, its file digest, and the
     validation findings — printed whether or not the file validates, because
-    the keeper reads a hand-written file with this before it can fix it. The
+    coop-keeper reads a hand-written file with this before it can fix it. The
     exit code still says whether the file is valid.
     """
     import yaml
@@ -1271,7 +1275,9 @@ def _run_config_edit(args) -> None:
                 except OSError as exc:
                     raise ce.PatchError(f"could not read fragment {args.file!r}: {exc}") from exc
                 except yaml.YAMLError as exc:
-                    raise ce.PatchError(f"fragment {args.file!r} is not valid YAML: {exc}") from exc
+                    raise ce.PatchError(
+                        f"fragment {args.file!r} is not valid YAML: {ce.yaml_error_summary(exc)}"
+                    ) from exc
                 if from_file is None:
                     from_file = {}
                 # `--file` first, then the paths on top: an explicit --set is
@@ -1280,16 +1286,16 @@ def _run_config_edit(args) -> None:
                     if fragment else ce.prepare_fragment(from_file)
             fragment = ce.prepare_fragment(fragment)
 
-            def mutate(document):
+            def mutate(document: dict) -> dict:
                 return ce.apply_fragment(document, fragment)
 
         elif args.config_cmd == "remove":
-            def mutate(document):
+            def mutate(document: dict) -> dict:
                 return ce.apply_fragment(
                     document, ce.remove_fragment(document, args.remove_kind, args.name))
 
         else:  # add
-            def mutate(document):
+            def mutate(document: dict) -> dict:
                 if args.add_kind == "connector":
                     fragment = ce.connector_fragment(
                         document, config_path, name=args.name, connector_type=args.type,
@@ -1306,8 +1312,8 @@ def _run_config_edit(args) -> None:
                         include=args.include, direct=args.direct, inherits=args.inherits)
                 return ce.apply_fragment(document, fragment)
 
-            def extra(merged):
-                block = {"connector": "connectors", "agent": "agents", "rule": "watcher_rules"}[args.add_kind]
+            def extra(merged: dict) -> dict:
+                block = ce.REMOVABLE[args.add_kind]
                 masked = redact_raw_document({block: merged.get(block)})[block]
                 if isinstance(masked, dict):
                     entry = masked.get(args.name)
@@ -1324,7 +1330,7 @@ def _run_config_edit(args) -> None:
     _report_edit(outcome, json_mode=args.json)
 
 
-def _report_edit(outcome, *, json_mode: bool) -> None:
+def _report_edit(outcome: "EditOutcome", *, json_mode: bool) -> None:
     if json_mode:
         print(json.dumps(outcome.to_dict(), indent=2, default=str))
     elif outcome.ok:

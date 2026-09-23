@@ -374,12 +374,14 @@ class TestNewCommands(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.pw = os.path.join(self._tmp.name, "pw")
-        with open(self.pw, "w") as f:
-            f.write("s3cret\n")
+        from tests.helpers import write_secret_file
+        self.pw = write_secret_file(self._tmp.name)
 
     def _admin(self):
+        # Local like every other AsyncMock admin in this module: the double
+        # is this CLI's own seam (admin_factory is patched), used nowhere else.
         mock_admin = AsyncMock()
+        mock_admin.profile = _PROFILE  # both real admins keep the profile they were built from
         mock_admin.create_user = AsyncMock(
             return_value=AdminUser(id="u1", username="alice", email="a@x.com"))
         mock_admin.reactivate_user = AsyncMock(

@@ -2,7 +2,7 @@
 `show --raw` and `backends` (coop-keeper design §3.10).
 
 Everything here works on the RAW document — the file as written, templates and
-`inherits:` intact — never on the resolved `GatewayConfig`: the keeper edits by
+`inherits:` intact — never on the resolved `GatewayConfig`: coop-keeper edits by
 path and the file must come back the way the operator wrote it, one entry
 changed. Resolution is validation's job; a merged document is dumped beside the
 file and handed to `validate_config()` before anything is written, and the write
@@ -27,7 +27,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -42,6 +42,16 @@ class DocumentError(Exception):
     """The file cannot be read as a configuration document at all — missing,
     unreadable, not YAML, or not a mapping. Distinct from a document that reads
     fine and fails validation."""
+
+
+def yaml_error_summary(exc: yaml.YAMLError) -> str:
+    """What went wrong and where, WITHOUT the source snippet `str(exc)`
+    carries — that snippet is the offending line, which in a configuration
+    file may be `password: …`."""
+    mark = getattr(exc, "problem_mark", None)
+    where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+    problem = getattr(exc, "problem", None) or type(exc).__name__
+    return f"{problem}{where}"
 
 
 def file_digest(data: bytes) -> str:
@@ -63,7 +73,7 @@ def read_document(path: str | Path) -> tuple[dict, str]:
     try:
         document = yaml.safe_load(data)
     except yaml.YAMLError as exc:
-        raise DocumentError(f"{path}: invalid YAML: {exc}") from exc
+        raise DocumentError(f"{path}: invalid YAML: {yaml_error_summary(exc)}") from exc
     if document is None:
         document = {}
     if not isinstance(document, dict):
@@ -127,11 +137,11 @@ class PatchError(Exception):
     names the place and never echoes a value (a value may be a credential)."""
 
 
-def _deepcopy(value):
+def _deepcopy(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
-def merge_patch(target, patch):
+def merge_patch(target: Any, patch: Any) -> Any:
     """RFC 7386: `patch` applied to `target`. Returns a new structure."""
     if not isinstance(patch, dict):
         return _deepcopy(patch)
@@ -144,7 +154,7 @@ def merge_patch(target, patch):
     return out
 
 
-def merge_named_list(existing, items: list, block: str) -> list:
+def merge_named_list(existing: Any, items: list, block: str) -> list:
     """The file's `block` list with the fragment's `items` merged in by name."""
     if existing is None:
         existing = []
@@ -192,7 +202,7 @@ def merge_named_list(existing, items: list, block: str) -> list:
     return out
 
 
-def apply_fragment(document: dict, fragment) -> dict:
+def apply_fragment(document: dict, fragment: Any) -> dict:
     """`fragment` (a `--file` document, or one built from `--set`/`--unset`)
     applied to the raw `document`. Neither input is modified."""
     if not isinstance(fragment, dict):
@@ -227,7 +237,9 @@ def parse_set(spec: str) -> tuple[str, object]:
     `"500"` a string. The value is never echoed in an error."""
     path, sep, raw = spec.partition("=")
     if not sep or not path:
-        raise PatchError(f"--set needs <path>=<value>, got {spec!r}")
+        # The argument is not echoed: with no '=' there is no telling which
+        # half of it the operator meant as the value.
+        raise PatchError("--set needs <path>=<value>")
     if raw.strip() == REDACTED:
         # Not valid YAML (`*` opens an alias), so it would otherwise be refused
         # for the wrong reason; the quoted form parses and is caught later.
@@ -239,11 +251,16 @@ def parse_set(spec: str) -> tuple[str, object]:
     return path, value
 
 
-def _nest(path: str, value) -> dict:
+def _segments(path: str) -> list[str]:
     keys = path.split(".")
     if any(not k for k in keys):
         raise PatchError(f"path {path!r} has an empty segment")
-    out = value
+    return keys
+
+
+def _nest(path: str, value: Any) -> dict:
+    keys = _segments(path)
+    out: Any = value
     for key in reversed(keys):
         out = {key: out}
     return out
@@ -269,9 +286,7 @@ def fragment_from_paths(
 def _nest_into(body: dict, path: str) -> dict:
     """Place an explicit `None` (a merge-patch delete) at `path` in `body` —
     `merge_patch` would drop it, so the leaf is set by hand."""
-    keys = path.split(".")
-    if any(not k for k in keys):
-        raise PatchError(f"path {path!r} has an empty segment")
+    keys = _segments(path)
     out = _deepcopy(body)
     cursor = out
     for key in keys[:-1]:
@@ -303,7 +318,7 @@ def read_secret_file(path: str) -> str:
     return text
 
 
-def resolve_from_file(value, where: str = ""):
+def resolve_from_file(value: Any, where: str = "") -> Any:
     """Every `{from_file: <path>}` mapping in `value` replaced by that file's
     content. A mapping carrying `from_file` and other keys is refused."""
     if isinstance(value, dict):
@@ -320,7 +335,7 @@ def resolve_from_file(value, where: str = ""):
     return value
 
 
-def find_sentinel(value, where: str = "") -> str | None:
+def find_sentinel(value: Any, where: str = "") -> str | None:
     """The path of the first value equal to `REDACTED`, or None."""
     if isinstance(value, str):
         return where or "value" if value == REDACTED else None
@@ -337,7 +352,7 @@ def find_sentinel(value, where: str = "") -> str | None:
     return None
 
 
-def prepare_fragment(fragment) -> dict:
+def prepare_fragment(fragment: Any) -> dict:
     """A fragment as the operator gave it → the fragment to apply: `from_file`
     values read, and the masked sentinel refused wherever it appears (a masked
     view must never be written back)."""

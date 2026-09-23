@@ -16,6 +16,7 @@ where it is wrong rather than three layers away.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from gateway.agents import AgentBackend
@@ -716,3 +717,11 @@ def build_backend_kwargs(agent_cfg, backend_name: str) -> dict:
     with patch(f"gateway.service.{backend_name}", side_effect=_capture):
         _build_agent_backend(agent_cfg)
     return captured
+
+
+def write_secret_file(directory, content: str = "s3cret\n", name: str = "pw") -> str:
+    """A credential file for `--password-file` / `{from_file:}` tests; returns
+    its path as a string, the way a CLI argument carries it."""
+    path = Path(directory) / name
+    path.write_text(content)
+    return str(path)

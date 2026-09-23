@@ -32,6 +32,7 @@ from pathlib import Path
 
 import yaml
 
+from gateway.config_diff import REDACTED
 from gateway.paths import RUNTIME_DIR
 
 
@@ -122,7 +123,7 @@ _StrictLoader.add_constructor(
 )
 
 
-# Beside config.yaml, not in the current directory: the keeper runs
+# Beside config.yaml, not in the current directory: coop-keeper runs
 # coop-provision from its own directory, which an upgrade replaces wholesale
 # (coop-keeper design §3.10). `--config` and COOP_ADMIN_CONFIG still override.
 DEFAULT_CONFIG_PATH = RUNTIME_DIR / "admin-profiles.yaml"
@@ -134,7 +135,7 @@ SUPPORTED_TYPES = ("rocketchat", "mattermost")
 # operator to fill; `profiles --json` shows each as "" (unfilled) or "***"
 # (filled), never the value.
 CREDENTIAL_FIELDS = ("username", "password", "token")
-MASKED = "***"
+MASKED = REDACTED  # the one sentinel every masked view in this project prints
 
 
 class AdminConfigError(Exception):

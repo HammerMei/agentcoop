@@ -36,7 +36,7 @@ from gateway.config_edit import (
     read_document,
     read_secret_file,
 )
-from tests.helpers import gateway_config_text
+from tests.helpers import gateway_config_text, write_secret_file
 
 
 class TestMergePatch(unittest.TestCase):
@@ -145,6 +145,9 @@ class TestPathsAndEntry(unittest.TestCase):
         with self.assertRaises(PatchError) as ctx:
             parse_set("server.password=[unclosed")
         self.assertNotIn("unclosed", str(ctx.exception))
+        with self.assertRaises(PatchError) as ctx:
+            parse_set("hunter2")  # no '=': which half is the value is unknowable
+        self.assertNotIn("hunter2", str(ctx.exception))
 
     def test_entry_scopes_every_set_and_unset_to_one_list_entry(self):
         fragment = fragment_from_paths(
@@ -173,9 +176,7 @@ class TestCredentialValues(unittest.TestCase):
         self.tmp = Path(self._tmp.name)
 
     def _file(self, content: str, name="pw") -> str:
-        path = self.tmp / name
-        path.write_text(content)
-        return str(path)
+        return write_secret_file(self.tmp, content, name)
 
     def test_one_trailing_newline_is_stripped_and_nothing_else(self):
         self.assertEqual(read_secret_file(self._file("s3cret\n")), "s3cret")
@@ -225,6 +226,14 @@ class TestReadDocument(unittest.TestCase):
         document, digest = read_document(path)
         self.assertEqual(document, {})
         self.assertEqual(digest, hashlib.sha256(path.read_bytes()).hexdigest())
+
+    def test_a_yaml_error_names_the_place_but_never_the_offending_line(self):
+        # str(YAMLError) quotes the source line — which here is a credential.
+        (self.tmp / "bad.yaml").write_text("server:\n  password: hunter2: oops\n")
+        with self.assertRaises(DocumentError) as ctx:
+            read_document(self.tmp / "bad.yaml")
+        self.assertIn("line 2", str(ctx.exception))
+        self.assertNotIn("hunter2", str(ctx.exception))
 
     def test_missing_invalid_and_non_mapping_files_are_document_errors(self):
         with self.assertRaises(DocumentError):

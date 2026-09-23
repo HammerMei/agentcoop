@@ -1940,6 +1940,21 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         self.assertFalse(doc["ok"])
         self.assertIn("invalid YAML", doc["error"])
 
+    def test_a_yaml_error_on_a_credential_line_does_not_echo_it(self):
+        Path(self.cfg_path).write_text("server:\n  password: hunter2: oops\n")
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        self.assertNotIn("hunter2", stdout + stderr)
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text("server:\n  password: hunter2: oops\n")
+        self._write_config()
+        stdout, stderr, code = self._run_with(
+            ["config", "patch", "--config", self.cfg_path, "--file", str(fragment), "--json"],
+            running=False)
+        self.assertEqual(code, 1)
+        self.assertNotIn("hunter2", stdout + stderr)
+
     def test_an_empty_deployment_is_valid_and_shown(self):
         Path(self.cfg_path).write_text("connectors: []\nagents: {}\n")
         stdout, _, code = self._run_with(
@@ -1965,9 +1980,8 @@ class _EditCLIBase(_ConfigCLIBase):
         return json.loads(stdout), stderr, code
 
     def _secret_file(self, content: str, name="pw") -> str:
-        path = Path(self.tmp) / name
-        path.write_text(content)
-        return str(path)
+        from tests.helpers import write_secret_file
+        return write_secret_file(self.tmp, content, name)
 
 
 class TestCLIConfigPatch(_EditCLIBase):
