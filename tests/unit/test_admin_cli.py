@@ -404,13 +404,14 @@ class TestNewCommands(unittest.IsolatedAsyncioTestCase):
         mock_admin.create_user.assert_awaited_once_with("alice", "a@x.com", "s3cret", full_name=None)
         self.assertNotIn("s3cret", out + err)
 
-    async def test_create_user_refuses_both_forms_and_neither(self):
+    async def test_create_user_refuses_both_forms_and_neither_before_connecting(self):
         for argv in (["p", "create-user", "alice", "a@x.com", "pw", "--password-file", self.pw],
                      ["p", "create-user", "alice", "a@x.com"]):
             mock_admin = self._admin()
             code, _, err = await self._run(argv, mock_admin)
             self.assertEqual(code, 1, argv)
             self.assertIn("password", err)
+            mock_admin.connect.assert_not_awaited()
             mock_admin.create_user.assert_not_awaited()
 
     async def test_a_missing_or_empty_password_file_is_an_error_naming_the_path(self):
@@ -552,13 +553,21 @@ class TestFileCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, 1)
         self.assertIn("must set either 'token'", err.getvalue())
 
-    async def test_profiles_on_a_missing_file_is_a_clean_error(self):
-        code, out, err = await self._run(["profiles", "--json"])
+    async def test_profiles_on_a_missing_file_is_no_profiles_not_an_error(self):
+        # The state bootstrap starts from (coop-keeper design §3.2).
+        code, out, _ = await self._run(["profiles", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), {"ok": True, "profiles": []})
+        code, out, _ = await self._run(["profiles"])
+        self.assertEqual(code, 0)
+        self.assertIn("No profiles defined", out)
+
+    async def test_profiles_on_a_malformed_file_is_still_an_error(self):
+        with open(self.path, "w") as f:
+            f.write("profiles: [\n")
+        code, out, _ = await self._run(["profiles", "--json"])
         self.assertEqual(code, 1)
         self.assertFalse(json.loads(out)["ok"])
-        code, _, err = await self._run(["profiles"])
-        self.assertEqual(code, 1)
-        self.assertIn("coop-provision init", err)
 
 
 class TestCloseFailureDoesNotChangeTheOutcome(unittest.IsolatedAsyncioTestCase):

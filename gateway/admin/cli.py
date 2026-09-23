@@ -299,9 +299,8 @@ def _password_from_args(args: argparse.Namespace) -> str:
     return given
 
 
-async def _dispatch(admin, args) -> None:
+async def _dispatch(admin, args, password: str | None) -> None:
     if args.command == "create-user":
-        password = _password_from_args(args)
         try:
             user = await admin.create_user(
                 args.username, args.email, password, full_name=args.full_name,
@@ -364,7 +363,6 @@ async def _dispatch(admin, args) -> None:
         print(f"Deleted channel '{args.channel}'")
 
     elif args.command == "reactivate-user":
-        password = _read_password_file(args.password_file)
         user = await admin.reactivate_user(args.username, password)
         print(f"Reactivated user '{user.username}' (id={user.id}) with the new password")
 
@@ -385,7 +383,7 @@ def _run_file_command(args: argparse.Namespace) -> int:
             print(f"Wrote profile '{args.profile}' to {path} with empty credential fields — "
                   f"fill them in an editor, then run 'coop-provision {args.profile} check'.")
         elif args.command == "profiles":
-            listed = masked_profiles(args.config)
+            listed = masked_profiles(args.config, missing_ok=True)
             if args.json:
                 print(json.dumps({"ok": True, "profiles": listed}, indent=2))
             elif not listed:
@@ -433,8 +431,16 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
 
     try:
+        # The password is resolved BEFORE connect(): a missing file or a
+        # both-forms mistake is the operator's to fix, and should not wait
+        # behind (or hide behind) a network error.
+        password = None
+        if args.command == "create-user":
+            password = _password_from_args(args)
+        elif args.command == "reactivate-user":
+            password = _read_password_file(args.password_file)
         await admin.connect()
-        await _dispatch(admin, args)
+        await _dispatch(admin, args, password)
     except httpx.HTTPStatusError as e:
         # httpx's own str(e) is generic ("Client error '400 Bad Request' for
         # url '...'") and never shows *why* — the platform's actual message

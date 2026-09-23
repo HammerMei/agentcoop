@@ -1955,6 +1955,19 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         self.assertEqual(code, 1)
         self.assertNotIn("hunter2", stdout + stderr)
 
+    def test_a_file_that_does_not_exist_yet_is_shown_as_the_empty_deployment(self):
+        fresh = str(Path(self.tmp) / "fresh" / "config.yaml")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", fresh, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0, stdout)
+        doc = json.loads(stdout)
+        self.assertEqual((doc["ok"], doc["exists"], doc["config"], doc["findings"]),
+                         (True, False, {}, []))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", fresh, "--raw"], running=False)
+        self.assertEqual(code, 0)
+        self.assertIn("does not exist yet", stdout)
+
     def test_an_empty_deployment_is_valid_and_shown(self):
         Path(self.cfg_path).write_text("connectors: []\nagents: {}\n")
         stdout, _, code = self._run_with(
@@ -2108,6 +2121,22 @@ class TestCLIConfigPatch(_EditCLIBase):
         doc, _, code = self._edit("patch", "--entry", "agent:x", "--set", "a=1")
         self.assertEqual(code, 1)
         self.assertIn("--entry", doc["error"])
+        # --entry addresses an entry; an absent name is said plainly, not appended.
+        doc, _, code = self._edit("patch", "--entry", "connector:nope", "--set", "timeout=1")
+        self.assertEqual(code, 1)
+        self.assertEqual(doc["error"], "--entry: no connector named 'nope'")
+        self.assertEqual([c["name"] for c in self._doc()["connectors"]], ["rc"])
+
+    def test_the_first_patch_creates_a_config_that_does_not_exist_yet(self):
+        # Bootstrap (§3.2): a plan against a machine with no config.yaml.
+        fresh = str(Path(self.tmp) / "fresh" / "config.yaml")
+        stdout, _, code = self._run_with(
+            ["config", "patch", "--config", fresh, "--set", "connector_templates.default.reply_in_thread=false",
+             "--json"], running=False)
+        self.assertEqual(code, 0, stdout)
+        self.assertEqual(yaml.safe_load(Path(fresh).read_text()),
+                         {"connector_templates": {"default": {"reply_in_thread": False}}})
+        self.assertEqual(Path(fresh).stat().st_mode & 0o777, 0o600)
 
 
 class TestCLIConfigAdd(_EditCLIBase):
@@ -2125,6 +2154,21 @@ class TestCLIConfigAdd(_EditCLIBase):
                                  "allowed_users": {"owners": ["glin"]}})
         self.assertEqual(doc["entry"]["server"]["password"], "***")
         self.assertNotIn("s3cret", json.dumps(doc))
+
+    def test_add_refuses_the_masked_sentinel_from_a_password_file_or_an_argument(self):
+        pw = self._secret_file("***\n")
+        before = Path(self.cfg_path).read_bytes()
+        doc, _, code = self._edit(
+            "add", "connector", "bob@mm", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "lab", "--username", "bob", "--password-file", pw)
+        self.assertEqual(code, 1)
+        self.assertIn("'***'", doc["error"])
+        doc, _, code = self._edit(
+            "add", "connector", "bob@mm", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "lab", "--username", "***", "--password-file", self._secret_file("x\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("'***'", doc["error"])
+        self.assertEqual(Path(self.cfg_path).read_bytes(), before)
 
     def test_add_connector_refuses_an_existing_name(self):
         pw = self._secret_file("x\n")

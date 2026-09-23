@@ -369,11 +369,15 @@ def load_profile(path: str | Path | None, name: str) -> AdminProfile:
     return _build_profile(config_path, name, raw_profiles[name])
 
 
-def masked_profiles(path: str | Path | None = None) -> list[dict]:
+def masked_profiles(path: str | Path | None = None, *, missing_ok: bool = False) -> list[dict]:
     """Every profile's name, type, server URL and team, with each credential
     field shown as "" when unfilled and `MASKED` when filled — so a caller
     can tell a skeleton from a usable profile without seeing a value.
-    Reads the file as written: an unfilled skeleton is listed, not refused."""
+    Reads the file as written: an unfilled skeleton is listed, not refused.
+    With `missing_ok`, no file yet is no profiles — the state bootstrap
+    starts from (coop-keeper design §3.2) — rather than an error."""
+    if missing_ok and not _resolve_config_path(path).exists():
+        return []
     _, raw_profiles = load_raw_profiles(path)
     out = []
     for name, fields in raw_profiles.items():

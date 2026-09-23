@@ -124,6 +124,13 @@ class TestApplyFragment(unittest.TestCase):
         self.assertEqual(sorted(out["agents"]), ["a", "c"])
         self.assertEqual(out["watcher_rules"], [])
 
+    def test_the_sentinel_is_refused_at_the_one_place_every_write_passes(self):
+        # `add` builds its fragment from arguments and never goes through
+        # prepare_fragment; the guard here is what catches a `***` password file.
+        with self.assertRaises(PatchError) as ctx:
+            apply_fragment({}, {"connectors": [{"name": "rc", "server": {"password": REDACTED}}]})
+        self.assertIn("connectors[0].server.password", str(ctx.exception))
+
     def test_a_null_block_removes_it_and_a_non_mapping_fragment_is_refused(self):
         out = apply_fragment({"connectors": [{"name": "rc"}], "agents": {}}, {"connectors": None})
         self.assertEqual(out, {"agents": {}})
@@ -160,6 +167,14 @@ class TestPathsAndEntry(unittest.TestCase):
         for bad in ("agent:x", "connector:", "connector", ":x"):
             with self.assertRaises(PatchError, msg=bad):
                 parse_entry(bad)
+
+    def test_entry_must_name_an_existing_entry_when_the_document_is_known(self):
+        doc = {"connectors": [{"name": "rc"}], "watcher_rules": []}
+        fragment = fragment_from_paths([("timeout", 5)], [], parse_entry("connector:rc"), doc)
+        self.assertEqual(fragment, {"connectors": [{"name": "rc", "timeout": 5}]})
+        with self.assertRaises(PatchError) as ctx:
+            fragment_from_paths([("timeout", 5)], [], parse_entry("rule:nope"), doc)
+        self.assertEqual(str(ctx.exception), "--entry: no rule named 'nope'")
 
     def test_without_entry_the_paths_are_top_level_and_a_later_set_wins(self):
         fragment = fragment_from_paths([("a.b", 1), ("a.b", 2), ("a.c", 3)], ["d"], None)
@@ -235,9 +250,13 @@ class TestReadDocument(unittest.TestCase):
         self.assertIn("line 2", str(ctx.exception))
         self.assertNotIn("hunter2", str(ctx.exception))
 
-    def test_missing_invalid_and_non_mapping_files_are_document_errors(self):
-        with self.assertRaises(DocumentError):
-            read_document(self.tmp / "absent.yaml")
+    def test_a_file_that_does_not_exist_yet_is_the_empty_deployment(self):
+        import hashlib
+        document, digest = read_document(self.tmp / "absent.yaml")
+        self.assertEqual(document, {})
+        self.assertEqual(digest, hashlib.sha256(b"").hexdigest())
+
+    def test_invalid_and_non_mapping_files_are_document_errors(self):
         (self.tmp / "bad.yaml").write_text("a: [")
         with self.assertRaises(DocumentError) as ctx:
             read_document(self.tmp / "bad.yaml")
@@ -322,13 +341,33 @@ class TestEditDocument(unittest.TestCase):
         self.assertEqual(set(outcome.findings[0]), {"level", "entity_kind", "entity_name", "field", "message"})
         self.assertEqual(self.path.read_bytes(), self.original)
 
-    def test_a_patch_error_and_a_missing_file_are_reported_not_raised(self):
+    def test_a_patch_error_is_reported_not_raised(self):
         outcome = self._edit(["not a mapping"], dry_run=True)
         self.assertFalse(outcome.ok)
         self.assertIn("mapping", outcome.error)
-        outcome = edit_document(str(self.tmp / "absent.yaml"), lambda d: d, dry_run=True)
-        self.assertFalse(outcome.ok)
-        self.assertIn("absent.yaml", outcome.error)
+
+    def test_the_first_write_creates_the_file_with_no_backup_and_mode_0600(self):
+        # Bootstrap (§3.2, §7 test 1): the first plan's patch on a machine
+        # with no config.yaml. Planned against "nothing there" — the digest of
+        # no bytes — and written without a backup, since there is nothing to back up.
+        import hashlib
+        path = self.tmp / "fresh" / "config.yaml"
+        fragment = {"agents": {"a": {"type": "claude", "working_directory": str(self.tmp)}}}
+        planned = edit_document(str(path), lambda d: apply_fragment(d, fragment), dry_run=True)
+        self.assertTrue(planned.ok, planned.error)
+        self.assertEqual(planned.file_digest, hashlib.sha256(b"").hexdigest())
+        self.assertFalse(path.exists(), "a dry run creates nothing")
+        outcome = edit_document(str(path), lambda d: apply_fragment(d, fragment),
+                                dry_run=False, if_digest=planned.file_digest)
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(yaml.safe_load(path.read_text()), fragment)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((path.parent / ".config-backups").exists())
+        self.assertEqual(outcome.file_digest, read_document(path)[1])
+        # Once the file exists, the "nothing there" digest is stale.
+        again = edit_document(str(path), lambda d: d, dry_run=False, if_digest=planned.file_digest)
+        self.assertFalse(again.ok)
+        self.assertIn("has changed since", again.error)
 
     def test_extra_keys_ride_along_in_the_report(self):
         outcome = self._edit({}, dry_run=True, extra=lambda merged: {"entry": {"name": "x"}})

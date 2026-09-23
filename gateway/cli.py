@@ -1226,25 +1226,33 @@ def _run_config_show_raw(args) -> None:
             print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
-    result = validate_config(args.config)
-    findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
+    exists = Path(args.config).exists()
+    if exists:
+        result = validate_config(args.config)
+        ok = result.ok
+        findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
+    else:
+        # No file yet is the empty deployment before the first bot (§3.2):
+        # valid, nothing to validate, and said plainly rather than refused.
+        ok, findings = True, []
     redacted = redact_raw_document(document)
     if args.json:
         print(json.dumps({
-            "ok": result.ok,
+            "ok": ok,
             "config_path": os.path.abspath(args.config),
+            "exists": exists,
             "file_digest": digest,
             "config": redacted,
             "findings": findings,
         }, indent=2, default=str))
     else:
-        print(f"Config:       {args.config}")
+        print(f"Config:       {args.config}" + ("" if exists else "  (does not exist yet)"))
         print(f"File digest:  {digest}")
         print()
         print(yaml.safe_dump(redacted, sort_keys=False, allow_unicode=True), end="")
         for finding in findings:
             print(f"[{finding['level'].upper()}] {finding['message']}", file=sys.stderr)
-    sys.exit(0 if result.ok else 1)
+    sys.exit(0 if ok else 1)
 
 
 def _run_config_edit(args) -> None:
@@ -1265,9 +1273,9 @@ def _run_config_edit(args) -> None:
                 raise ce.PatchError("nothing to patch — pass --set, --unset and/or --file")
             if args.entry and not (args.set or args.unset):
                 raise ce.PatchError("--entry scopes --set/--unset; pass one of them")
-            fragment = ce.fragment_from_paths(
-                [ce.parse_set(spec) for spec in args.set], list(args.unset),
-                ce.parse_entry(args.entry))
+            sets = [ce.parse_set(spec) for spec in args.set]
+            entry = ce.parse_entry(args.entry)
+            from_file: dict = {}
             if args.file:
                 try:
                     with open(args.file) as f:
@@ -1278,15 +1286,15 @@ def _run_config_edit(args) -> None:
                     raise ce.PatchError(
                         f"fragment {args.file!r} is not valid YAML: {ce.yaml_error_summary(exc)}"
                     ) from exc
-                if from_file is None:
-                    from_file = {}
-                # `--file` first, then the paths on top: an explicit --set is
-                # the more specific instruction.
-                fragment = ce.apply_fragment(ce.prepare_fragment(from_file), fragment) \
-                    if fragment else ce.prepare_fragment(from_file)
-            fragment = ce.prepare_fragment(fragment)
+                from_file = ce.prepare_fragment(from_file if from_file is not None else {})
 
             def mutate(document: dict) -> dict:
+                # `--file` first, then the paths on top: an explicit --set is
+                # the more specific instruction. --entry is checked against
+                # the document, so the paths are built here.
+                paths = ce.prepare_fragment(
+                    ce.fragment_from_paths(sets, list(args.unset), entry, document))
+                fragment = ce.apply_fragment(from_file, paths) if paths else from_file
                 return ce.apply_fragment(document, fragment)
 
         elif args.config_cmd == "remove":

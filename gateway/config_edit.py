@@ -63,11 +63,17 @@ def file_digest(data: bytes) -> str:
 def read_document(path: str | Path) -> tuple[dict, str]:
     """The raw document and the digest of the bytes it was read from.
 
-    An empty file is an empty document (an empty deployment is valid).
+    An empty file is an empty document, and so is a file that does not exist
+    yet: both are the empty deployment, valid (§3.10) and the state a first
+    bootstrap starts from (§3.2, §7 test 1). The digest of an absent file is
+    the digest of no bytes, so a write planned against "nothing there" is
+    refused once something is.
     """
     path = Path(path)
     try:
         data = path.read_bytes()
+    except FileNotFoundError:
+        data = b""
     except OSError as exc:
         raise DocumentError(f"{path}: could not read: {exc}") from exc
     try:
@@ -203,13 +209,19 @@ def merge_named_list(existing: Any, items: list, block: str) -> list:
 
 
 def apply_fragment(document: dict, fragment: Any) -> dict:
-    """`fragment` (a `--file` document, or one built from `--set`/`--unset`)
-    applied to the raw `document`. Neither input is modified."""
+    """`fragment` (a `--file` document, or one built from `--set`/`--unset`
+    or by an `add` command) applied to the raw `document`. Neither input is
+    modified. The `***` sentinel is refused here, at the one place every
+    write passes, so no command can skip the check (`prepare_fragment` also
+    refuses it earlier, before `from_file` values are read)."""
     if not isinstance(fragment, dict):
         raise PatchError(
             f"the fragment must be a YAML mapping at the top level, "
             f"got {type(fragment).__name__}"
         )
+    hit = find_sentinel(fragment)
+    if hit:
+        raise PatchError(f"{hit} is the masked value {REDACTED!r} — a masked view is never written back")
     lists = {k: v for k, v in fragment.items() if k in NAMED_LISTS and isinstance(v, list)}
     merged = merge_patch(document, {k: v for k, v in fragment.items() if k not in lists})
     for block, items in lists.items():
@@ -268,10 +280,15 @@ def _nest(path: str, value: Any) -> dict:
 
 def fragment_from_paths(
     sets: list[tuple[str, object]], unsets: list[str], entry: tuple[str, str] | None,
+    document: dict | None = None,
 ) -> dict:
     """One fragment carrying every `--set` and `--unset`, scoped to `--entry`'s
     list entry when given. Merging the paths into one mapping means a later
-    `--set` on the same path wins, as a later key in a fragment would."""
+    `--set` on the same path wins, as a later key in a fragment would.
+
+    `--entry` ADDRESSES an entry: with `document` given, a name that is not
+    there is refused rather than appended as a new entry made of the paths —
+    a connector born of `--set server.url=…` alone is never what was meant."""
     body: dict = {}
     for path, value in sets:
         body = merge_patch(body, _nest(path, value))
@@ -280,6 +297,8 @@ def fragment_from_paths(
     if entry is None:
         return body
     block, name = entry
+    if document is not None and name not in _raw_named(document, block):
+        raise PatchError(f"--entry: no {NAMED_LISTS[block]} named '{name}'")
     return {block: [{"name": name, **body}]}
 
 
@@ -409,9 +428,18 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
     the file's directory, and a temp file elsewhere would validate other paths."""
     from .config_validate import validate_config
 
+    beside = config_path.parent
+    if not beside.is_dir():
+        # The file does not exist yet and neither does its directory (a first
+        # bootstrap). A dry run must not create the directory, so validate in
+        # a scratch one: a relative path in the document would resolve against
+        # a directory that does not exist either way, and fail either way.
+        scratch = tempfile.TemporaryDirectory()
+        beside = Path(scratch.name)
+    else:
+        scratch = None
     handle = tempfile.NamedTemporaryFile(
-        "w", dir=config_path.parent, prefix=f".{config_path.name}.", suffix=".dry-run",
-        delete=False,
+        "w", dir=beside, prefix=f".{config_path.name}.", suffix=".dry-run", delete=False,
     )
     try:
         with handle:
@@ -420,6 +448,24 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
     finally:
         with contextlib.suppress(OSError):
             os.unlink(handle.name)
+        if scratch is not None:
+            scratch.cleanup()
+
+
+def _create_file(path: Path, document: dict) -> None:
+    """The first write to a config.yaml that does not exist yet: the same
+    temp-beside-then-replace as `EditableConfig.save`, minus the backup there
+    is nothing to take, and 0600 because the file is about to hold secrets."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w") as f:
+            yaml.dump(document, f, sort_keys=False, allow_unicode=True)
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
 
 
 def edit_document(
@@ -479,12 +525,16 @@ def edit_document(
     # look catches a change during this very run. What remains between here
     # and the replace is process-local and inside what §3.8 promises.
     try:
-        if file_digest(path.read_bytes()) != digest:
+        _, now = read_document(path)
+        if now != digest:
             return EditOutcome(
                 ok=False, dry_run=False, config_path=abspath, file_digest=digest,
                 error=f"{config_path} changed while this edit ran — nothing written; plan it again",
             )
-        EditableConfig(document=merged, path=path).save()
+        if path.exists():
+            EditableConfig(document=merged, path=path).save()
+        else:
+            _create_file(path, merged)
         written = file_digest(path.read_bytes())
     except (OSError, ValueError) as exc:
         return EditOutcome(ok=False, dry_run=False, config_path=abspath, file_digest=digest,
