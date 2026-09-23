@@ -34,6 +34,7 @@ from pathlib import Path
 import yaml
 
 from gateway.config_diff import REDACTED
+from gateway.config_edit import AGENT_NAME_RE
 from gateway.paths import RUNTIME_DIR
 
 
@@ -318,8 +319,12 @@ def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, d
         # open() + safe_load(), so this cannot mask a logic bug in the
         # validation code below. KeyboardInterrupt/SystemExit are
         # BaseException and still propagate.
+        # Type only, never str(e): a constructor error's message carries the
+        # value it choked on (`password: !!int hunter2` → "invalid literal
+        # ... 'hunter2'"), and this file holds administrative credentials.
         raise AdminConfigError(
-            f"{config_path}: could not parse config file: {type(e).__name__}: {e}"
+            f"{config_path}: could not parse config file: {type(e).__name__} while "
+            "constructing a tagged value"
         ) from e
 
     if not isinstance(raw, dict):
@@ -429,6 +434,16 @@ def init_profile(
     Rocket.Chat profiles get username/password; Mattermost ones also get
     token, which MattermostAdmin prefers when set.
     """
+    if not AGENT_NAME_RE.fullmatch(name):
+        # §2: a profile `init` writes takes the same single path component as an
+        # agent name — the keeper derives `<agent>@<profile>` connector names
+        # from it. A hand-written profile outside the pattern stays usable
+        # (the check is here, not in the loader), just not for naming.
+        raise AdminConfigError(
+            f"profile name {name!r} is not a single lower-case path component "
+            f"(pattern {AGENT_NAME_RE.pattern}); a hand-written profile may use another "
+            "name, one written by init may not"
+        )
     if profile_type not in SUPPORTED_TYPES:
         raise AdminConfigError(f"unknown type {profile_type!r}, must be one of {SUPPORTED_TYPES}")
     if not server_url:

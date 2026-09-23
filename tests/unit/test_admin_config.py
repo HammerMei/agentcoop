@@ -422,7 +422,10 @@ class TestDuplicateKeys(unittest.TestCase):
         # still turns it into a clean AdminConfigError rather than a traceback.
         with self.assertRaises(AdminConfigError) as ctx:
             self._load("profiles:\n  ? [a, b]\n  : value\n")
-        self.assertIn("unhashable", str(ctx.exception))
+        # Type only, no str(e): the backstop may not echo what PyYAML choked
+        # on (see the tagged-credential tests), so the cause is named by type.
+        self.assertIn("TypeError", str(ctx.exception))
+        self.assertIn("could not parse", str(ctx.exception))
 
     def test_strict_loader_still_refuses_unsafe_tags(self):
         # Subclassing SafeLoader must not have widened the tag set: an
@@ -445,6 +448,22 @@ class TestGetProfile(unittest.TestCase):
         with self.assertRaises(AdminConfigError) as ctx:
             get_profile(profiles, "nope")
         self.assertIn("mm", str(ctx.exception))
+
+
+class TestTaggedScalarsNeverEchoInTheProfilesLoader(unittest.TestCase):
+    """The profiles file holds administrative credentials; PyYAML's constructor
+    errors carry the value they choked on, and neither the YAMLError arm nor the
+    backstop may print it."""
+
+    def test_a_tagged_credential_is_refused_by_type_only(self):
+        for tagged in ("!!int hunter2", "!!bool hunter2", "!!float hunter2", "!!timestamp hunter2"):
+            with tempfile.TemporaryDirectory() as d:
+                path = Path(d) / "p.yaml"
+                path.write_text(f"profiles:\n  rc:\n    type: rocketchat\n    server_url: https://x\n"
+                                f"    username: admin\n    password: {tagged}\n")
+                with self.assertRaises(AdminConfigError, msg=tagged) as ctx:
+                    load_profiles(path)
+                self.assertNotIn("hunter2", str(ctx.exception), tagged)
 
 
 class TestLoadProfileIsLazy(unittest.TestCase):
@@ -563,6 +582,14 @@ class TestInitProfile(unittest.TestCase):
         doc = yaml.safe_load(self.path.read_text())
         self.assertEqual(list(doc["profiles"]), ["rc", "mm", "rc-2"])
         self.assertEqual(doc["profiles"]["rc"]["password"], "pw", "existing values are kept")
+
+    def test_refuses_a_name_that_is_not_a_single_path_component(self):
+        for bad in ("bad:name", "has space", "Upper", "a/b", "bob\n", "a" * 65):
+            with self.assertRaises(AdminConfigError, msg=repr(bad)) as ctx:
+                init_profile(self.path, bad, profile_type="rocketchat", server_url="https://x", team=None)
+            self.assertIn("path component", str(ctx.exception))
+        self.assertFalse(self.path.exists())
+        init_profile(self.path, "mm-labpig_2", profile_type="rocketchat", server_url="https://x", team=None)
 
     def test_refuses_an_existing_profile_and_bad_arguments(self):
         init_profile(self.path, "rc", profile_type="rocketchat", server_url="https://rc", team=None)

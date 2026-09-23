@@ -2382,7 +2382,7 @@ class TestCLIConfigAdd(_EditCLIBase):
         self.assertEqual(code, 0, doc)
         self.assertEqual(self._doc()["agents"]["bob"],
                          {"type": "claude", "command": "claude", "working_directory": str(self.agent_dir)})
-        for bad in ("Bob", "a/b", "..", "x y", "a" * 65):
+        for bad in ("Bob", "a/b", "..", "x y", "a" * 65, "bob\n"):
             doc, _, code = self._edit(
                 "add", "agent", bad, "--type", "claude", "--command", "claude",
                 "--working-directory", str(self.agent_dir), "--dry-run")

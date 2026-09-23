@@ -802,7 +802,7 @@ def agent_fragment(
     not one path component, a name already present, and a command that does
     not resolve on PATH — a machine-specific check that belongs at the moment
     of adding, not in `config validate` (§3.10)."""
-    if not AGENT_NAME_RE.match(name):
+    if not AGENT_NAME_RE.fullmatch(name):  # fullmatch: `$` would accept "bob\n"
         raise PatchError(
             f"agent name {name!r} is not a single lower-case path component "
             f"(pattern {AGENT_NAME_RE.pattern}) — it becomes a directory name"

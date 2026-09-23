@@ -270,3 +270,29 @@ Notes:
 - Both raters and the detector: stop. Codex is at its usage limit in any case.
 
 **Status: open.** Settles with the round-4 and round-5 entries.
+
+---
+
+## 2026-09-23 — PR #181 round 7
+
+**Chain detector:** 43 findings over 7 rounds, **no chain** — round 7 put two findings on
+the author's last fix in `gateway/admin/config.py`, streak 1. Rater 2's blame: F1's
+handler predates the branch (`5d9cb84b`); F2/F3 sit in original increment commits, not
+review-fix commits.
+**Control finding:** none. Agreement is **uncorroborated**.
+
+All three decided at Step 1 by both raters (gate `cheap`), all **FIX**.
+
+| | verdicts | notes |
+|---|---|---|
+| **F1** the profiles loader's broad backstop interpolates `str(e)` — `password: !!int hunter2` → the credential in `coop-provision profiles` output | FIX / FIX | Both: 1 line, type only. Rater 2: do **not** route through `config_edit.load_yaml` (that would need a `Loader` parameter for `_StrictLoader` — a new concept); the arm's own comment already enumerated the leaky exception types, the code contradicted it. Not a chain — a **sweep gap** in round 4's "one YAML loader" claim, which covered `config_edit` and, in round 6, this file's `YAMLError` arm but not its backstop. Test enumerates the tag constructors against `load_profiles` |
+| **F2** `init` accepts any profile name; design §2 says the same single path component as an agent name | FIX / FIX; `silent` yes (bites later, when the keeper derives `<agent>@bad:name`) | Both: reuse `AGENT_NAME_RE`, ~5 lines. Rater 2's bound adopted: check in `init_profile` only — §2 keeps a hand-written off-pattern profile usable |
+| **F3** `AGENT_NAME_RE.match` accepts `"bob\n"` | FIX / FIX; `silent` yes | `fullmatch`, one token |
+
+Notes:
+- Adoption: 3 of 3.
+- The pre-existing `unhashable` test assertion changed to assert the exception type: the
+  backstop may no longer echo what PyYAML choked on.
+- Both raters: one more round; stop if round 8 lands on any of these three fixes.
+
+**Status: open.** Settles with the round-4 entry.
