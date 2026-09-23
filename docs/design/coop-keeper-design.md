@@ -518,7 +518,14 @@ fields. The resolved view (`config
 show --json`) already uses the same sentinel. Because a masked document must
 never be written back, `config add` and `config patch` refuse any value equal
 to the sentinel, whether it arrives through `--set` or inside `--file`; the
-keeper edits by path and never round-trips a whole document.
+keeper edits by path and never round-trips a whole document. Unlike `config
+show`, `show --raw` prints the file even when it does not validate — with the
+findings, and exit 1 — because the keeper reads a hand-written file with it
+before it can fix the file; a `config.yaml` that does not exist yet is
+reported as the empty deployment (`exists: false`, an empty document,
+`ok: true`) rather than as an error, since that is the state bootstrap starts
+from (§3.2). A YAML error is reported by kind and position only: the
+offending line may be a credential.
 
 `add`, `remove` and `patch` take `--dry-run`: the merged result is validated
 and returned (with `--json`, the resulting entries and any findings) and the
@@ -540,17 +547,36 @@ the name; removal order is the operator's (the keeper's) responsibility.
 `patch` follows JSON merge-patch semantics: `null` deletes, `--set` values
 are parsed as YAML so `500` is an integer and `"500"` a string, and a list
 entry is addressed with `--entry connector:<name>` (likewise `rule:`) rather
-than inside the path, so a name is never parsed for delimiters. A fragment
+than inside the path, so a name is never parsed for delimiters; `--entry`
+addresses an entry that exists and refuses an absent name. Merge-patch
+replaces a list wholesale, and `connectors:` and `watcher_rules:` are lists
+in the file, so a fragment's entries there are merged **by `name`**: a new
+name is appended, an existing one merged into, and an explicit `op` field on
+the entry names the other two operations — `op: add` refuses an existing name
+(the same rule as `config add`) and `op: remove` deletes the entry and only
+it. `op` is the fragment's word and never reaches the file. The mapping
+blocks (`agents:`, the templates, `tool_presets:`) are keyed by name in the
+file itself, so plain merge-patch addresses one entry there and `null`
+removes it. A fragment
 may write a credential as `{from_file: <path>}`; the command reads the file
-and stores the value, and the fragment itself never holds it. `--dry-run
+and stores the value, and the fragment itself never holds it — and reads it
+on a dry run too, so the keeper writes a password file before it plans.
+`--dry-run
 --json` returns the whole merged, masked document and the digest of the file
-it was computed against; the write accepts that digest as `--if-digest` and
-refuses, writing nothing, when the file has changed since (§3.8).
+it was computed against (`file_digest`, over the file's bytes — not the
+`digest` `config show` reports over the resolved configuration, which does
+not see a `description` edit); the write accepts that digest as
+`--if-digest` and refuses, writing nothing, when the file has changed since
+(§3.8).
 `backends` reports each supported backend type with its command and whether
 it was found, using the same lookup `add agent` uses.
 
 All writes go through the config TUI's existing atomic save, which takes a
-timestamped backup under `.config-backups/` first. Comments in `config.yaml`
+timestamped backup under `.config-backups/` first. The one exception is the
+first write to a `config.yaml` that does not exist yet (bootstrap, §3.2): it
+is planned against the empty deployment — the digest of no bytes — and
+created `0600` with the same temp-beside-then-replace and no backup, there
+being nothing to back up. Comments in `config.yaml`
 are not preserved by any of these — the TUI has never preserved them, and
 the `description` field is the preservable comment; the user guide and
 `config.example.yaml` now say so.
@@ -558,8 +584,9 @@ the `description` field is the preservable comment; the user guide and
 `coop-provision` gains five things: `--password-file` on `create-user`;
 `reactivate-user <username> --password-file`, which on Mattermost re-enables
 a deactivated account and sets the new password (the admin API needs no old
-one) and on Rocket.Chat reports that there is nothing to reactivate, deletion
-there being permanent;
+one) — an account that is *active* is refused, since that would be a password
+rotation (§5) — and on Rocket.Chat reports that there is nothing to
+reactivate, deletion there being permanent;
 `init <profile> --type … --server-url … [--team …]`, which writes a profile
 with empty credential fields and refuses to touch a profile that already
 exists; `<profile> check`, which runs the existing `connect()` — an
@@ -567,7 +594,13 @@ authenticated `get_me` plus team resolution — and exits non-zero on failure;
 and `profiles --json`, which lists every profile's name, type, server URL and
 team with credential fields present but masked with the same `***`
 sentinel, so the keeper can tell an unfilled skeleton (field empty) from a
-filled profile (field masked). The default location
+filled profile (field masked); a profiles file that does not exist yet lists
+no profiles rather than failing. `init` and `profiles` act on the file rather
+than through a profile, so they take the place of the `<profile>` word and a
+profile literally named `init` or `profiles` cannot be addressed; `init`
+re-serializes the file (comments in it are not kept) and leaves it `0600`.
+The CLI validates only the profile it was asked for, so an unfilled skeleton
+beside a working profile does not stop the working one. The default location
 of `admin-profiles.yaml` moves from the current directory to
 `~/.agentcoop/admin-profiles.yaml`; `--config` and `COOP_ADMIN_CONFIG` still
 override it. The default `--log-file` moves the same way, to

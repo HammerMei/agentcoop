@@ -1939,6 +1939,8 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         doc = json.loads(stdout)
         self.assertFalse(doc["ok"])
         self.assertIn("invalid YAML", doc["error"])
+        self.assertEqual((doc["exists"], doc["file_digest"], doc["config"], doc["findings"]),
+                         (True, None, None, []), "one shape whether or not the file parses")
 
     def test_a_yaml_error_on_a_credential_line_does_not_echo_it(self):
         Path(self.cfg_path).write_text("server:\n  password: hunter2: oops\n")
@@ -2191,6 +2193,28 @@ class TestCLIConfigAdd(_EditCLIBase):
             "--credentials-from", "nope")
         self.assertEqual(code, 1)
         self.assertIn("no connector named 'nope'", doc["error"])
+
+    def test_credentials_from_sees_through_the_source_connectors_template(self):
+        # The credentials live in a connector_templates entry the source inherits.
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connector_templates:
+              shared: {{server: {{url: http://localhost:3000, username: bot, password: hunter2}}}}
+            connectors:
+              - name: rc
+                type: rocketchat
+                inherits: shared
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: rc, agent: default, rooms: {{include: [general]}}}}
+        """))
+        doc, _, code = self._edit(
+            "add", "connector", "rc-2", "--type", "rocketchat", "--server-url", "http://rc-2:3000",
+            "--credentials-from", "rc")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["server"],
+                         {"url": "http://rc-2:3000", "username": "bot", "password": "hunter2"})
+        self.assertNotIn("hunter2", json.dumps(doc))
 
     def test_add_agent_checks_the_name_and_the_command_on_path(self):
         with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):

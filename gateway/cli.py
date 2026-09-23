@@ -1220,8 +1220,11 @@ def _run_config_show_raw(args) -> None:
         document, digest = read_document(args.config)
     except DocumentError as exc:
         if args.json:
+            # Same keys as the success document, so a consumer reads one shape.
             print(json.dumps({"ok": False, "error": str(exc),
-                              "config_path": os.path.abspath(args.config)}, indent=2))
+                              "config_path": os.path.abspath(args.config),
+                              "exists": Path(args.config).exists(), "file_digest": None,
+                              "config": None, "findings": []}, indent=2))
         else:
             print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
