@@ -496,7 +496,10 @@ def _create_file(path: Path, document: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
         # 0600 from the first byte, exclusively created: the document holds
-        # the secrets, and a chmod after the write would leave a window.
+        # the secrets, and a chmod after the write would leave a window. A
+        # stale `.tmp` from an interrupted earlier write is ours to clear.
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.dump(document, f, sort_keys=False, allow_unicode=True)
         os.replace(tmp, path)

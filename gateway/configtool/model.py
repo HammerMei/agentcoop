@@ -39,6 +39,7 @@ important for the two reasons that remain.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import time
@@ -232,7 +233,14 @@ class EditableConfig:
 
         tmp_path = self.path.with_name(self.path.name + ".tmp")
         try:
-            with open(tmp_path, "w") as f:
+            # 0600 from the first byte, created exclusively: the document holds
+            # the secrets, and the chmod on `self.path` below would otherwise
+            # leave them world-readable (under umask 022) from here until the
+            # replace. A stale `.tmp` from an interrupted earlier save is ours
+            # and is cleared first, or O_EXCL would refuse every save after it.
+            with contextlib.suppress(FileNotFoundError):
+                tmp_path.unlink()
+            with open(os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
                 yaml.dump(self.document, f, sort_keys=False, allow_unicode=True)
 
             after = validate_config(str(tmp_path))
@@ -251,7 +259,10 @@ class EditableConfig:
             backup_dir = self.path.parent / ".config-backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup_dir.chmod(0o700)
-            backup_path = backup_dir / f"{self.path.name}.bak.{int(time.time())}"
+            # Nanoseconds, not seconds: two saves in one second (a scripted
+            # `coop config patch` twice) named the same backup, and the second
+            # copy2 overwrote the first — the very snapshot it promised to keep.
+            backup_path = backup_dir / f"{self.path.name}.bak.{time.time_ns()}"
             shutil.copy2(self.path, backup_path)
             backup_path.chmod(0o600)
             os.replace(tmp_path, self.path)

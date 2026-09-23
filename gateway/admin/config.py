@@ -452,6 +452,8 @@ def init_profile(
         # 0600 from the first byte, exclusively created — every existing
         # administrative credential is about to be written into it, and a
         # chmod after the dump would leave them world-readable meanwhile.
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()  # a stale .tmp from an interrupted earlier write is ours
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.safe_dump({"profiles": raw_profiles}, f, sort_keys=False, allow_unicode=True)
         os.replace(tmp, config_path)
