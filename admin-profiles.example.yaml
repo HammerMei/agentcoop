@@ -1,7 +1,9 @@
 # Example profile file for the standalone gateway.admin CLI (coop-provision).
 #
-# Copy to admin-profiles.yaml (gitignored) and fill in real credentials, or
-# point --config / $COOP_ADMIN_CONFIG at a copy kept elsewhere. This is a
+# Copy to ~/.agentcoop/admin-profiles.yaml (the default coop-provision reads;
+# chmod 600 it) and fill in real credentials, or point --config /
+# $COOP_ADMIN_CONFIG at a copy kept elsewhere — or skip the copy and run
+# `coop-provision init <profile> --type ... --server-url ...`. This is a
 # separate, standalone config — NOT read by AgentCoop's own config.yaml/daemon.
 #
 # The admin credentials here should be a distinct, higher-privilege account

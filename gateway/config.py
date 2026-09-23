@@ -322,7 +322,12 @@ class GatewayConfig:
 
         # ── Agents ────────────────────────────────────────────────────────────
 
-        agents_raw = raw.get("agents") or {}
+        # None → {} only: `agents: []`, `false` or `""` must still hit the type
+        # check below, or a malformed block reads as an intentional empty
+        # deployment and `config reload` stops the fleet on it.
+        agents_raw = raw.get("agents")
+        if agents_raw is None:
+            agents_raw = {}
         if not isinstance(agents_raw, dict):
             raise ValueError(
                 f"config.yaml 'agents:' must be a mapping (got {type(agents_raw).__name__}). "
@@ -1887,7 +1892,9 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
     # never ran on them even though they have nothing to do with an agents:-
     # section problem. Returned as a partial config (agents={}, no rules)
     # instead, so already-successful connectors keep getting checked.
-    agents_raw = raw.get("agents") or {}
+    agents_raw = raw.get("agents")
+    if agents_raw is None:
+        agents_raw = {}  # None only — see from_file()
     if not isinstance(agents_raw, dict):
         issues.append(
             ConfigIssue(

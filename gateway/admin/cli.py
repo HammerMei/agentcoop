@@ -376,6 +376,11 @@ def _run_file_command(args: argparse.Namespace) -> int:
     """`init` and `profiles`: no server, no log file, no profile to load."""
     try:
         if args.command == "init":
+            if args.profile in FILE_COMMANDS:
+                raise AdminConfigError(
+                    f"'{args.profile}' is a coop-provision command and cannot be a profile "
+                    "name — it could never be selected afterwards"
+                )
             path = init_profile(
                 args.config, args.profile, profile_type=args.type,
                 server_url=args.server_url, team=args.team,
@@ -393,7 +398,10 @@ def _run_file_command(args: argparse.Namespace) -> int:
                     filled = [k for k in ("username", "password", "token") if entry[k]]
                     creds = ", ".join(filled) if filled else "no credentials filled in"
                     team = f" team={entry['team']}" if entry.get("team") else ""
-                    print(f"{entry['name']:<20} {entry['type']:<11} {entry['server_url']}{team}  ({creds})")
+                    # str() first: a hand-written `type: [a]` is listed, not a
+                    # TypeError out of the width specifier.
+                    print(f"{entry['name']:<20} {str(entry['type']):<11} {entry['server_url']}{team}"
+                          f"  ({creds})")
     except AdminConfigError as e:
         if getattr(args, "json", False):
             print(json.dumps({"ok": False, "error": str(e)}, indent=2))

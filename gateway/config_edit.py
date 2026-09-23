@@ -328,6 +328,10 @@ def read_secret_file(path: str) -> str:
         text = Path(path).expanduser().read_text()
     except OSError as exc:
         raise PatchError(f"could not read credential file {path!r}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Not an OSError; the message would otherwise be a traceback. The
+        # content is not echoed.
+        raise PatchError(f"credential file {path!r} is not text ({exc.encoding})") from exc
     if text.endswith("\r\n"):
         text = text[:-2]
     elif text.endswith("\n"):
@@ -444,7 +448,17 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
     try:
         with handle:
             yaml.safe_dump(document, handle, sort_keys=False, allow_unicode=True)
-        return validate_config(handle.name)
+        try:
+            return validate_config(handle.name)
+        except Exception as exc:  # noqa: BLE001 — a boundary: the validator's own crash
+            # `validate_config` collects problems rather than raising, but a
+            # value of the wrong type can still reach a connector parser that
+            # was never written for it (`server.url: []` meets `.rstrip`).
+            # Here that is a refusal of the edit, not a traceback.
+            raise PatchError(
+                f"the validator could not check the result ({type(exc).__name__}: {exc}) "
+                "— nothing written"
+            ) from exc
     finally:
         with contextlib.suppress(OSError):
             os.unlink(handle.name)
@@ -507,7 +521,11 @@ def edit_document(
         return EditOutcome(ok=False, dry_run=dry_run, config_path=abspath,
                            file_digest=digest, error=str(exc))
 
-    result = validate_document(merged, path)
+    try:
+        result = validate_document(merged, path)
+    except PatchError as exc:
+        return EditOutcome(ok=False, dry_run=dry_run, config_path=abspath,
+                           file_digest=digest, error=str(exc))
     findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
     redacted = redact_raw_document(merged)
     more = extra(merged) if extra else {}
@@ -643,6 +661,13 @@ def agent_fragment(
         )
     if name in _raw_named(document, "agents"):
         raise PatchError(f"agent '{name}' already exists — an existing name is not replaced")
+    if agent_type not in _AGENT_TYPE_DEFAULT_COMMAND:
+        # The loader accepts any string here and the failure would come at
+        # start, as "Unknown agent type" from backend construction.
+        raise PatchError(
+            f"unknown agent type {agent_type!r} — one of "
+            f"{', '.join(sorted(_AGENT_TYPE_DEFAULT_COMMAND))} (see 'coop config backends')"
+        )
     if resolve_command(command) is None:
         raise PatchError(
             f"command {command!r} was not found on PATH — install the backend, or see "

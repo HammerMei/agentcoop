@@ -26,6 +26,7 @@ Duplicate keys (a repeated profile name, or a repeated field within a profile)
 are rejected rather than silently resolved last-wins — see _StrictLoader.
 """
 
+import contextlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -430,12 +431,20 @@ def init_profile(
         skeleton["token"] = ""
     raw_profiles = dict(raw_profiles)
     raw_profiles[name] = skeleton
+    # Serialize beside the file and replace it only once the write succeeded:
+    # `open(path, "w")` would truncate the store of every administrative
+    # credential before the dump ran, and a disk-full or interruption there
+    # would leave nothing behind.
+    tmp = config_path.with_name(config_path.name + ".tmp")
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w") as f:
+        with open(tmp, "w") as f:
             yaml.safe_dump({"profiles": raw_profiles}, f, sort_keys=False, allow_unicode=True)
-        config_path.chmod(0o600)
+        tmp.chmod(0o600)
+        os.replace(tmp, config_path)
     except OSError as e:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
         raise AdminConfigError(f"{config_path}: could not write: {e}") from e
     return config_path
 

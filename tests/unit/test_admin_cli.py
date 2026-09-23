@@ -505,6 +505,20 @@ class TestFileCommands(unittest.IsolatedAsyncioTestCase):
         with open(self.path) as f:
             self.assertEqual(f.read(), before)
 
+    async def test_init_refuses_the_two_reserved_profile_names(self):
+        for name in ("init", "profiles"):
+            code, _, err = await self._run(["init", name, "--type", "rocketchat", "--server-url", "https://rc"])
+            self.assertEqual(code, 1, name)
+            self.assertIn("cannot be a profile name", err)
+        self.assertFalse(os.path.exists(self.path))
+
+    async def test_text_listing_survives_malformed_metadata(self):
+        with open(self.path, "w") as f:
+            f.write("profiles:\n  odd:\n    type: [a, b]\n    server_url: {x: 1}\n")
+        code, out, _ = await self._run(["profiles"])
+        self.assertEqual(code, 0)
+        self.assertIn("odd", out)
+
     async def test_init_requires_a_team_for_mattermost(self):
         code, _, err = await self._run(["init", "mm", "--type", "mattermost", "--server-url", "https://mm"])
         self.assertEqual(code, 1)

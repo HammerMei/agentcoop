@@ -2241,6 +2241,12 @@ class TestCLIConfigAdd(_EditCLIBase):
             "--working-directory", str(self.agent_dir), "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("already exists", doc["error"])
+        with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "dave", "--type", "clade", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown agent type 'clade'", doc["error"])
 
     def test_add_rule_writes_rooms_only_when_asked_and_validates_the_whole_file(self):
         doc, _, code = self._edit("add", "rule", "w2", "--connector", "rc", "--agent", "default",

@@ -558,6 +558,16 @@ class TestInitProfile(unittest.TestCase):
         with self.assertRaises(AdminConfigError):
             init_profile(self.path, "x", profile_type="rocketchat", server_url="", team=None)
 
+    def test_a_failed_write_leaves_the_existing_file_intact(self):
+        self.path.parent.mkdir()
+        self.path.write_text(TestLoadProfileIsLazy._FILE)
+        before = self.path.read_bytes()
+        with patch("gateway.admin.config.yaml.safe_dump", side_effect=OSError(28, "No space left")):
+            with self.assertRaises(AdminConfigError):
+                init_profile(self.path, "rc-2", profile_type="rocketchat", server_url="https://x", team=None)
+        self.assertEqual(self.path.read_bytes(), before, "never truncated before the dump succeeded")
+        self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists())
+
     def test_a_duplicate_key_in_the_existing_file_is_refused_not_silently_merged(self):
         self.path.parent.mkdir()
         self.path.write_text("profiles:\n  rc: {type: rocketchat, server_url: a, token: t}\n"

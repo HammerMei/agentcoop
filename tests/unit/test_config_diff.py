@@ -323,6 +323,12 @@ class TestRedactRawDocument(unittest.TestCase):
         self.assertEqual(out["watcher_templates"]["secret-rooms"], {"session_idle_days": 3})
         self.assertEqual(out["agents"]["secretary"], {"type": "claude"})
 
+    def test_a_non_string_key_is_shown_not_a_crash(self):
+        # `show --raw` walks hand-written files where a key may legally be an int.
+        out = redact_raw_document({1: "value", "connectors": [{"name": "x", 2: {"token": "t"}}]})
+        self.assertEqual(out[1], "value")
+        self.assertEqual(out["connectors"][0][2]["token"], "***")
+
     def test_a_mapping_under_a_secret_key_is_masked_whole_at_any_depth(self):
         doc = {"connectors": [{"name": "x", "server": {"client_secret": {"value": "s"}},
                                "extra": {"deep": {"api_token": ["a", "b"]}}}]}

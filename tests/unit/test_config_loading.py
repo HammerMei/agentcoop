@@ -1281,6 +1281,18 @@ class TestEmptyDeployment(unittest.TestCase):
             GatewayConfig.from_file(self._write("connectors: 5\n"))
         self.assertIn("'connectors:' must be a list", str(ctx.exception))
 
+    def test_a_falsy_non_mapping_agents_block_is_refused_not_read_as_empty(self):
+        # `agents: []` is a malformed file, not an intentional empty deployment
+        # — read as one, `config reload` would stop the fleet on a typo.
+        for text in ("agents: []\n", "agents: false\n", "agents: ''\n", "agents: 0\n"):
+            with self.assertRaises(ValueError, msg=text) as ctx:
+                GatewayConfig.from_file(self._write(text))
+            self.assertIn("'agents:' must be a mapping", str(ctx.exception))
+            _, issues = collect_config(self._write(text))
+            self.assertTrue(any("'agents:' must be a mapping" in i.message for i in issues), text)
+        config = GatewayConfig.from_file(self._write("agents:\n"))
+        self.assertEqual(config.agents, {}, "a bare key is YAML null, and null is empty")
+
     def test_collect_config_reports_nothing_for_an_empty_deployment(self):
         config, issues = collect_config(self._write("connectors: []\nagents: {}\n"))
         self.assertEqual(issues, [])

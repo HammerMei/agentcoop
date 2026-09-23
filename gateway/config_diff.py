@@ -276,7 +276,11 @@ SECRET_KEY_MARKERS = ("password", "token", "secret")
 REDACTED = "***"
 
 
-def is_secret_key(key: str) -> bool:
+def is_secret_key(key: object) -> bool:
+    """Only a string key can name a secret; `show --raw` walks hand-written
+    files where a YAML key may legally be an int or a date."""
+    if not isinstance(key, str):
+        return False
     lowered = key.lower()
     return any(marker in lowered for marker in SECRET_KEY_MARKERS)
 

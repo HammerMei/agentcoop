@@ -199,6 +199,14 @@ class TestCredentialValues(unittest.TestCase):
         self.assertEqual(read_secret_file(self._file("s3cret\n\n")), "s3cret\n")
         self.assertEqual(read_secret_file(self._file(" padded ")), " padded ")
 
+    def test_a_file_that_is_not_text_is_refused_by_path_not_content(self):
+        path = self.tmp / "binary"
+        path.write_bytes(b"\xff\xfe\x00secret")
+        with self.assertRaises(PatchError) as ctx:
+            read_secret_file(str(path))
+        self.assertIn("is not text", str(ctx.exception))
+        self.assertNotIn("secret", str(ctx.exception))
+
     def test_an_empty_or_missing_file_is_refused_by_path_not_content(self):
         with self.assertRaises(PatchError) as ctx:
             read_secret_file(self._file("\n"))
@@ -339,6 +347,15 @@ class TestEditDocument(unittest.TestCase):
         self.assertEqual(outcome.findings[0]["level"], "error")
         self.assertIn("nobody", outcome.findings[0]["message"])
         self.assertEqual(set(outcome.findings[0]), {"level", "entity_kind", "entity_name", "field", "message"})
+        self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_a_validator_crash_on_a_wrongly_typed_value_is_a_refusal_not_a_traceback(self):
+        # `server.url: []` reaches a connector parser's `.rstrip` — the
+        # validator raises rather than reporting, and that is still ok:false.
+        outcome = self._edit({"connectors": [{"name": "script", "server": {"url": []}}]}, dry_run=True)
+        self.assertFalse(outcome.ok)
+        self.assertIn("could not check the result", outcome.error)
+        self.assertIn("AttributeError", outcome.error)
         self.assertEqual(self.path.read_bytes(), self.original)
 
     def test_a_patch_error_is_reported_not_raised(self):
