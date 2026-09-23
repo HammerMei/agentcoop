@@ -277,6 +277,98 @@ def main():
              "findings — printed even when the file does not validate",
     )
 
+    def _write_flags(parser: argparse.ArgumentParser) -> None:
+        """Shared by add/remove/patch (coop-keeper design §3.10)."""
+        parser.add_argument(
+            "--config", default=DEFAULT_CONFIG,
+            help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        )
+        parser.add_argument("--json", action="store_true", help="Emit the result as JSON")
+        parser.add_argument(
+            "--dry-run", action="store_true",
+            help="Validate and report the merged result (masked) without writing",
+        )
+        parser.add_argument(
+            "--if-digest", metavar="SHA256",
+            help="Write only if the file's digest still equals this (from a --dry-run); "
+                 "otherwise refuse and write nothing",
+        )
+
+    config_add_p = config_sub.add_parser(
+        "add", help="Add one connector, agent or rule entry to config.yaml",
+    )
+    add_sub = config_add_p.add_subparsers(dest="add_kind", required=True)
+    add_conn_p = add_sub.add_parser("connector", help="Add a connector (a chat-server account)")
+    add_conn_p.add_argument("name")
+    add_conn_p.add_argument("--type", required=True, help="rocketchat or mattermost")
+    add_conn_p.add_argument("--server-url", required=True)
+    add_conn_p.add_argument("--team", help="Mattermost team (required for mattermost)")
+    add_conn_p.add_argument("--username", help="The bot account's username")
+    add_conn_p.add_argument(
+        "--password-file", metavar="PATH",
+        help="File holding the bot account's password; the value never passes on the command line",
+    )
+    add_conn_p.add_argument(
+        "--credentials-from", metavar="CONNECTOR",
+        help="Copy server.username and the password/token from this existing connector "
+             "instead of --username/--password-file (a second team on one installation)",
+    )
+    add_conn_p.add_argument("--owner", action="append", default=[], metavar="USERNAME",
+                            help="allowed_users.owners entry (repeatable)")
+    add_conn_p.add_argument("--inherits", help="connector_templates entry to inherit")
+    _write_flags(add_conn_p)
+
+    add_agent_p = add_sub.add_parser("agent", help="Add an agent (a backend process and its directory)")
+    add_agent_p.add_argument("name", help="one lower-case path component: ^[a-z0-9][a-z0-9_-]{0,63}$")
+    add_agent_p.add_argument("--type", required=True, help="claude or opencode")
+    # dest is not "command": that is the top-level subcommand's dest, and a
+    # plain `--command` would overwrite `args.command == "config"` with the
+    # backend name and fall out of the dispatch silently.
+    add_agent_p.add_argument("--command", dest="agent_command", required=True,
+                             help="the backend command; must be on PATH")
+    add_agent_p.add_argument("--working-directory", required=True)
+    add_agent_p.add_argument("--inherits", help="agent_templates entry to inherit")
+    _write_flags(add_agent_p)
+
+    add_rule_p = add_sub.add_parser("rule", help="Add a watcher rule binding a connector to an agent")
+    add_rule_p.add_argument("name")
+    add_rule_p.add_argument("--connector", required=True)
+    add_rule_p.add_argument("--agent", required=True)
+    add_rule_p.add_argument("--include", action="append", default=[], metavar="PATTERN",
+                            help="rooms.include pattern (repeatable)")
+    add_rule_p.add_argument("--direct", action="store_true", help="rooms.direct: true")
+    add_rule_p.add_argument("--inherits", help="watcher_templates entry to inherit")
+    _write_flags(add_rule_p)
+
+    config_remove_p = config_sub.add_parser(
+        "remove",
+        help="Remove one connector, agent or rule entry; refused while other entries refer to it",
+    )
+    config_remove_p.add_argument("remove_kind", choices=("connector", "agent", "rule"))
+    config_remove_p.add_argument("name")
+    _write_flags(config_remove_p)
+
+    config_patch_p = config_sub.add_parser(
+        "patch",
+        help="Apply a merge-patch to config.yaml: --set/--unset paths, or a --file fragment",
+        description=(
+            "JSON merge-patch semantics: a mapping merges, null deletes, anything else "
+            "replaces. --set values are YAML (500 is an integer, \"500\" a string). "
+            "A fragment's connectors:/watcher_rules: lists are merged by name: a new "
+            "name is appended, an existing one merged into; `op: add` refuses an existing "
+            "name and `op: remove` deletes the entry. A credential is written as "
+            "{from_file: <path>}; the masked value '***' is refused everywhere."
+        ),
+    )
+    config_patch_p.add_argument("--set", action="append", default=[], metavar="PATH=VALUE",
+                                help="Set a dotted path (repeatable)")
+    config_patch_p.add_argument("--unset", action="append", default=[], metavar="PATH",
+                                help="Delete a dotted path (repeatable)")
+    config_patch_p.add_argument("--entry", metavar="connector:<name>|rule:<name>",
+                                help="Scope every --set/--unset to this list entry")
+    config_patch_p.add_argument("--file", metavar="FRAGMENT.yaml", help="A fragment to merge")
+    _write_flags(config_patch_p)
+
     config_backends_p = config_sub.add_parser(
         "backends",
         help="Report each supported agent backend type, its command and whether "
@@ -790,6 +882,8 @@ def _run_config(args) -> None:
             _run_config_show(args)
     elif args.config_cmd == "backends":
         _run_config_backends(args)
+    elif args.config_cmd in ("add", "remove", "patch"):
+        _run_config_edit(args)
     elif args.config_cmd == "migrate-env":
         _run_config_migrate_env(args)
     else:
@@ -1147,6 +1241,105 @@ def _run_config_show_raw(args) -> None:
         for finding in findings:
             print(f"[{finding['level'].upper()}] {finding['message']}", file=sys.stderr)
     sys.exit(0 if result.ok else 1)
+
+
+def _run_config_edit(args) -> None:
+    """Handle 'config add|remove|patch [--dry-run] [--if-digest] [--json]'
+    (coop-keeper design §3.10). Every command builds one fragment and takes
+    the one plan-then-write path in `config_edit.edit_document`; nothing this
+    prints — text or JSON, accepted or refused — carries a credential."""
+    import yaml
+
+    from . import config_edit as ce
+    from .config_diff import redact_raw_document
+
+    config_path = Path(args.config)
+    extra = None
+    try:
+        if args.config_cmd == "patch":
+            if not (args.set or args.unset or args.file):
+                raise ce.PatchError("nothing to patch — pass --set, --unset and/or --file")
+            if args.entry and not (args.set or args.unset):
+                raise ce.PatchError("--entry scopes --set/--unset; pass one of them")
+            fragment = ce.fragment_from_paths(
+                [ce.parse_set(spec) for spec in args.set], list(args.unset),
+                ce.parse_entry(args.entry))
+            if args.file:
+                try:
+                    with open(args.file) as f:
+                        from_file = yaml.safe_load(f)
+                except OSError as exc:
+                    raise ce.PatchError(f"could not read fragment {args.file!r}: {exc}") from exc
+                except yaml.YAMLError as exc:
+                    raise ce.PatchError(f"fragment {args.file!r} is not valid YAML: {exc}") from exc
+                if from_file is None:
+                    from_file = {}
+                # `--file` first, then the paths on top: an explicit --set is
+                # the more specific instruction.
+                fragment = ce.apply_fragment(ce.prepare_fragment(from_file), fragment) \
+                    if fragment else ce.prepare_fragment(from_file)
+            fragment = ce.prepare_fragment(fragment)
+
+            def mutate(document):
+                return ce.apply_fragment(document, fragment)
+
+        elif args.config_cmd == "remove":
+            def mutate(document):
+                return ce.apply_fragment(
+                    document, ce.remove_fragment(document, args.remove_kind, args.name))
+
+        else:  # add
+            def mutate(document):
+                if args.add_kind == "connector":
+                    fragment = ce.connector_fragment(
+                        document, config_path, name=args.name, connector_type=args.type,
+                        server_url=args.server_url, team=args.team, username=args.username,
+                        password_file=args.password_file, owners=args.owner,
+                        inherits=args.inherits, credentials_from=args.credentials_from)
+                elif args.add_kind == "agent":
+                    fragment = ce.agent_fragment(
+                        document, name=args.name, agent_type=args.type, command=args.agent_command,
+                        working_directory=args.working_directory, inherits=args.inherits)
+                else:
+                    fragment = ce.rule_fragment(
+                        document, name=args.name, connector=args.connector, agent=args.agent,
+                        include=args.include, direct=args.direct, inherits=args.inherits)
+                return ce.apply_fragment(document, fragment)
+
+            def extra(merged):
+                block = {"connector": "connectors", "agent": "agents", "rule": "watcher_rules"}[args.add_kind]
+                masked = redact_raw_document({block: merged.get(block)})[block]
+                if isinstance(masked, dict):
+                    entry = masked.get(args.name)
+                else:
+                    entry = next((e for e in masked if isinstance(e, dict)
+                                  and e.get("name") == args.name), None)
+                return {"entry": entry}
+    except ce.PatchError as exc:
+        outcome = ce.EditOutcome(ok=False, dry_run=args.dry_run,
+                                 config_path=os.path.abspath(args.config), error=str(exc))
+    else:
+        outcome = ce.edit_document(
+            args.config, mutate, dry_run=args.dry_run, if_digest=args.if_digest, extra=extra)
+    _report_edit(outcome, json_mode=args.json)
+
+
+def _report_edit(outcome, *, json_mode: bool) -> None:
+    if json_mode:
+        print(json.dumps(outcome.to_dict(), indent=2, default=str))
+    elif outcome.ok:
+        verb = "Dry run: the result validates — nothing written" if outcome.dry_run \
+            else f"Wrote {outcome.config_path}"
+        print(f"{verb}.")
+        print(f"File digest:  {outcome.file_digest}")
+        for finding in outcome.findings:
+            print(f"[{finding['level'].upper()}] {finding['message']}", file=sys.stderr)
+    else:
+        print(f"[ERROR] {outcome.error}", file=sys.stderr)
+        for finding in outcome.findings:
+            if finding["level"] == "error":
+                print(f"  [ERROR] {finding['message']}", file=sys.stderr)
+    sys.exit(0 if outcome.ok else 1)
 
 
 def _run_config_backends(args) -> None:
