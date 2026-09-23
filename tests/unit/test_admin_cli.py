@@ -538,10 +538,21 @@ class TestFileCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_json_listing_renders_a_date_or_binary_field_as_its_string(self):
         with open(self.path, "w") as f:
-            f.write("profiles:\n  odd:\n    type: 2026-01-01\n    server_url: !!binary aGk=\n")
+            f.write("profiles:\n  odd:\n    type: 2026-01-01\n    server_url: !!binary aGk=\n"
+                    "    team: {2026-01-01: x}\n")
         code, out, _ = await self._run(["profiles", "--json"])
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["profiles"][0]["type"], "2026-01-01")
+        listed = json.loads(out)["profiles"][0]
+        self.assertEqual(listed["type"], "2026-01-01")
+        self.assertEqual(listed["team"], "{datetime.date(2026, 1, 1): 'x'}")
+
+    async def test_a_malformed_profiles_file_does_not_echo_its_lines(self):
+        with open(self.path, "w") as f:
+            f.write("profiles:\n  rc:\n    password: hunter2: oops\n")
+        code, out, err = await self._run(["profiles"])
+        self.assertEqual(code, 1)
+        self.assertNotIn("hunter2", out + err)
+        self.assertIn("invalid YAML", err)
 
     async def test_init_requires_a_team_for_mattermost(self):
         code, _, err = await self._run(["init", "mm", "--type", "mattermost", "--server-url", "https://mm"])

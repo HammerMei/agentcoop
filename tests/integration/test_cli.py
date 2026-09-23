@@ -1960,6 +1960,22 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         doc = json.loads(stdout)
         self.assertEqual(doc["config"]["2026-01-01"], "value")
 
+    def test_colliding_keys_are_reported_beside_the_document_not_dropped_in_silence(self):
+        Path(self.cfg_path).write_text("connectors:\n  - {name: rc, 1: a, '1': b}\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        doc = json.loads(stdout)
+        self.assertTrue(any("collide" in f["message"] for f in doc["findings"]), doc["findings"])
+
+    def test_a_recursive_alias_is_a_clean_refusal_in_both_modes(self):
+        Path(self.cfg_path).write_text("connectors: &loop [*loop]\n")
+        for argv in (["config", "show", "--config", self.cfg_path, "--raw", "--json"],
+                     ["config", "show", "--config", self.cfg_path, "--raw"]):
+            stdout, stderr, code = self._run_with(argv, running=False)
+            self.assertEqual(code, 1, argv)
+            self.assertNotIn("Traceback", stderr)
+            self.assertIn("recursive alias", stdout + stderr)
+
     def test_an_unreadable_path_is_a_structured_refusal_not_a_traceback(self):
         # Path.exists() itself raises on an overlong name; the error branch
         # must not repeat the probe that just failed.
@@ -2177,6 +2193,24 @@ class TestCLIConfigPatch(_EditCLIBase):
         self.assertIn("[ERROR]", stderr)
         self.assertIn("nobody", stderr)
 
+    def test_a_scoped_set_cannot_rename_its_way_onto_another_entry(self):
+        self._write_config(rules="  - name: w2\n    connector: rc\n    agent: default\n"
+                                 "    rooms:\n      include: [ops]\n")
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "name=w2",
+                                  "--set", "description=moved")
+        self.assertEqual(code, 1)
+        self.assertIn("selector", doc["error"])
+        self.assertNotIn("description", json.dumps(self._doc()["watcher_rules"]))
+
+    def test_from_file_under_a_non_credential_key_is_refused_and_never_printed(self):
+        secret = self._secret_file("the contents of some file\n")
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_text(f"connectors:\n  - {{name: rc, description: {{from_file: {secret}}}}}\n")
+        doc, stderr, code = self._edit("patch", "--file", str(fragment), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("credential key", doc["error"])
+        self.assertNotIn("contents of some file", json.dumps(doc) + stderr)
+
     def test_nothing_to_patch_and_a_bad_entry_are_errors(self):
         doc, _, code = self._edit("patch")
         self.assertEqual(code, 1)
@@ -2371,6 +2405,14 @@ class TestCLIConfigAdd(_EditCLIBase):
                 "--working-directory", str(self.agent_dir), "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("unknown agent type 'clade'", doc["error"])
+        # A bare name that PATH resolves through a relative entry (`bin`) is
+        # the same mismatch one step removed.
+        with patch("gateway.config_edit.shutil.which", return_value="bin/claude"):
+            doc, _, code = self._edit(
+                "add", "agent", "erin", "--type", "claude", "--command", "claude",
+                "--working-directory", str(self.agent_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("relative PATH entry", doc["error"])
         # A relative path would be checked here against the caller's cwd and
         # launched against working_directory; an absolute path is fine.
         with patch("gateway.config_edit.shutil.which", return_value="/bin/claude"):

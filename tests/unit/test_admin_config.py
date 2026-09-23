@@ -520,13 +520,14 @@ class TestMaskedProfiles(unittest.TestCase):
             init_profile(path, "rc", profile_type="rocketchat", server_url="https://x", team=None)
 
     def test_metadata_of_any_yaml_type_is_listed_not_rejected(self):
-        import datetime
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "p.yaml"
             path.write_text("profiles:\n  odd:\n    type: 2026-01-01\n    server_url: !!binary aGk=\n")
             listed = masked_profiles(path)
-        self.assertEqual(listed[0]["type"], datetime.date(2026, 1, 1))
-        self.assertEqual(listed[0]["server_url"], b"hi")
+        # Rendered as text: the view is for listing, and a JSON encoder or a
+        # width specifier downstream must not meet a date or bytes.
+        self.assertEqual(listed[0]["type"], "2026-01-01")
+        self.assertEqual(listed[0]["server_url"], "b'hi'")
 
 
 class TestInitProfile(unittest.TestCase):

@@ -296,8 +296,14 @@ def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, d
         # symlink loop, or a too-long path — ordinary configuration mistakes
         # that open() surfaces before YAML parsing even starts.
         raise AdminConfigError(f"{config_path}: could not read config file: {e}") from e
-    except yaml.YAMLError as e:
+    except _DuplicateKeyError as e:
+        # Our own message: it names the repeated KEY and its line, never a value.
         raise AdminConfigError(f"{config_path}: invalid YAML: {e}") from e
+    except yaml.YAMLError as e:
+        # Summary, not str(e): that quotes the offending line of a file that
+        # holds administrative credentials.
+        from gateway.config_edit import yaml_error_summary
+        raise AdminConfigError(f"{config_path}: invalid YAML: {yaml_error_summary(e)}") from e
     except Exception as e:
         # Backstop, because yaml.safe_load's exception surface is not
         # enumerable: PyYAML's SafeConstructor leaks several raw exceptions
@@ -393,11 +399,17 @@ def masked_profiles(path: str | Path | None = None, *, missing_ok: bool = False)
         return []
     out = []
     for name, fields in raw_profiles.items():
+        # Metadata is shape-checked, not field-validated, so a hand-written
+        # value may be any YAML type; the view renders non-strings as text
+        # (a mapping with a date key would otherwise break the JSON encoder).
+        def as_text(value: object) -> object:
+            return value if value is None or isinstance(value, str) else str(value)
+
         entry = {
             "name": name,
-            "type": fields.get("type"),
-            "server_url": fields.get("server_url"),
-            "team": fields.get("team"),
+            "type": as_text(fields.get("type")),
+            "server_url": as_text(fields.get("server_url")),
+            "team": as_text(fields.get("team")),
         }
         for key in CREDENTIAL_FIELDS:
             entry[key] = MASKED if fields.get(key) else ""

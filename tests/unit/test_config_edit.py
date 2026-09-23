@@ -177,6 +177,14 @@ class TestPathsAndEntry(unittest.TestCase):
             fragment_from_paths([("timeout", 5)], [], parse_entry("rule:nope"), doc)
         self.assertEqual(str(ctx.exception), "--entry: no rule named 'nope'")
 
+    def test_the_selector_name_cannot_be_set_through_a_scoped_path(self):
+        doc = {"watcher_rules": [{"name": "w1"}, {"name": "w2"}]}
+        with self.assertRaises(PatchError) as ctx:
+            fragment_from_paths([("name", "w2"), ("rooms.direct", True)], [], parse_entry("rule:w1"), doc)
+        self.assertIn("selector", str(ctx.exception))
+        with self.assertRaises(PatchError):
+            fragment_from_paths([], ["name"], parse_entry("rule:w1"), doc)
+
     def test_without_entry_the_paths_are_top_level_and_a_later_set_wins(self):
         fragment = fragment_from_paths([("a.b", 1), ("a.b", 2), ("a.c", 3)], ["d"], None)
         self.assertEqual(fragment, {"a": {"b": 2, "c": 3}, "d": None})
@@ -226,6 +234,20 @@ class TestCredentialValues(unittest.TestCase):
         out = prepare_fragment({"connectors": [{"name": "rc", "server": {
             "password": {"from_file": pw}, "url": "u"}}]})
         self.assertEqual(out["connectors"][0]["server"], {"password": "hunter2", "url": "u"})
+
+    def test_from_file_is_allowed_only_under_a_credential_key(self):
+        # Under `description` the value would be printed back verbatim in
+        # every report, which is masked only by the key it lands under.
+        pw = self._file("hunter2\n")
+        for where in ({"connectors": [{"name": "rc", "description": {"from_file": pw}}]},
+                      {"agents": {"a": {"working_directory": {"from_file": pw}}}}):
+            with self.assertRaises(PatchError) as ctx:
+                prepare_fragment(where)
+            self.assertIn("credential key", str(ctx.exception))
+            self.assertNotIn("hunter2", str(ctx.exception))
+        ok = prepare_fragment({"connectors": [{"name": "rc", "server": {
+            "token": {"from_file": pw}, "client_secret": {"from_file": pw}}}]})
+        self.assertEqual(ok["connectors"][0]["server"], {"token": "hunter2", "client_secret": "hunter2"})
 
     def test_from_file_beside_other_keys_is_refused(self):
         with self.assertRaises(PatchError) as ctx:
@@ -303,6 +325,47 @@ class TestTaggedScalarsNeverEcho(unittest.TestCase):
                 with self.assertRaises(PatchError) as ctx:
                     read_fragment_file(str(self.tmp / "f.yaml"))
                 self.assertNotIn("hunter2", str(ctx.exception))
+
+
+class TestLegalYamlShapesTheBoundaryDidNotAnticipate(unittest.TestCase):
+    """Four review rounds each found one more legal YAML value that a walk or
+    an encoder had not anticipated. This enumerates the shapes at the one
+    loader every entry point uses, so the next one fails here."""
+
+    def test_a_recursive_alias_is_refused_and_a_shared_alias_is_not(self):
+        from gateway.config_edit import _YamlLoadFailure, load_yaml
+        with self.assertRaises(_YamlLoadFailure) as ctx:
+            load_yaml("value: &loop [*loop]\n")
+        self.assertIn("recursive alias", str(ctx.exception))
+        with self.assertRaises(_YamlLoadFailure):
+            load_yaml("a: &m {b: *m}\n")
+        shared = load_yaml("x: &s [1, 2]\ny: *s\nz: {p: *s, q: *s}\n")
+        self.assertEqual(shared["y"], [1, 2])
+
+    def test_an_undefined_alias_named_like_a_credential_is_not_echoed(self):
+        # PyYAML's `problem` quotes the alias name: "found undefined alias 'hunter2'".
+        from gateway.config_edit import _YamlLoadFailure, load_yaml
+        with self.assertRaises(_YamlLoadFailure) as ctx:
+            load_yaml("server:\n  password: *hunter2\n")
+        self.assertNotIn("hunter2", str(ctx.exception))
+        self.assertIn("line 2", str(ctx.exception))
+        with self.assertRaises(DocumentError) as ctx2:
+            path = Path(tempfile.mkdtemp()) / "c.yaml"
+            path.write_text("password: !hunter2 x\n")
+            read_document(path)
+        self.assertNotIn("hunter2", str(ctx2.exception))
+
+    def test_non_string_keys_render_and_a_collision_is_reported_not_swallowed(self):
+        import datetime
+
+        from gateway.config_edit import json_safe_keys
+        collisions: list[str] = []
+        out = json_safe_keys({1: "int", "1": "str", datetime.date(2026, 1, 1): {True: 1}}, collisions)
+        self.assertEqual(set(out), {"1", "2026-01-01"})
+        self.assertEqual(len(collisions), 1)
+        self.assertIn("collide", collisions[0])
+        json.dumps(out)
+        self.assertEqual(json_safe_keys({1: "a"}), {"1": "a"}, "collisions optional")
 
 
 class TestReadDocument(unittest.TestCase):

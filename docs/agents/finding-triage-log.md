@@ -232,3 +232,41 @@ Notes:
 
 **Status: open.** Settles with round 4's entry.
 
+
+---
+
+## 2026-09-23 — PR #181 round 6
+
+**Chain detector:** 40 findings over 6 rounds, **no chain** — round 6 put one finding
+on the author's own last fix in each of `gateway/admin/cli.py` and
+`gateway/config_edit.py`, streak 1 both; two older findings could not be blamed (lines
+since rewritten), so their absence of a chain is unproven. Codex reported hitting its
+review usage limit during this round.
+**Control finding:** none. Agreement is **uncorroborated**.
+
+Codex: 1 × P1, 7 × P2. Re-ranked by consequence below.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `validate_document` validates in a scratch dir when the config dir is absent, so a relative `working_directory` means something else | `cheap` yes: mkdir the parent during the dry run (3 lines) — or FILE | `cheap` **no**: a dry run that creates a directory breaks §3.8 "nothing is written before the yes"; rewriting relative paths against the intended parent is a new rule. Scored: `hours_per_hit` 0.5 · `hits_per_year` 0.006–0.03 (bootstrap into an absent dir 0.02–0.1 × P(relative wd) 0.3; install.sh mkdirs `~/.agentcoop`, the keeper writes absolute paths) · `discount` 0.56 (nearest ladder row, TUI save §14.2 — `add/patch` is not on the ladder) · `fix_hours` 2 · `tax` 0.2 → net negative | **DROP.** Rater 1 conceded on the §3.8 clause — checkable evidence, not capitulation. Layer note (rater 2): `validate_config`'s `config_dir` derivation owns this; the correct fix is a `config_dir` parameter there, not a scratch-branch patch |
+| **F2** a bare command resolving through a relative `PATH` entry | `cheap` yes, 2 lines | `cheap` yes, 3 lines; reproduced with `PATH=bin:…` | **FIX** — refuse when `which()` returns a relative path |
+| **F3** `json_safe_keys` collapses `1:` and `'1':` | DROP — twin of the anchor's int-vs-string-key digest collision | `silent` yes → priced **MAKE IT LOUD**: one collision finding appended, ~6 lines, passes `cheap`; the behavioural fix (typed keys) is the anchor's DROP | **MAKE IT LOUD.** Rater 1 had not priced the loud version — the skill's `silent` obligation, cited by rater 2 |
+| **F4** `&loop [*loop]` → RecursionError in `redact_raw_document` | `cheap` yes: a boundary on `show --raw` | `cheap` yes: a cycle check in `load_yaml` (~8 lines), since every later walk (`redact`, `find_sentinel`, `resolve_from_file`) would recurse too; the finding points at the cli.py redact call — wrong layer | **FIX** at `load_yaml` (rater 2's layer) |
+| **F5** `--entry rule:w1 --set name=w2` edits w2 | `cheap` yes; `silent` yes | `cheap` yes (refuse, do not silently override); `silent` yes | **FIX** — `name` is the selector, refused as a path |
+| **F6** `yaml_error_summary`'s `problem` quotes source text (`*hunter2` → "found undefined alias 'hunter2'") | `cheap` yes: drop `problem` | `cheap` yes: strip the single-quoted fragments (1 line), keep the diagnostic; **also found** `gateway/admin/config.py` printing `str(e)` for the profiles file — worse, and on the `profiles` path | **FIX** both (the admin loader was refactored by this increment, so in scope). `_DuplicateKeyError`'s own message is kept: it names a key, never a value |
+| **F7** `profiles --json` with a nested date key | `cheap` yes: `json_safe_keys` at the print | `cheap` yes: coerce in `masked_profiles` — the view owns it | **FIX** in the view |
+| **F8** `{from_file:}` under a non-credential key prints the file back in every report | `cheap` yes (~4 lines); **P2** not P1 | `cheap` yes (~6 lines); reproduced on a refused write too; **P2**: attacker = fragment author = the operator or coop-keeper as the operator's user on the operator's machine, who can already `cat` the file — a contract breach that puts file contents in the keeper's transcript, not exfiltration; no ADR 0001 boundary crossed | **FIX** — `from_file` only under a key the redactor masks |
+
+Both raters: F3/F4/F6/F7 are one shape — a legal YAML value the input boundary did not
+anticipate — and CLAUDE.md's answer is one enumerating test, not another round.
+Added: `TestLegalYamlShapesTheBoundaryDidNotAnticipate` (cycles, shared aliases,
+alias/tag names in `problem`, non-string and colliding keys) beside the round-4
+constructor enumeration.
+
+Notes:
+- Adoption: 7 of 8 acted on (6 FIX, 1 MAKE IT LOUD), 1 DROP.
+- Two disagreements, both converged on cited evidence (§3.8 for F1; the `silent`
+  obligation for F3) — the concession row, with the evidence written down.
+- Both raters and the detector: stop. Codex is at its usage limit in any case.
+
+**Status: open.** Settles with the round-4 and round-5 entries.

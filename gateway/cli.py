@@ -1254,12 +1254,16 @@ def _run_config_show_raw(args) -> None:
         ok, findings = True, []
     redacted = redact_raw_document(document)
     if args.json:
+        collisions: list[str] = []
+        rendered = json_safe_keys(redacted, collisions)
+        findings += [{"level": "warning", "entity_kind": "global", "entity_name": None,
+                      "field": None, "message": m} for m in collisions]
         print(json.dumps({
             "ok": ok,
             "config_path": os.path.abspath(args.config),
             "exists": exists,
             "file_digest": digest,
-            "config": json_safe_keys(redacted),
+            "config": rendered,
             "findings": findings,
         }, indent=2, default=str))
     else:
@@ -1358,7 +1362,11 @@ def _run_config_edit(args) -> None:
 def _report_edit(outcome: "EditOutcome", *, json_mode: bool) -> None:
     if json_mode:
         from .config_edit import json_safe_keys
-        print(json.dumps(json_safe_keys(outcome.to_dict()), indent=2, default=str))
+        collisions: list[str] = []
+        rendered = json_safe_keys(outcome.to_dict(), collisions)
+        rendered["findings"] += [{"level": "warning", "entity_kind": "global", "entity_name": None,
+                                  "field": None, "message": m} for m in collisions]
+        print(json.dumps(rendered, indent=2, default=str))
     elif outcome.ok:
         verb = "Dry run: the result validates — nothing written" if outcome.dry_run \
             else f"Wrote {outcome.config_path}"

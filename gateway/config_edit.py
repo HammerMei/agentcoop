@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from .config import _AGENT_TYPE_DEFAULT_COMMAND
-from .config_diff import REDACTED
+from .config_diff import REDACTED, is_secret_key
 
 if TYPE_CHECKING:
     from .config_validate import ValidationResult
@@ -52,6 +52,10 @@ def yaml_error_summary(exc: yaml.YAMLError) -> str:
     mark = getattr(exc, "problem_mark", None)
     where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
     problem = getattr(exc, "problem", None) or type(exc).__name__
+    # PyYAML single-quotes every source-derived fragment in `problem` — an
+    # undefined alias name (`password: *hunter2` → "found undefined alias
+    # 'hunter2'"), a tag, a character. Those are the file's own text.
+    problem = re.sub(r"'[^']*'", "'…'", problem)
     return f"{problem}{where}"
 
 
@@ -72,13 +76,32 @@ def load_yaml(source: bytes | str | Any) -> Any:
     The set is not enumerable across PyYAML releases (gateway/admin/config.py
     reached the same conclusion), hence the broad clause on a one-call body."""
     try:
-        return yaml.safe_load(source)
+        loaded = yaml.safe_load(source)
     except yaml.YAMLError as exc:
         raise _YamlLoadFailure(yaml_error_summary(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — see docstring
         raise _YamlLoadFailure(
             f"{type(exc).__name__} while constructing a tagged value"
         ) from exc
+    if _has_cycle(loaded):
+        # `value: &loop [*loop]` is legal YAML and loads as a self-referential
+        # list; every walk after this point (redact, sentinel, from_file)
+        # would recurse without end. A shared `*alias` subtree is fine.
+        raise _YamlLoadFailure("a recursive alias refers to its own container")
+    return loaded
+
+
+def _has_cycle(value: Any, on_path: set[int] | None = None) -> bool:
+    if not isinstance(value, (dict, list)):
+        return False
+    on_path = on_path if on_path is not None else set()
+    if id(value) in on_path:
+        return True
+    on_path.add(id(value))
+    children = value.values() if isinstance(value, dict) else value
+    found = any(_has_cycle(child, on_path) for child in children)
+    on_path.discard(id(value))
+    return found
 
 
 def file_digest(data: bytes) -> str:
@@ -319,6 +342,10 @@ def fragment_from_paths(
     if entry is None:
         return body
     block, name = entry
+    if "name" in body:
+        # `--entry rule:w1 --set name=w2` would pass the check below for w1
+        # and then match — and edit — w2. A rename is a different operation.
+        raise PatchError("--entry: 'name' is the selector and cannot be set through --set/--unset")
     if document is not None and name not in _raw_named(document, block):
         raise PatchError(f"--entry: no {NAMED_LISTS[block]} named '{name}'")
     return {block: [{"name": name, **body}]}
@@ -374,11 +401,25 @@ def resolve_from_file(value: Any, where: str = "") -> Any:
                     f"{where or 'value'}: a from_file mapping holds exactly one string "
                     f"key, {{{FROM_FILE_KEY}: <path>}}"
                 )
+            if not is_secret_key(_last_key(where)):
+                # The value read is masked in every report only because the
+                # key it lands under is a credential key; under `description`
+                # it would be printed back verbatim.
+                raise PatchError(
+                    f"{where or 'value'}: from_file is allowed only under a credential key "
+                    "(password, token, secret) — its value is masked in every report by "
+                    "that key"
+                )
             return read_secret_file(value[FROM_FILE_KEY])
         return {k: resolve_from_file(v, f"{where}.{k}" if where else k) for k, v in value.items()}
     if isinstance(value, list):
         return [resolve_from_file(v, f"{where}[{i}]") for i, v in enumerate(value)]
     return value
+
+
+def _last_key(where: str) -> str:
+    """The field a dotted path ends in, list indices stripped."""
+    return re.sub(r"\[\d+\]$", "", where.rsplit(".", 1)[-1])
 
 
 def find_sentinel(value: Any, where: str = "") -> str | None:
@@ -432,14 +473,25 @@ def read_fragment_file(path: str) -> dict:
     return {} if loaded is None else loaded
 
 
-def json_safe_keys(value: Any) -> Any:
+def json_safe_keys(value: Any, collisions: list[str] | None = None, where: str = "") -> Any:
     """`value` with every non-string mapping key rendered as its string —
     YAML allows `2026-01-01:` or `1:` as a key, JSON does not, and
-    `json.dumps(default=str)` converts values only."""
+    `json.dumps(default=str)` converts values only.
+
+    Two legal YAML keys can render alike (`1:` and `'1':`); when `collisions`
+    is given, the path of each such mapping is appended so the caller can say
+    a value is missing from the JSON view rather than drop it in silence."""
     if isinstance(value, dict):
-        return {(k if isinstance(k, str) else str(k)): json_safe_keys(v) for k, v in value.items()}
+        out = {}
+        for k, v in value.items():
+            key = k if isinstance(k, str) else str(k)
+            if key in out and collisions is not None:
+                collisions.append(f"{where or 'document'}: keys {k!r} and another rendering as "
+                                  f"{key!r} collide in JSON; one value is not shown")
+            out[key] = json_safe_keys(v, collisions, f"{where}.{key}" if where else key)
+        return out
     if isinstance(value, list):
-        return [json_safe_keys(v) for v in value]
+        return [json_safe_keys(v, collisions, f"{where}[{i}]") for i, v in enumerate(value)]
     return value
 
 
@@ -773,10 +825,18 @@ def agent_fragment(
             f"command {command!r} is a relative path — give a bare command name found on "
             "PATH, or an absolute path"
         )
-    if resolve_command(command) is None:
+    resolved = resolve_command(command)
+    if resolved is None:
         raise PatchError(
             f"command {command!r} was not found on PATH — install the backend, or see "
             "'coop config backends'"
+        )
+    if not os.path.isabs(resolved):
+        # A relative PATH entry (`.`, `bin`) resolved it against the caller's
+        # directory; the backend launches it from working_directory.
+        raise PatchError(
+            f"command {command!r} resolves through a relative PATH entry ({resolved!r}) — "
+            "give an absolute path"
         )
     entry: dict = {"type": agent_type}
     if inherits:
