@@ -7,6 +7,10 @@
 # and by `coop start`), so this is safe as long as you don't
 # commit your filled-in copy to version control.
 #
+# Comments in your config.yaml are NOT preserved by `coop config` (the TUI) or
+# by `coop config add/remove/patch` — every save re-serializes the file. Use
+# the `description:` field on an entry or template for a note that survives.
+#
 # $VAR / ${VAR} is NOT expanded — a value that happens to look like one is
 # used exactly as written, like any other string. (If you're upgrading from
 # an older setup that used a `.env` file with $VAR references, the next

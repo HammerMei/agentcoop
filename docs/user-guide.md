@@ -820,6 +820,107 @@ the active digest and warns when the file differs, so "I edited but forgot to
 reload" is visible. `config validate --json` and `config reload --json` emit
 structured output.
 
+### Editing Configuration from the Command Line
+
+`coop config add`, `remove` and `patch` edit `config.yaml` one entry at a
+time without opening the TUI — the commands coop-keeper drives, usable by
+hand or from a script. Every write validates the whole result first (an
+invalid result is not written and the findings come back in the same shape as
+`config validate --json`), then goes through the config TUI's atomic save: one
+timestamped backup under `.config-backups/`, one replace. **Comments in
+`config.yaml` are not preserved** by these commands or by the TUI; the
+`description:` field is the comment that survives.
+
+```bash
+# One entry each; an existing name is refused, never replaced
+coop config add connector bob@mm --type mattermost --server-url https://mm.example \
+    --team lab --username bob --password-file /tmp/pw --owner alice
+coop config add connector bob@mm-2 --type mattermost --server-url https://mm.example \
+    --team ops --credentials-from bob@mm       # a second team, same account
+coop config add agent bob --type claude --command claude --working-directory ~/.agentcoop/agents/user/bob
+coop config add rule bob@mm --connector bob@mm --agent bob --include '*' --direct
+
+# Refused while a rule still refers to the name — remove in dependency order
+coop config remove rule bob@mm
+coop config remove connector bob@mm
+coop config remove agent bob
+
+# Merge-patch by path: values are YAML (500 is an integer, "500" a string),
+# --unset deletes, --entry scopes the paths to one list entry by name
+coop config patch --set agents.bob.timeout=500
+coop config patch --entry rule:bob@mm --set 'rooms.include=[general, eng-*]'
+coop config patch --entry connector:bob@mm --unset description
+
+# Or a fragment file, merged with the same rules
+coop config patch --file fragment.yaml
+
+# Preview the merged result (credentials masked) without writing, then write
+# only if the file has not changed since
+coop config patch --file fragment.yaml --dry-run --json      # reports file_digest
+coop config patch --file fragment.yaml --if-digest <file_digest>
+```
+
+A fragment follows JSON merge-patch: a mapping merges into a mapping, `null`
+deletes a key, anything else replaces. `connectors:` and `watcher_rules:` are
+lists in the file, so a fragment's entries there are merged **by name**: a new
+name is appended, an existing one merged into, `op: add` refuses an existing
+name and `op: remove` deletes the entry and only it (`op` is the fragment's
+word and never reaches the file). A credential is written as
+`{from_file: <path>}` and the command reads the file; the masked value `***`
+is refused everywhere, so a masked view can never be written back.
+
+```yaml
+connectors:
+  - name: bob@mm
+    op: add
+    type: mattermost
+    server: {url: https://mm.example, team: lab, username: bob, password: {from_file: /tmp/pw}}
+watcher_rules:
+  - name: alice@rc
+    op: remove
+```
+
+`agents:` and the template blocks are mappings keyed by name in the file
+itself, so plain merge-patch addresses one entry there and `agents: {alice: null}`
+removes it.
+
+`config show --raw` prints the file as written — templates, `inherits:`,
+`description`, key order — with credentials masked, its **file digest** (over
+the file's bytes; the `digest` plain `show` reports is over the resolved
+configuration and ignores a `description` edit) and the validation findings,
+even when the file does not validate. `config backends` reports each
+supported backend type, its command and whether the command is on `PATH`,
+which is what `add agent` refuses on.
+
+A `config.yaml` with no connector, agent or rule is valid — it is the state
+between installing and the first bot — but `coop start` refuses to run it and
+says so; `config reload` to one stops the last connector and expires its
+records.
+
+### Provisioning Accounts (`coop-provision`)
+
+`coop-provision` creates and removes accounts and channel memberships on a
+Rocket.Chat or Mattermost server with an administrator's credentials, kept in
+`~/.agentcoop/admin-profiles.yaml` (override with `--config` or
+`COOP_ADMIN_CONFIG`); full API error bodies go to
+`~/.agentcoop/coop-provision.log` (`--log-file`).
+
+```bash
+coop-provision init mm-lab --type mattermost --server-url https://mm.example --team lab
+$EDITOR ~/.agentcoop/admin-profiles.yaml       # fill in token, or username/password
+coop-provision mm-lab check                    # authenticates; exit 0 when the profile works
+coop-provision profiles --json                 # every profile, credentials shown as "" or "***"
+
+coop-provision mm-lab create-user bob bob@agentcoop.invalid --password-file /tmp/pw
+coop-provision mm-lab add-to-channel bob general
+coop-provision mm-lab delete-user bob          # deactivates on Mattermost, deletes on Rocket.Chat
+coop-provision mm-lab reactivate-user bob --password-file /tmp/pw   # Mattermost only
+```
+
+`init` and `profiles` act on the profiles file itself and take the place of
+the profile name, so a profile literally named `init` or `profiles` cannot be
+addressed. `init` re-serializes the file, so comments in it are not kept.
+
 ### Watcher Control
 
 All commands require the daemon to be running.
