@@ -231,7 +231,14 @@ class EditableConfig:
                 f"Cannot save: {self.path} no longer exists (nothing to back up)."
             )
 
-        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        # Write to the TARGET of a symlinked config.yaml, not to the link:
+        # `os.replace(tmp, link)` would swap the link itself for a regular
+        # file, leaving the real file untouched and the deployment that
+        # repoints the link (Docker mode 1, `config_migrate.py`'s "Symlink
+        # safety") silently editing the wrong one. Same precedent as
+        # config_migrate.py, which resolves first for the same reason.
+        target = self.path.resolve()
+        tmp_path = target.with_name(target.name + ".tmp")
         try:
             # 0600 from the first byte, created exclusively: the document holds
             # the secrets, and the chmod on `self.path` below would otherwise
@@ -256,17 +263,17 @@ class EditableConfig:
                 # save. The pre-existing problem(s) stay exactly as they
                 # were; this save just doesn't ALSO fix them.
 
-            backup_dir = self.path.parent / ".config-backups"
+            backup_dir = target.parent / ".config-backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup_dir.chmod(0o700)
             # Nanoseconds, not seconds: two saves in one second (a scripted
             # `coop config patch` twice) named the same backup, and the second
             # copy2 overwrote the first — the very snapshot it promised to keep.
-            backup_path = backup_dir / f"{self.path.name}.bak.{time.time_ns()}"
-            shutil.copy2(self.path, backup_path)
+            backup_path = backup_dir / f"{target.name}.bak.{time.time_ns()}"
+            shutil.copy2(target, backup_path)
             backup_path.chmod(0o600)
-            os.replace(tmp_path, self.path)
-            self.path.chmod(0o600)
+            os.replace(tmp_path, target)
+            target.chmod(0o600)
         finally:
             # Only ever removes OUR OWN temp file, not the real config: if
             # os.replace() above succeeded, tmp_path no longer exists at this

@@ -536,9 +536,12 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
     beside = config_path.parent
     if not beside.is_dir():
         # The file does not exist yet and neither does its directory (a first
-        # bootstrap). A dry run must not create the directory, so validate in
-        # a scratch one: a relative path in the document would resolve against
-        # a directory that does not exist either way, and fail either way.
+        # bootstrap), so the temp file goes in a scratch one. A relative path
+        # in the document then resolves against a directory that does not
+        # exist either way, and fails either way — the case is not handled,
+        # only kept from raising. (This is not a "dry run creates nothing"
+        # guarantee: validate_config's own state checks create the runtime
+        # directory, as `config validate` and `coop start` always have.)
         scratch = tempfile.TemporaryDirectory()
         beside = Path(scratch.name)
     else:

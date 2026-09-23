@@ -296,3 +296,27 @@ Notes:
 - Both raters: one more round; stop if round 8 lands on any of these three fixes.
 
 **Status: open.** Settles with the round-4 entry.
+
+---
+
+## 2026-09-23 — PR #181 round 8
+
+**Chain detector:** 46 findings over 8 rounds, **no chain** by its rule (code written since
+the *previous* round). Rater 2 notes F1 sits in `_has_cycle`, added by the round-6 fix
+`b2e8629` — a finding on a fix two rounds back, which the detector does not count.
+**Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `_has_cycle` is exponential on a doubling acyclic alias graph | `cheap` yes: memoize proven-acyclic containers (4 lines) → FIX; the render explosion is the operator's own alias bomb → drop that half | `cheap` **no** — measured: n=20 doc, `_has_cycle` 1.3 s, redact 2.2 s, `show --raw` 27.7 s / 88 MB; the memo removes ~⅓, the render still expands the DAG; a correct fix is a traversal budget (new named constant) or refusing shared containers (contradicts "a shared alias is fine"). Scored: `hours_per_hit` 0.5 · `hits_per_year` 0.003–0.1 (3–10 operators × P(author such a graph) 0.001–0.01) · `discount` 1.0 · `fix_hours` 1 · `tax` 0.1 → net ≤ 0, lighter than the DROP anchor | **DROP.** Rater 1 conceded on the measurement: the memo alone does not remove the defect, and the full fix carries a tax the harm never repays. Input is the operator's own file; no ADR 0001 boundary |
+| **F2** `save()` through a symlinked `config.yaml` replaces the link with a regular file | `cheap` yes, fix in `save()` (resolve to the target) | `cheap` yes — 1–2 lines with a precedent (`config_migrate.py` resolves first for the same reason); pre-existing TUI behaviour, but Docker mode 1 symlinks config.yaml and the increment introduces the scripted write §3.8 relies on; `silent` yes | **FIX in `save()`** — temp, backup and replace all on the resolved target; the link stays a link. Test: save through a link edits the target and leaves the link |
+| **F3** a dry run creates `~/.agentcoop` via `validate_config`'s state checks | `cheap` fails the file rule (`core/state.py` is outside the increment); scored ≈ 0 harm → DROP; §3.8 is about edits waiting to be applied, not an install directory | same: three call sites, `coop start` mkdirs it anyway, `config validate` always did; `hours_per_hit` ~0 → any fix net ≤ 0 → DROP; **but** the comment at `validate_document` claimed "a dry run must not create the directory", which the default path does not deliver — a wrong rationale outranks the small bug | **DROP the behaviour; the comment corrected** to say what is and is not guaranteed |
+
+Notes:
+- Adoption: 1 of 3 (F2). Two drops by scoring, both with the reason on the thread.
+- Round 6's `_has_cycle` fix is where F1 landed; the round-4/6 YAML-boundary work is
+  now: refuse cycles (kept), and accept that a pathological but acyclic alias graph is
+  the operator's own problem (documented on the thread).
+- Both raters: one more round, then stop regardless.
+
+**Status: open.** Settles with the round-4 entry.
