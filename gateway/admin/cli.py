@@ -414,11 +414,11 @@ def _run_file_command(args: argparse.Namespace) -> int:
 async def _run(args: argparse.Namespace) -> int:
     if args.command in FILE_COMMANDS:
         return _run_file_command(args)
-    if args.log_file == DEFAULT_LOG_FILE:
-        # The default lives beside config.yaml; an explicit --log-file is the
-        # operator's path and is not created for them.
-        Path(DEFAULT_LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
     try:
+        if args.log_file == DEFAULT_LOG_FILE:
+            # The default lives beside config.yaml; an explicit --log-file is
+            # the operator's path and is not created for them.
+            Path(DEFAULT_LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
         _configure_error_log(args.log_file)
     except OSError as e:
         # logging.FileHandler opens the file immediately (not lazily) — an

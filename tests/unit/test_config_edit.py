@@ -14,6 +14,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -179,6 +180,11 @@ class TestPathsAndEntry(unittest.TestCase):
     def test_without_entry_the_paths_are_top_level_and_a_later_set_wins(self):
         fragment = fragment_from_paths([("a.b", 1), ("a.b", 2), ("a.c", 3)], ["d"], None)
         self.assertEqual(fragment, {"a": {"b": 2, "c": 3}, "d": None})
+
+    def test_set_to_null_is_an_explicit_deletion_not_a_silent_no_op(self):
+        fragment = fragment_from_paths([parse_set("a.b=null"), parse_set("a.c=~")], [], None)
+        self.assertEqual(fragment, {"a": {"b": None, "c": None}})
+        self.assertEqual(apply_fragment({"a": {"b": 1, "c": 2, "d": 3}}, fragment), {"a": {"d": 3}})
         with self.assertRaises(PatchError):
             fragment_from_paths([("a..b", 1)], [], None)
 
@@ -233,6 +239,37 @@ class TestCredentialValues(unittest.TestCase):
         # ...including when it arrives through a credential file.
         with self.assertRaises(PatchError):
             prepare_fragment({"a": {"from_file": self._file(REDACTED + "\n")}})
+
+
+class TestFragmentFileAndJsonKeys(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def test_a_fragment_file_is_read_with_yaml_encoding_detection(self):
+        from gateway.config_edit import read_fragment_file
+        path = self.tmp / "f.yaml"
+        path.write_bytes("agents: {b\u00f6b: {timeout: 1}}\n".encode("utf-16"))
+        self.assertEqual(read_fragment_file(str(path)), {"agents": {"b\u00f6b": {"timeout": 1}}})
+        path.write_bytes(b"\xff\xfe\x00\x00 not: [valid")
+        with self.assertRaises(PatchError) as ctx:
+            read_fragment_file(str(path))
+        self.assertIn("not valid YAML", str(ctx.exception))
+        (self.tmp / "empty.yaml").write_text("")
+        self.assertEqual(read_fragment_file(str(self.tmp / "empty.yaml")), {})
+        with self.assertRaises(PatchError):
+            read_fragment_file(str(self.tmp / "absent.yaml"))
+
+    def test_non_string_keys_are_rendered_for_json(self):
+        import datetime
+
+        from gateway.config_edit import json_safe_keys
+        doc = {datetime.date(2026, 1, 1): "v", 1: [{2: "x"}], "s": {True: 1}}
+        out = json_safe_keys(doc)
+        self.assertEqual(out, {"2026-01-01": "v", "1": [{"2": "x"}], "s": {"True": 1}})
+        json.dumps(out)
 
 
 class TestReadDocument(unittest.TestCase):
@@ -374,11 +411,20 @@ class TestEditDocument(unittest.TestCase):
         self.assertTrue(planned.ok, planned.error)
         self.assertEqual(planned.file_digest, hashlib.sha256(b"").hexdigest())
         self.assertFalse(path.exists(), "a dry run creates nothing")
-        outcome = edit_document(str(path), lambda d: apply_fragment(d, fragment),
-                                dry_run=False, if_digest=planned.file_digest)
+        modes_seen: list[int] = []
+        real_dump = yaml.dump
+
+        def spying_dump(data, stream, **kw):
+            modes_seen.append(os.fstat(stream.fileno()).st_mode & 0o777)
+            return real_dump(data, stream, **kw)
+
+        with patch("gateway.config_edit.yaml.dump", side_effect=spying_dump):
+            outcome = edit_document(str(path), lambda d: apply_fragment(d, fragment),
+                                    dry_run=False, if_digest=planned.file_digest)
         self.assertTrue(outcome.ok, outcome.error)
         self.assertEqual(yaml.safe_load(path.read_text()), fragment)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(modes_seen, [0o600], "0600 from the first byte, not chmod'd after the dump")
         self.assertFalse((path.parent / ".config-backups").exists())
         self.assertEqual(outcome.file_digest, read_document(path)[1])
         # Once the file exists, the "nothing there" digest is stale.

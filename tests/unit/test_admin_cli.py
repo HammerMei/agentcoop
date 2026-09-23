@@ -446,6 +446,23 @@ class TestNewCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, 1)
         self.assertIn("nothing to reactivate", err)
 
+    async def test_an_uncreatable_default_log_directory_is_a_clean_error(self):
+        import gateway.admin.cli as cli_mod
+        blocked = os.path.join(self._tmp.name, "blocked")
+        with open(blocked, "w") as f:
+            f.write("a file where the directory should be")
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(cli_mod, "DEFAULT_LOG_FILE", os.path.join(blocked, "coop-provision.log")), \
+             patch("gateway.admin.cli._configure_error_log") as log, \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            args = _args(["p", "check"])
+            args.log_file = cli_mod.DEFAULT_LOG_FILE
+            code = await _run(args)
+        self.assertEqual(code, 1)
+        self.assertIn("could not open log file", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+        log.assert_not_called()
+
     async def test_check_passes_when_connect_does_and_fails_when_it_does_not(self):
         mock_admin = self._admin()
         code, out, _ = await self._run(["p", "check"], mock_admin)

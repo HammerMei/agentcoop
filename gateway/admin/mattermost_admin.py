@@ -342,10 +342,10 @@ class MattermostAdmin(PlatformAdmin):
             )
 
     async def reactivate_user(self, username: str, password: str) -> AdminUser:
-        """The inverse of delete_user: PUT users/{id}/active {active: true}
-        re-enables a soft-deleted account, then PUT users/{id}/password sets
-        the new password — as an admin, without the old one. Read back:
-        delete_at must be unset afterwards."""
+        """The inverse of delete_user: PUT users/{id}/password sets the new
+        password — as an admin, without the old one — then PUT
+        users/{id}/active {active: true} re-enables the soft-deleted account.
+        Read back: delete_at must be unset afterwards."""
         user = await self._get_user_or_none(username)
         if user is None:
             raise UserNotFoundError(f"Mattermost user '{username}' not found")
@@ -354,10 +354,16 @@ class MattermostAdmin(PlatformAdmin):
                 f"Mattermost user '{username}' is active — nothing to reactivate "
                 "(rotating an active account's password is not supported)"
             )
-        await self._rest._request("PUT", f"users/{user.id}/active", json_data={"active": True})
+        # Password first, then activation: if the password write fails the
+        # account is still deactivated and a retry is refused by nothing; the
+        # other order would leave it active under its OLD password with the
+        # `not user.deactivated` guard above blocking the retry. (Mattermost
+        # accepting an admin password update on a deactivated account is what
+        # the lab run of §7 test 10 verifies; a refusal there changes nothing.)
         await self._rest._request(
             "PUT", f"users/{user.id}/password", json_data={"new_password": password}
         )
+        await self._rest._request("PUT", f"users/{user.id}/active", json_data={"active": True})
         with readback_after_write(f"Mattermost reported user '{username}' reactivated"):
             result = await self._rest._request("GET", f"users/{user.id}")
         if result.get("delete_at"):

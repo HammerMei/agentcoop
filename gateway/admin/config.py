@@ -438,9 +438,11 @@ def init_profile(
     tmp = config_path.with_name(config_path.name + ".tmp")
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(tmp, "w") as f:
+        # 0600 from the first byte, exclusively created — every existing
+        # administrative credential is about to be written into it, and a
+        # chmod after the dump would leave them world-readable meanwhile.
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.safe_dump({"profiles": raw_profiles}, f, sort_keys=False, allow_unicode=True)
-        tmp.chmod(0o600)
         os.replace(tmp, config_path)
     except OSError as e:
         with contextlib.suppress(OSError):

@@ -558,6 +558,21 @@ class TestInitProfile(unittest.TestCase):
         with self.assertRaises(AdminConfigError):
             init_profile(self.path, "x", profile_type="rocketchat", server_url="", team=None)
 
+    def test_the_temp_file_is_0600_before_a_single_credential_is_written(self):
+        self.path.parent.mkdir()
+        self.path.write_text(TestLoadProfileIsLazy._FILE)
+        import yaml
+        modes: list[int] = []
+        real_dump = yaml.safe_dump
+
+        def spying_dump(data, stream, **kw):
+            modes.append(os.fstat(stream.fileno()).st_mode & 0o777)
+            return real_dump(data, stream, **kw)
+
+        with patch("gateway.admin.config.yaml.safe_dump", side_effect=spying_dump):
+            init_profile(self.path, "rc-2", profile_type="rocketchat", server_url="https://x", team=None)
+        self.assertEqual(modes, [0o600])
+
     def test_a_failed_write_leaves_the_existing_file_intact(self):
         self.path.parent.mkdir()
         self.path.write_text(TestLoadProfileIsLazy._FILE)

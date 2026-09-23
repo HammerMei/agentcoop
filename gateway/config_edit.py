@@ -270,14 +270,6 @@ def _segments(path: str) -> list[str]:
     return keys
 
 
-def _nest(path: str, value: Any) -> dict:
-    keys = _segments(path)
-    out: Any = value
-    for key in reversed(keys):
-        out = {key: out}
-    return out
-
-
 def fragment_from_paths(
     sets: list[tuple[str, object]], unsets: list[str], entry: tuple[str, str] | None,
     document: dict | None = None,
@@ -291,9 +283,12 @@ def fragment_from_paths(
     a connector born of `--set server.url=…` alone is never what was meant."""
     body: dict = {}
     for path, value in sets:
-        body = merge_patch(body, _nest(path, value))
+        # By hand, not via merge_patch: `--set path=null` is an explicit
+        # deletion and merge_patch would drop the leaf before it reached the
+        # document, reporting success for a change it never made.
+        body = _nest_into(body, path, value)
     for path in unsets:
-        body = _nest_into(body, path)
+        body = _nest_into(body, path, None)
     if entry is None:
         return body
     block, name = entry
@@ -302,9 +297,10 @@ def fragment_from_paths(
     return {block: [{"name": name, **body}]}
 
 
-def _nest_into(body: dict, path: str) -> dict:
-    """Place an explicit `None` (a merge-patch delete) at `path` in `body` —
-    `merge_patch` would drop it, so the leaf is set by hand."""
+def _nest_into(body: dict, path: str, value: Any) -> dict:
+    """`body` with `value` placed at `path` — including an explicit `None`,
+    which merge_patch would treat as a delete and drop. A later path wins
+    over an earlier one, as a later key in a fragment would."""
     keys = _segments(path)
     out = _deepcopy(body)
     cursor = out
@@ -314,7 +310,7 @@ def _nest_into(body: dict, path: str) -> dict:
             nxt = {}
             cursor[key] = nxt
         cursor = nxt
-    cursor[keys[-1]] = None
+    cursor[keys[-1]] = _deepcopy(value)
     return out
 
 
@@ -392,6 +388,32 @@ def prepare_fragment(fragment: Any) -> dict:
     if hit:
         raise PatchError(f"{hit} is the masked value {REDACTED!r} — a masked view is never written back")
     return resolved
+
+
+def read_fragment_file(path: str) -> dict:
+    """A `--file` fragment: read as bytes so PyYAML detects the encoding (a
+    UTF-16 file from a Windows editor loads; undecodable bytes are a YAML
+    error, not a UnicodeDecodeError out of a text read). Errors name the
+    file and the position, never a line of it."""
+    try:
+        with open(path, "rb") as f:
+            loaded = yaml.safe_load(f)
+    except OSError as exc:
+        raise PatchError(f"could not read fragment {path!r}: {exc.strerror or exc}") from exc
+    except yaml.YAMLError as exc:
+        raise PatchError(f"fragment {path!r} is not valid YAML: {yaml_error_summary(exc)}") from exc
+    return {} if loaded is None else loaded
+
+
+def json_safe_keys(value: Any) -> Any:
+    """`value` with every non-string mapping key rendered as its string —
+    YAML allows `2026-01-01:` or `1:` as a key, JSON does not, and
+    `json.dumps(default=str)` converts values only."""
+    if isinstance(value, dict):
+        return {(k if isinstance(k, str) else str(k)): json_safe_keys(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_safe_keys(v) for v in value]
+    return value
 
 
 # ── Plan and write ────────────────────────────────────────────────────────────
@@ -473,9 +495,10 @@ def _create_file(path: Path, document: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:
-        with open(tmp, "w") as f:
+        # 0600 from the first byte, exclusively created: the document holds
+        # the secrets, and a chmod after the write would leave a window.
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             yaml.dump(document, f, sort_keys=False, allow_unicode=True)
-        tmp.chmod(0o600)
         os.replace(tmp, path)
     finally:
         with contextlib.suppress(OSError):
@@ -567,6 +590,10 @@ def edit_document(
 # component, lower case, no separators.
 AGENT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
+# The connector types `add connector` knows the server block of — the two
+# chat platforms coop-keeper provisions accounts on.
+ADDABLE_CONNECTOR_TYPES = ("rocketchat", "mattermost")
+
 
 def _raw_connectors(document: dict) -> list[dict]:
     block = document.get("connectors") or []
@@ -594,6 +621,13 @@ def connector_fragment(
     from the command line."""
     if name in _raw_named(document, "connectors"):
         raise PatchError(f"connector '{name}' already exists — an existing name is not replaced")
+    if connector_type not in ADDABLE_CONNECTOR_TYPES:
+        # The `server` block built below is the Rocket.Chat/Mattermost shape;
+        # another type (voice, script) would validate with that block ignored.
+        raise PatchError(
+            f"unknown connector type {connector_type!r} — one of "
+            f"{', '.join(ADDABLE_CONNECTOR_TYPES)} (other types are written with 'config patch')"
+        )
     server: dict = {"url": server_url}
     if team:
         server["team"] = team
@@ -638,10 +672,12 @@ def _credentials_of(document: dict, config_path: Path, source: str) -> dict:
     for key in ("password", "token"):
         if server.get(key):
             out[key] = server[key]
-    if "username" not in out or not ({"password", "token"} & set(out)):
+    # A token stands alone (MattermostConfig authenticates with it and no
+    # username); a password needs the username it belongs to.
+    if not ("token" in out or ("username" in out and "password" in out)):
         raise PatchError(
-            f"--credentials-from: connector '{source}' carries no username with a "
-            "password or token to copy"
+            f"--credentials-from: connector '{source}' carries neither a token nor a "
+            "username with a password to copy"
         )
     return out
 

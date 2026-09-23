@@ -1942,6 +1942,24 @@ class TestCLIConfigShowRaw(_ConfigCLIBase):
         self.assertEqual((doc["exists"], doc["file_digest"], doc["config"], doc["findings"]),
                          (True, None, None, []), "one shape whether or not the file parses")
 
+    def test_a_validator_crash_still_shows_the_document_with_an_error_finding(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "url: http://localhost:3000", "url: []"))
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1, stderr)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["url"], [])
+        self.assertIn("could not check this file", doc["findings"][0]["message"])
+
+    def test_a_date_key_in_the_file_is_shown_in_json(self):
+        Path(self.cfg_path).write_text("2026-01-01: value\nconnectors: []\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["config"]["2026-01-01"], "value")
+
     def test_a_yaml_error_on_a_credential_line_does_not_echo_it(self):
         Path(self.cfg_path).write_text("server:\n  password: hunter2: oops\n")
         stdout, stderr, code = self._run_with(
@@ -2100,6 +2118,17 @@ class TestCLIConfigPatch(_EditCLIBase):
         self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
         self.assertEqual(Path(self.cfg_path).read_bytes(), before)
 
+    def test_set_to_null_deletes_and_an_undecodable_fragment_is_a_clean_error(self):
+        doc, _, code = self._edit("patch", "--entry", "rule:w1", "--set", "rooms.include=null",
+                                  "--set", "rooms.direct=true")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["watcher_rules"][0]["rooms"], {"direct": True})
+        fragment = Path(self.tmp) / "fragment.yaml"
+        fragment.write_bytes(b"\xff\xfe\x00\x00 not: [valid")
+        doc, _, code = self._edit("patch", "--file", str(fragment))
+        self.assertEqual(code, 1)
+        self.assertIn("not valid YAML", doc["error"])
+
     def test_text_mode_says_what_happened_and_never_prints_the_document(self):
         stdout, stderr, code = self._run_with(
             ["config", "patch", "--config", self.cfg_path, "--set", "agents.default.timeout=5"],
@@ -2193,6 +2222,32 @@ class TestCLIConfigAdd(_EditCLIBase):
             "--credentials-from", "nope")
         self.assertEqual(code, 1)
         self.assertIn("no connector named 'nope'", doc["error"])
+
+    def test_add_connector_refuses_a_type_it_cannot_shape(self):
+        doc, _, code = self._edit(
+            "add", "connector", "v", "--type", "voice", "--server-url", "http://x",
+            "--username", "u", "--password-file", self._secret_file("x\n"), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown connector type 'voice'", doc["error"])
+
+    def test_credentials_from_copies_a_token_that_stands_alone(self):
+        Path(self.cfg_path).write_text(textwrap.dedent(f"""\
+            connectors:
+              - name: mm
+                type: mattermost
+                server: {{url: http://mm:8065, team: lab, token: t0k}}
+            agents:
+              default: {{type: claude, working_directory: {self.agent_dir}}}
+            watcher_rules:
+              - {{name: w1, connector: mm, agent: default, rooms: {{include: [general]}}}}
+        """))
+        doc, _, code = self._edit(
+            "add", "connector", "mm-ops", "--type", "mattermost", "--server-url", "http://mm:8065",
+            "--team", "ops", "--credentials-from", "mm")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self._doc()["connectors"][1]["server"],
+                         {"url": "http://mm:8065", "team": "ops", "token": "t0k"})
+        self.assertNotIn("t0k", json.dumps(doc))
 
     def test_credentials_from_sees_through_the_source_connectors_template(self):
         # The credentials live in a connector_templates entry the source inherits.

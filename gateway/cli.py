@@ -1213,7 +1213,7 @@ def _run_config_show_raw(args) -> None:
     import yaml
 
     from .config_diff import redact_raw_document
-    from .config_edit import DocumentError, read_document
+    from .config_edit import DocumentError, json_safe_keys, read_document
     from .config_validate import finding_to_dict, validate_config
 
     try:
@@ -1231,9 +1231,18 @@ def _run_config_show_raw(args) -> None:
 
     exists = Path(args.config).exists()
     if exists:
-        result = validate_config(args.config)
-        ok = result.ok
-        findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
+        try:
+            result = validate_config(args.config)
+        except Exception as exc:  # noqa: BLE001 — the validator's own crash on a wrongly typed value
+            # The document is what this command exists to show, so the crash
+            # becomes one error finding beside it rather than a traceback.
+            ok, findings = False, [{
+                "level": "error", "entity_kind": "global", "entity_name": None, "field": None,
+                "message": f"the validator could not check this file ({type(exc).__name__}: {exc})",
+            }]
+        else:
+            ok = result.ok
+            findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
     else:
         # No file yet is the empty deployment before the first bot (§3.2):
         # valid, nothing to validate, and said plainly rather than refused.
@@ -1245,7 +1254,7 @@ def _run_config_show_raw(args) -> None:
             "config_path": os.path.abspath(args.config),
             "exists": exists,
             "file_digest": digest,
-            "config": redacted,
+            "config": json_safe_keys(redacted),
             "findings": findings,
         }, indent=2, default=str))
     else:
@@ -1263,7 +1272,6 @@ def _run_config_edit(args) -> None:
     (coop-keeper design §3.10). Every command builds one fragment and takes
     the one plan-then-write path in `config_edit.edit_document`; nothing this
     prints — text or JSON, accepted or refused — carries a credential."""
-    import yaml
 
     from . import config_edit as ce
     from .config_diff import redact_raw_document
@@ -1280,16 +1288,7 @@ def _run_config_edit(args) -> None:
             entry = ce.parse_entry(args.entry)
             from_file: dict = {}
             if args.file:
-                try:
-                    with open(args.file) as f:
-                        from_file = yaml.safe_load(f)
-                except OSError as exc:
-                    raise ce.PatchError(f"could not read fragment {args.file!r}: {exc}") from exc
-                except yaml.YAMLError as exc:
-                    raise ce.PatchError(
-                        f"fragment {args.file!r} is not valid YAML: {ce.yaml_error_summary(exc)}"
-                    ) from exc
-                from_file = ce.prepare_fragment(from_file if from_file is not None else {})
+                from_file = ce.prepare_fragment(ce.read_fragment_file(args.file))
 
             def mutate(document: dict) -> dict:
                 # `--file` first, then the paths on top: an explicit --set is
@@ -1336,14 +1335,23 @@ def _run_config_edit(args) -> None:
         outcome = ce.EditOutcome(ok=False, dry_run=args.dry_run,
                                  config_path=os.path.abspath(args.config), error=str(exc))
     else:
-        outcome = ce.edit_document(
-            args.config, mutate, dry_run=args.dry_run, if_digest=args.if_digest, extra=extra)
+        try:
+            outcome = ce.edit_document(
+                args.config, mutate, dry_run=args.dry_run, if_digest=args.if_digest, extra=extra)
+        except Exception as exc:  # noqa: BLE001 — the CLI boundary, as gateway/admin/cli.py's _run
+            # Whatever the input did to a parser somewhere below, the answer
+            # is a refusal in the command's own shape, not a traceback — two
+            # review rounds each found one more such input; this ends the class.
+            outcome = ce.EditOutcome(
+                ok=False, dry_run=args.dry_run, config_path=os.path.abspath(args.config),
+                error=f"could not apply the edit ({type(exc).__name__}: {exc}) — nothing written")
     _report_edit(outcome, json_mode=args.json)
 
 
 def _report_edit(outcome: "EditOutcome", *, json_mode: bool) -> None:
     if json_mode:
-        print(json.dumps(outcome.to_dict(), indent=2, default=str))
+        from .config_edit import json_safe_keys
+        print(json.dumps(json_safe_keys(outcome.to_dict()), indent=2, default=str))
     elif outcome.ok:
         verb = "Dry run: the result validates — nothing written" if outcome.dry_run \
             else f"Wrote {outcome.config_path}"

@@ -756,11 +756,22 @@ class TestReactivateUser(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((user.id, user.username, user.deactivated), ("u1", "alice", False))
         calls = admin._rest._request.call_args_list
-        self.assertEqual(calls[0].args[:2], ("PUT", "users/u1/active"))
-        self.assertEqual(calls[0].kwargs["json_data"], {"active": True})
-        self.assertEqual(calls[1].args[:2], ("PUT", "users/u1/password"))
-        self.assertEqual(calls[1].kwargs["json_data"], {"new_password": "n3w"})
+        # Password BEFORE activation: a failed password write leaves the
+        # account deactivated and the retry unblocked.
+        self.assertEqual(calls[0].args[:2], ("PUT", "users/u1/password"))
+        self.assertEqual(calls[0].kwargs["json_data"], {"new_password": "n3w"})
+        self.assertEqual(calls[1].args[:2], ("PUT", "users/u1/active"))
+        self.assertEqual(calls[1].kwargs["json_data"], {"active": True})
         self.assertEqual(calls[2].args[:2], ("GET", "users/u1"))
+
+    async def test_a_failed_password_write_leaves_the_account_deactivated(self):
+        admin = _admin_with_mock_rest()
+        admin._rest.get_user_by_username = AsyncMock(return_value={
+            "id": "u1", "username": "alice", "email": "", "delete_at": 5})
+        admin._rest._request = AsyncMock(side_effect=[_http_error(400)])
+        with self.assertRaises(httpx.HTTPStatusError):
+            await admin.reactivate_user("alice", "n3w")
+        self.assertEqual(admin._rest._request.await_count, 1, "activation never attempted")
 
     async def test_not_found_raises(self):
         admin = _admin_with_mock_rest()
