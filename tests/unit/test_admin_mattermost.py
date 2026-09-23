@@ -738,6 +738,56 @@ class TestDeleteUser(unittest.IsolatedAsyncioTestCase):
             await admin.delete_user("alice")
 
 
+class TestReactivateUser(unittest.IsolatedAsyncioTestCase):
+    """The inverse of delete_user (coop-keeper design §3.10): re-enable, set the
+    new password as an admin, read back that delete_at is unset."""
+
+    async def test_happy_path_reenables_sets_password_and_verifies(self):
+        admin = _admin_with_mock_rest()
+        admin._rest.get_user_by_username = AsyncMock(return_value={
+            "id": "u1", "username": "alice", "email": "a@x.com", "delete_at": 1750000000000})
+        admin._rest._request = AsyncMock(side_effect=[
+            {},  # PUT active
+            {},  # PUT password
+            {"id": "u1", "delete_at": 0},  # GET verify
+        ])
+
+        user = await admin.reactivate_user("alice", "n3w")
+
+        self.assertEqual((user.id, user.username, user.deactivated), ("u1", "alice", False))
+        calls = admin._rest._request.call_args_list
+        self.assertEqual(calls[0].args[:2], ("PUT", "users/u1/active"))
+        self.assertEqual(calls[0].kwargs["json_data"], {"active": True})
+        self.assertEqual(calls[1].args[:2], ("PUT", "users/u1/password"))
+        self.assertEqual(calls[1].kwargs["json_data"], {"new_password": "n3w"})
+        self.assertEqual(calls[2].args[:2], ("GET", "users/u1"))
+
+    async def test_not_found_raises(self):
+        admin = _admin_with_mock_rest()
+        admin._rest.get_user_by_username = AsyncMock(side_effect=_http_error(404))
+        with self.assertRaises(UserNotFoundError):
+            await admin.reactivate_user("ghost", "n3w")
+
+    async def test_an_active_account_is_refused_and_nothing_is_written(self):
+        # Rotation is out of scope: an active account keeps its password.
+        admin = _admin_with_mock_rest()
+        admin._rest.get_user_by_username = AsyncMock(return_value={
+            "id": "u1", "username": "alice", "email": "", "delete_at": 0})
+        admin._rest._request = AsyncMock()
+        with self.assertRaises(AdminError) as ctx:
+            await admin.reactivate_user("alice", "n3w")
+        self.assertIn("nothing to reactivate", str(ctx.exception))
+        admin._rest._request.assert_not_awaited()
+
+    async def test_verification_failure_when_delete_at_still_set(self):
+        admin = _admin_with_mock_rest()
+        admin._rest.get_user_by_username = AsyncMock(return_value={
+            "id": "u1", "username": "alice", "email": "", "delete_at": 5})
+        admin._rest._request = AsyncMock(side_effect=[{}, {}, {"id": "u1", "delete_at": 5}])
+        with self.assertRaises(VerificationError):
+            await admin.reactivate_user("alice", "n3w")
+
+
 class TestDeleteChannel(unittest.IsolatedAsyncioTestCase):
     async def test_happy_path_archives_and_verifies(self):
         admin = _admin_with_mock_rest()

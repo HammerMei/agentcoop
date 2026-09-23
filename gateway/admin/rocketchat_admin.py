@@ -22,6 +22,7 @@ from gateway.admin._errors import readback_after_write
 from gateway.admin._logging import quiet_expected_error
 from gateway.admin.base import (
     AdminChannel,
+    AdminError,
     AdminUser,
     ChannelAlreadyExistsError,
     ChannelArchivedError,
@@ -229,6 +230,25 @@ class RocketChatAdmin(PlatformAdmin):
             raise VerificationError(
                 f"Deleted user '{username}' but a read-back lookup still finds it."
             )
+
+    async def reactivate_user(self, username: str, password: str) -> AdminUser:
+        """Rocket.Chat has nothing this tool can reactivate: `delete_user`
+        here hard-deletes, so an account it removed is gone and is recreated
+        with `create-user`. An account an admin deactivated out-of-band is
+        reported as such and left alone. Both are errors, so a plan that
+        reached for this step stops."""
+        user = await self._get_user_or_none(username)
+        if user is None:
+            raise UserNotFoundError(
+                f"Rocket.Chat user '{username}' not found — deletion is permanent on "
+                "Rocket.Chat, so there is nothing to reactivate; use create-user"
+            )
+        if user.deactivated:
+            raise AdminError(
+                f"Rocket.Chat user '{username}' is deactivated (by an admin, not by this "
+                "tool) — reactivating it is not supported here"
+            )
+        raise AdminError(f"Rocket.Chat user '{username}' is active — nothing to reactivate")
 
     async def delete_channel(self, channel_name: str) -> None:
         channel = await self._get_channel_or_none(channel_name)

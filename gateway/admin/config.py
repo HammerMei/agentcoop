@@ -32,6 +32,8 @@ from pathlib import Path
 
 import yaml
 
+from gateway.paths import RUNTIME_DIR
+
 
 class _DuplicateKeyError(yaml.YAMLError):
     """Raised by _StrictLoader when a mapping repeats a key.
@@ -120,10 +122,19 @@ _StrictLoader.add_constructor(
 )
 
 
-DEFAULT_CONFIG_PATH = Path("admin-profiles.yaml")
+# Beside config.yaml, not in the current directory: the keeper runs
+# coop-provision from its own directory, which an upgrade replaces wholesale
+# (coop-keeper design §3.10). `--config` and COOP_ADMIN_CONFIG still override.
+DEFAULT_CONFIG_PATH = RUNTIME_DIR / "admin-profiles.yaml"
 CONFIG_PATH_ENV_VAR = "COOP_ADMIN_CONFIG"
 
 SUPPORTED_TYPES = ("rocketchat", "mattermost")
+
+# The fields a profile authenticates with. `init` writes them empty for the
+# operator to fill; `profiles --json` shows each as "" (unfilled) or "***"
+# (filled), never the value.
+CREDENTIAL_FIELDS = ("username", "password", "token")
+MASKED = "***"
 
 
 class AdminConfigError(Exception):
@@ -223,11 +234,18 @@ def _resolve_config_path(path: str | Path | None) -> Path:
     return DEFAULT_CONFIG_PATH
 
 
-def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
-    """Load all profiles from a YAML file.
+def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, dict]]:
+    """The file's profiles as written — name → field mapping — checked for
+    shape only (a mapping of mappings with string names), not for content.
+
+    This is the read `load_profile`, `load_profiles`, `init_profile` and
+    `masked_profiles` share. Content validation is per profile, in
+    `AdminProfile`, and deliberately NOT done here: a skeleton `init` wrote
+    and the operator has not filled yet has empty credentials, and reading
+    the whole file must not fail on it while another profile is being used.
 
     Resolution order for the file path: explicit ``path`` argument, then
-    the ``COOP_ADMIN_CONFIG`` env var, then ``./admin-profiles.yaml``.
+    the ``COOP_ADMIN_CONFIG`` env var, then ``~/.agentcoop/admin-profiles.yaml``.
 
     The file is opened in *binary* mode and handed to PyYAML undecoded, so
     PyYAML applies its own YAML-spec encoding detection (UTF-8/16/32, BOM
@@ -259,7 +277,8 @@ def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
     except FileNotFoundError as e:
         raise AdminConfigError(
             f"Admin config file not found: {config_path} "
-            f"(pass --config, set {CONFIG_PATH_ENV_VAR}, or create ./admin-profiles.yaml)"
+            f"(pass --config, set {CONFIG_PATH_ENV_VAR}, or create it with "
+            f"'coop-provision init <profile> ...')"
         ) from e
     except OSError as e:
         # e.g. --config pointing at a directory (IsADirectoryError), an
@@ -293,14 +312,13 @@ def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
         )
 
     raw_profiles = raw.get("profiles")
-    if not raw_profiles:
+    if raw_profiles is None:
         raise AdminConfigError(f"{config_path}: no 'profiles' section found")
     if not isinstance(raw_profiles, dict):
         raise AdminConfigError(
             f"{config_path}: 'profiles' must be a mapping, got {type(raw_profiles).__name__}"
         )
 
-    profiles: dict[str, AdminProfile] = {}
     for name, fields in raw_profiles.items():
         if not isinstance(name, str):
             # An unquoted YAML scalar that looks numeric/boolean (123, true,
@@ -317,16 +335,104 @@ def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
             )
         if not isinstance(fields, dict):
             raise AdminConfigError(f"{config_path}: profile '{name}' must be a mapping")
-        try:
-            profiles[name] = AdminProfile(name=name, **fields)
-        except TypeError as e:
-            # A misspelled/unsupported key, or a redundant 'name' key inside
-            # the profile body (colliding with the name=name passed above),
-            # makes this raise TypeError — not caught by _run()'s
-            # `except AdminConfigError`, so left alone this was a raw
-            # traceback for a common config typo instead of a clean error.
-            raise AdminConfigError(f"{config_path}: profile '{name}' has invalid fields: {e}") from e
-    return profiles
+    return config_path, raw_profiles
+
+
+def _build_profile(config_path: Path, name: str, fields: dict) -> AdminProfile:
+    try:
+        return AdminProfile(name=name, **fields)
+    except TypeError as e:
+        # A misspelled/unsupported key, or a redundant 'name' key inside
+        # the profile body (colliding with the name=name passed above),
+        # makes this raise TypeError — not caught by _run()'s
+        # `except AdminConfigError`, so left alone this was a raw
+        # traceback for a common config typo instead of a clean error.
+        raise AdminConfigError(f"{config_path}: profile '{name}' has invalid fields: {e}") from e
+
+
+def load_profiles(path: str | Path | None = None) -> dict[str, AdminProfile]:
+    """Every profile in the file, each validated — for callers that want them
+    all. The CLI uses `load_profile` instead, so one unfilled skeleton does
+    not stop another profile from being used."""
+    config_path, raw_profiles = load_raw_profiles(path)
+    return {name: _build_profile(config_path, name, fields) for name, fields in raw_profiles.items()}
+
+
+def load_profile(path: str | Path | None, name: str) -> AdminProfile:
+    """The one named profile, validated; the others are only checked for
+    shape. Unknown names list what IS there (AdminConfigError)."""
+    config_path, raw_profiles = load_raw_profiles(path)
+    if name not in raw_profiles:
+        available = ", ".join(sorted(raw_profiles)) or "(none defined)"
+        raise AdminConfigError(f"Unknown profile '{name}'. Available profiles: {available}")
+    return _build_profile(config_path, name, raw_profiles[name])
+
+
+def masked_profiles(path: str | Path | None = None) -> list[dict]:
+    """Every profile's name, type, server URL and team, with each credential
+    field shown as "" when unfilled and `MASKED` when filled — so a caller
+    can tell a skeleton from a usable profile without seeing a value.
+    Reads the file as written: an unfilled skeleton is listed, not refused."""
+    _, raw_profiles = load_raw_profiles(path)
+    out = []
+    for name, fields in raw_profiles.items():
+        entry = {
+            "name": name,
+            "type": fields.get("type"),
+            "server_url": fields.get("server_url"),
+            "team": fields.get("team"),
+        }
+        for key in CREDENTIAL_FIELDS:
+            entry[key] = MASKED if fields.get(key) else ""
+        out.append(entry)
+    return out
+
+
+def init_profile(
+    path: str | Path | None, name: str, *, profile_type: str, server_url: str, team: str | None,
+) -> Path:
+    """Write profile `name` with its credential fields empty, for the operator
+    to fill in an editor (coop-keeper design §3.2). Creates the file when it
+    is absent; refuses to touch a profile that already exists. The file is
+    re-serialized, so comments in it are not preserved, and it is chmod'd
+    0600 because it is about to hold administrative credentials.
+
+    Rocket.Chat profiles get username/password; Mattermost ones also get
+    token, which MattermostAdmin prefers when set.
+    """
+    if profile_type not in SUPPORTED_TYPES:
+        raise AdminConfigError(f"unknown type {profile_type!r}, must be one of {SUPPORTED_TYPES}")
+    if not server_url:
+        raise AdminConfigError("server_url is required")
+    if profile_type == "mattermost" and not team:
+        raise AdminConfigError("'--team' is required for type=mattermost")
+    config_path = _resolve_config_path(path)
+    if config_path.exists():
+        config_path, raw_profiles = load_raw_profiles(config_path)
+    else:
+        raw_profiles = {}
+    if name in raw_profiles:
+        raise AdminConfigError(
+            f"{config_path}: profile '{name}' already exists — it is not rewritten; "
+            "edit the file, or choose another name"
+        )
+    skeleton: dict = {"type": profile_type, "server_url": server_url}
+    if team:
+        skeleton["team"] = team
+    skeleton["username"] = ""
+    skeleton["password"] = ""
+    if profile_type == "mattermost":
+        skeleton["token"] = ""
+    raw_profiles = dict(raw_profiles)
+    raw_profiles[name] = skeleton
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            yaml.safe_dump({"profiles": raw_profiles}, f, sort_keys=False, allow_unicode=True)
+        config_path.chmod(0o600)
+    except OSError as e:
+        raise AdminConfigError(f"{config_path}: could not write: {e}") from e
+    return config_path
 
 
 def get_profile(profiles: dict[str, AdminProfile], name: str) -> AdminProfile:

@@ -175,6 +175,9 @@ class _DummyAdmin(PlatformAdmin):
     async def delete_channel(self, channel_name):
         raise NotImplementedError
 
+    async def reactivate_user(self, username, password):
+        raise NotImplementedError
+
 
 class TestPlatformAdminContextManager(unittest.IsolatedAsyncioTestCase):
     async def test_context_manager_connects_and_closes(self):

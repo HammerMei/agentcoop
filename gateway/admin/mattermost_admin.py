@@ -17,6 +17,7 @@ from gateway.admin._errors import friendly_error_message, readback_after_write
 from gateway.admin._logging import quiet_expected_error
 from gateway.admin.base import (
     AdminChannel,
+    AdminError,
     AdminUser,
     ChannelAlreadyExistsError,
     ChannelNotFoundError,
@@ -339,6 +340,32 @@ class MattermostAdmin(PlatformAdmin):
                 f"Deactivated user '{username}' but a read-back check shows "
                 "delete_at is still unset."
             )
+
+    async def reactivate_user(self, username: str, password: str) -> AdminUser:
+        """The inverse of delete_user: PUT users/{id}/active {active: true}
+        re-enables a soft-deleted account, then PUT users/{id}/password sets
+        the new password — as an admin, without the old one. Read back:
+        delete_at must be unset afterwards."""
+        user = await self._get_user_or_none(username)
+        if user is None:
+            raise UserNotFoundError(f"Mattermost user '{username}' not found")
+        if not user.deactivated:
+            raise AdminError(
+                f"Mattermost user '{username}' is active — nothing to reactivate "
+                "(rotating an active account's password is not supported)"
+            )
+        await self._rest._request("PUT", f"users/{user.id}/active", json_data={"active": True})
+        await self._rest._request(
+            "PUT", f"users/{user.id}/password", json_data={"new_password": password}
+        )
+        with readback_after_write(f"Mattermost reported user '{username}' reactivated"):
+            result = await self._rest._request("GET", f"users/{user.id}")
+        if result.get("delete_at"):
+            raise VerificationError(
+                f"Reactivated user '{username}' but a read-back check shows "
+                "delete_at is still set."
+            )
+        return AdminUser(id=user.id, username=user.username, email=user.email, deactivated=False)
 
     async def delete_channel(self, channel_name: str) -> None:
         """Archive a channel. Mattermost has no hard channel-delete via the

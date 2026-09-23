@@ -322,6 +322,18 @@ class PlatformAdmin(ABC):
     async def delete_channel(self, channel_name: str) -> None:
         """Delete a channel. Raises ChannelNotFoundError if it does not exist."""
 
+    @abstractmethod
+    async def reactivate_user(self, username: str, password: str) -> AdminUser:
+        """Re-enable a deactivated account and give it `password` — the inverse
+        of `delete_user` on a platform that soft-deletes (coop-keeper design
+        §3.10: a bot removed earlier comes back with a new password).
+
+        Raises UserNotFoundError when there is no such account, and AdminError
+        when the account is not deactivated — an active account is not
+        reactivated and its password is not rotated (rotation is out of
+        scope) — or when the platform cannot reactivate at all.
+        """
+
     async def __aenter__(self) -> "PlatformAdmin":
         # If connect() raises, __aenter__ never returns normally, and per
         # the async-context-manager protocol Python will NOT call

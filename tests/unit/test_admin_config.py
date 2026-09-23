@@ -10,10 +10,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gateway.admin.config import (
+    DEFAULT_CONFIG_PATH,
     AdminConfigError,
     AdminProfile,
     get_profile,
+    init_profile,
+    load_profile,
     load_profiles,
+    masked_profiles,
 )
 
 
@@ -441,6 +445,125 @@ class TestGetProfile(unittest.TestCase):
         with self.assertRaises(AdminConfigError) as ctx:
             get_profile(profiles, "nope")
         self.assertIn("mm", str(ctx.exception))
+
+
+class TestLoadProfileIsLazy(unittest.TestCase):
+    """`load_profile` validates the one profile asked for; the rest of the file
+    is checked for shape only, so an unfilled skeleton beside a working profile
+    does not stop the working one (coop-keeper design §3.2)."""
+
+    _FILE = (
+        "profiles:\n"
+        "  rc:\n    type: rocketchat\n    server_url: https://rc\n"
+        "    username: admin\n    password: pw\n"
+        "  mm:\n    type: mattermost\n    server_url: https://mm\n    team: lab\n"
+        "    username: ''\n    password: ''\n    token: ''\n"
+    )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "admin-profiles.yaml"
+        self.path.write_text(self._FILE)
+
+    def test_the_filled_profile_loads_while_the_skeleton_sits_beside_it(self):
+        self.assertEqual(load_profile(self.path, "rc").username, "admin")
+
+    def test_the_skeleton_itself_is_refused_with_the_credential_message(self):
+        with self.assertRaises(AdminConfigError) as ctx:
+            load_profile(self.path, "mm")
+        self.assertIn("must set either 'token'", str(ctx.exception))
+
+    def test_load_profiles_still_validates_every_profile(self):
+        with self.assertRaises(AdminConfigError):
+            load_profiles(self.path)
+
+    def test_an_unknown_name_lists_what_is_there(self):
+        with self.assertRaises(AdminConfigError) as ctx:
+            load_profile(self.path, "nope")
+        self.assertIn("mm, rc", str(ctx.exception))
+
+    def test_a_shape_error_elsewhere_in_the_file_still_stops_the_load(self):
+        self.path.write_text(self._FILE + "  3: {type: rocketchat}\n")
+        with self.assertRaises(AdminConfigError):
+            load_profile(self.path, "rc")
+
+    def test_default_path_is_beside_config_yaml(self):
+        self.assertEqual(DEFAULT_CONFIG_PATH, Path.home() / ".agentcoop" / "admin-profiles.yaml")
+
+
+class TestMaskedProfiles(unittest.TestCase):
+
+    def test_credentials_show_as_empty_or_masked_never_the_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "p.yaml"
+            path.write_text(TestLoadProfileIsLazy._FILE)
+            listed = masked_profiles(path)
+        self.assertEqual(listed[0], {"name": "rc", "type": "rocketchat", "server_url": "https://rc",
+                                     "team": None, "username": "***", "password": "***", "token": ""})
+        self.assertEqual(listed[1]["password"], "")
+        self.assertEqual(listed[1]["team"], "lab")
+        self.assertNotIn("pw", str(listed))
+
+    def test_a_missing_file_is_an_admin_config_error(self):
+        with self.assertRaises(AdminConfigError):
+            masked_profiles("/nonexistent/p.yaml")
+
+
+class TestInitProfile(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "sub" / "admin-profiles.yaml"
+
+    def test_creates_the_file_with_empty_credential_fields_and_mode_0600(self):
+        written = init_profile(self.path, "mm-lab", profile_type="mattermost",
+                               server_url="https://mm", team="lab")
+        self.assertEqual(written, self.path)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        import yaml
+        doc = yaml.safe_load(self.path.read_text())
+        self.assertEqual(doc, {"profiles": {"mm-lab": {
+            "type": "mattermost", "server_url": "https://mm", "team": "lab",
+            "username": "", "password": "", "token": ""}}})
+
+    def test_a_rocketchat_skeleton_has_no_token_field(self):
+        init_profile(self.path, "rc", profile_type="rocketchat", server_url="https://rc", team=None)
+        import yaml
+        doc = yaml.safe_load(self.path.read_text())
+        self.assertEqual(doc["profiles"]["rc"],
+                         {"type": "rocketchat", "server_url": "https://rc", "username": "", "password": ""})
+
+    def test_adds_to_an_existing_file_and_keeps_the_other_profiles(self):
+        self.path.parent.mkdir()
+        self.path.write_text(TestLoadProfileIsLazy._FILE)
+        init_profile(self.path, "rc-2", profile_type="rocketchat", server_url="https://rc2", team=None)
+        import yaml
+        doc = yaml.safe_load(self.path.read_text())
+        self.assertEqual(list(doc["profiles"]), ["rc", "mm", "rc-2"])
+        self.assertEqual(doc["profiles"]["rc"]["password"], "pw", "existing values are kept")
+
+    def test_refuses_an_existing_profile_and_bad_arguments(self):
+        init_profile(self.path, "rc", profile_type="rocketchat", server_url="https://rc", team=None)
+        before = self.path.read_text()
+        with self.assertRaises(AdminConfigError) as ctx:
+            init_profile(self.path, "rc", profile_type="rocketchat", server_url="https://x", team=None)
+        self.assertIn("already exists", str(ctx.exception))
+        self.assertEqual(self.path.read_text(), before)
+        with self.assertRaises(AdminConfigError):
+            init_profile(self.path, "x", profile_type="discord", server_url="https://x", team=None)
+        with self.assertRaises(AdminConfigError):
+            init_profile(self.path, "x", profile_type="mattermost", server_url="https://x", team=None)
+        with self.assertRaises(AdminConfigError):
+            init_profile(self.path, "x", profile_type="rocketchat", server_url="", team=None)
+
+    def test_a_duplicate_key_in_the_existing_file_is_refused_not_silently_merged(self):
+        self.path.parent.mkdir()
+        self.path.write_text("profiles:\n  rc: {type: rocketchat, server_url: a, token: t}\n"
+                             "  rc: {type: rocketchat, server_url: b, token: t}\n")
+        with self.assertRaises(AdminConfigError):
+            init_profile(self.path, "x", profile_type="rocketchat", server_url="https://x", team=None)
 
 
 class TestFieldTypeValidation(unittest.TestCase):
