@@ -334,8 +334,14 @@ the daemon treats the two halves of a removal differently: a record whose
 *rule* disappears at reload is fully reclaimed — subscription, backend
 session, prompt file, attachments, record (`session_manager.py`,
 `_apply_expire`) — while a *connector* that disappears at reload keeps its
-backend session by design (`keep_backend_session`, #144/#146). Removing both
-in one edit would take the second path and leak the session; reclaiming with
+backend session by design (`keep_backend_session`, #144/#146). "Backend
+session" here means what the backend can delete: OpenCode sessions are
+deleted; Claude sessions never are — `ClaudeBackend` does not implement
+`delete_session`, so every path leaves the transcript under
+`~/.claude/projects/` and logs the id (the open decision in #146). For a
+Claude bot the ordering therefore protects the prompt file, attachments and
+record; for an OpenCode bot it also protects against a leaked session.
+Removing both in one edit would take the second path; reclaiming with
 `coop expire` first would leave a window in which the still-present rule
 recreates the watcher on the next message.
 
