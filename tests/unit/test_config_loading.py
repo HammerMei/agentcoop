@@ -1234,6 +1234,69 @@ class TestSkipOwnerApprovalRequiresEnabled(unittest.TestCase):
 # ── Tests: _deep_merge helper ─────────────────────────────────────────────────
 
 
+class TestEmptyDeployment(unittest.TestCase):
+    """A file with no connector, agent or rule is valid (coop-keeper design
+    §3.10): it is the state between installing and the first bot, and after
+    removing the last one. Whether there is anything to RUN is `coop start`'s
+    question, not the loader's."""
+
+    def _write(self, text: str) -> str:
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent(text))
+            return f.name
+
+    def test_explicitly_empty_blocks_load(self):
+        config = GatewayConfig.from_file(self._write("""\
+            connectors: []
+            agents: {}
+            watcher_rules: []
+        """))
+        self.assertEqual((config.connectors, config.agents, config.watcher_rules), ([], {}, []))
+
+    def test_a_file_holding_only_presets_and_templates_loads(self):
+        # The shape the keeper's first plan leaves behind before any bot, and
+        # what removing the last bot leaves: the shared settings, nothing else.
+        config = GatewayConfig.from_file(self._write("""\
+            tool_presets:
+              readonly: [{tool: Read}]
+            connector_templates:
+              default: {reply_in_thread: false}
+            agent_templates:
+              default: {timeout: 60}
+            watcher_templates:
+              default: {session_idle_days: 7}
+        """))
+        self.assertEqual(config.connectors, [])
+        self.assertEqual(config.agents, {})
+        self.assertEqual(config.watcher_rules, [])
+
+    def test_a_bare_connectors_key_is_an_empty_list(self):
+        # `connectors:` with nothing after it is YAML null — the same reading
+        # the loaders already give a bare `watcher_rules:`.
+        config = GatewayConfig.from_file(self._write("connectors:\nagents:\n"))
+        self.assertEqual(config.connectors, [])
+
+    def test_a_non_list_connectors_block_is_still_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            GatewayConfig.from_file(self._write("connectors: 5\n"))
+        self.assertIn("'connectors:' must be a list", str(ctx.exception))
+
+    def test_collect_config_reports_nothing_for_an_empty_deployment(self):
+        config, issues = collect_config(self._write("connectors: []\nagents: {}\n"))
+        self.assertEqual(issues, [])
+        self.assertEqual((config.connectors, config.agents, config.watcher_rules), ([], {}, []))
+
+    def test_a_rule_in_an_otherwise_empty_file_fails_on_its_own_reference(self):
+        # No global "define at least one" finding stands in front of the real
+        # problem any more: the rule names things that are not there.
+        _, issues = collect_config(self._write("""\
+            watcher_rules:
+              - {name: w1, connector: rc, agent: bob, rooms: {include: [general]}}
+        """))
+        self.assertEqual([i.entity_kind for i in issues], ["watcher"])
+        self.assertIn("rc", issues[0].message)
+
+
 class TestDeepMerge(unittest.TestCase):
     """Unit tests for the private _deep_merge helper used by *_defaults blocks."""
 
@@ -1878,7 +1941,7 @@ class TestAgentSessionLifecycleKeysAreRejected(unittest.TestCase):
     def test_collect_config_attributes_it_to_the_agent_and_keeps_going(self):
         """A second, healthy agent isolates the attribution from the pre-existing
         cascade: when the *only* agent fails, zero agents parse and
-        collect_config() adds its own "must define at least one agent" global issue
+        collect_config() adds its own "No agents parsed successfully" global issue
         on top. That cascade is existing behaviour, asserted separately below."""
         cfg = textwrap.dedent("""\
             connectors:
@@ -1913,7 +1976,7 @@ class TestAgentSessionLifecycleKeysAreRejected(unittest.TestCase):
 
     def test_the_only_agent_failing_still_reports_the_named_key_first(self):
         """Pre-existing cascade, pinned so the attributed issue is not mistaken for
-        the whole story: the "at least one agent" global issue follows it."""
+        the whole story: the "No agents parsed successfully" global issue follows it."""
         _, issues = collect_config(self._write_config("session_expire_days: 30\n"))
         self.assertEqual([i.entity_kind for i in issues], ["agent", "global"])
         self.assertIn("'watcher_rules:'", issues[0].message)

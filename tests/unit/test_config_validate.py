@@ -996,6 +996,14 @@ class TestValidateConfigLint(_ValidateConfigTestBase):
         self.assertFalse(result.ok)
 
 
+class TestEmptyDeployment(_ValidateConfigTestBase):
+    def test_an_empty_deployment_validates_with_zero_watchers(self):
+        result = self._validate(self._write("connectors: []\nagents: {}\nwatcher_rules: []\n"))
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.watcher_count, 0)
+        self.assertIsNotNone(result.config)
+
+
 class TestFindingsExtension(_ValidateConfigTestBase):
     """`findings: list[Finding]` is additive alongside the flat string lists —
     every append to errors/warnings/lint_findings must have a matching
@@ -1008,9 +1016,11 @@ class TestFindingsExtension(_ValidateConfigTestBase):
         entity_kind="global" — this is what lets the config TUI's Overview
         mark the RIGHT row, instead of a global banner nothing points at.
         This specific fixture's only agent fails, so `agents` ends up empty
-        too — a second, genuinely global finding ("must define at least one
-        agent") is expected alongside the per-agent one; both are real and
-        independently true."""
+        too — a second, genuinely global finding ("No agents parsed
+        successfully") is expected alongside the per-agent one; both are real
+        and independently true. (A file that DEFINES no agent is different:
+        that is an empty deployment and produces no global finding — see
+        TestEmptyDeployment.)"""
         cfg = self._write("""\
             connectors:
               - name: rc
@@ -1034,7 +1044,7 @@ class TestFindingsExtension(_ValidateConfigTestBase):
         self.assertIn("working_directory is required", agent_finding.message)
         global_finding = next(f for f in result.findings if f.entity_kind == "global")
         self.assertIsNone(global_finding.entity_name)
-        self.assertIn("must define at least one agent", global_finding.message)
+        self.assertIn("No agents parsed successfully", global_finding.message)
 
     def test_two_independently_broken_agents_both_surface(self):
         """The actual scenario this whole change exists for: TWO agents each

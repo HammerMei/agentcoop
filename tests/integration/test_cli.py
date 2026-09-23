@@ -2012,6 +2012,32 @@ class TestStartValidatesConfig(_PreflightBase):
             self._run(["start", "--config", cfg])
         start.assert_called_once_with(cfg)
 
+    def _empty_deployment(self) -> str:
+        """Valid, and nothing to run: no connector, agent or rule."""
+        from tests.helpers import gateway_config_text
+        return self._write(gateway_config_text(connectors=(), agents={}, rules=[]))
+
+    def test_start_refuses_an_empty_deployment_and_says_so(self):
+        # The FILE is valid (coop-keeper design §3.10) — `config validate`
+        # accepts it — but a daemon with no watcher rule would answer nothing.
+        cfg = self._empty_deployment()
+        with patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["start", "--config", cfg])
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn("[ERROR]", err)
+        self.assertIn("no watcher rules", err)
+
+    def test_restart_refuses_an_empty_deployment_before_stopping(self):
+        cfg = self._empty_deployment()
+        with patch("gateway.daemon.stop_daemon") as stop, \
+                patch("gateway.daemon.start_daemon") as start:
+            _, err, code = self._run(["restart", "--config", cfg])
+        self.assertEqual(code, 1)
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertIn("no watcher rules", err)
+
     def test_restart_validates_before_stopping_the_running_gateway(self):
         """The ordering half: validating inside the start would stop a healthy
         gateway and then refuse to bring it back."""

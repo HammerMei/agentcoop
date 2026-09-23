@@ -96,11 +96,11 @@ _REMOVED_DEFAULTS_KEYS: dict[str, str] = {
 # list of keys that do.
 #
 # Before this, ANY unrecognised top-level key was ignored in silence. A typo in
-# `connectors:` or `agents:` was caught only incidentally, by the separate "must
-# define at least one" rules — and with a misleading message, since the entries
-# were sitting right there under the misspelled key. `watchers:` had no such
-# rule, correctly (a config with no rules is legal), so a mistyped key there
-# meant a daemon that started and watched nothing.
+# `connectors:` or `agents:` was caught only incidentally, by the since-removed
+# "must define at least one" rules — and with a misleading message, since the
+# entries were sitting right there under the misspelled key. Now that an empty
+# deployment is legal (no connector, agent or rule), this check is the ONLY
+# thing standing between a misspelled block and a file that loads as empty.
 TOP_LEVEL_KEYS: frozenset[str] = frozenset({
     "connectors",
     "connector_templates",
@@ -297,11 +297,13 @@ class GatewayConfig:
 
         # ── Connectors ────────────────────────────────────────────────────────
 
-        connectors_raw = raw.get("connectors", [])
-        if not connectors_raw:
-            raise ValueError(
-                "config.yaml must define at least one connector under 'connectors:'"
-            )
+        # An empty deployment — no connector, agent or rule — is a valid file:
+        # it is the state between installing and the first bot, and after
+        # removing the last one (coop-keeper design §3.10). Whether there is
+        # anything to RUN is the daemon's question, asked by `coop start`.
+        connectors_raw = raw.get("connectors")
+        if connectors_raw is None:
+            connectors_raw = []
         if not isinstance(connectors_raw, list):
             raise ValueError(
                 f"config.yaml 'connectors:' must be a list (got {type(connectors_raw).__name__})."
@@ -333,11 +335,6 @@ class GatewayConfig:
         for agent_name, agent_raw_entry in agents_raw.items():
             agents[agent_name] = _parse_one_agent(
                 agent_name, agent_raw_entry, agent_templates, tool_presets, config_dir
-            )
-
-        if not agents:
-            raise ValueError(
-                "config.yaml must define at least one agent under 'agents:'"
             )
 
         # ── Watchers ──────────────────────────────────────────────────────────
@@ -1767,7 +1764,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
 
     Only the three per-entity for-loops (connectors/agents/watchers) get
     this fault-tolerant treatment. Every STRUCTURAL check — is `connectors:`
-    even a list, is there at least one agent, is `watcher_rules:` a list,
+    even a list, is `agents:` a mapping, is `watcher_rules:` a list,
     `tool_presets:`/`*_templates:` blocks themselves
     well-formed, `max_queue_depth`/`scheduler:` shape — stays a hard,
     immediate stop: there's no meaningful "keep going with the other 9
@@ -1841,14 +1838,10 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
         )
 
     # ── Connectors ────────────────────────────────────────────────────────
-    connectors_raw = raw.get("connectors", [])
-    if not connectors_raw:
-        return None, [
-            ConfigIssue(
-                "global", None,
-                "config.yaml must define at least one connector under 'connectors:'",
-            )
-        ]
+    # Zero connectors is a valid (empty) deployment — see from_file().
+    connectors_raw = raw.get("connectors")
+    if connectors_raw is None:
+        connectors_raw = []
     if not isinstance(connectors_raw, list):
         return None, [
             ConfigIssue(
@@ -1935,15 +1928,18 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
         except ValueError as exc:
             issues.append(ConfigIssue("agent", agent_name, str(exc)))
 
-    if not agents:
-        # Every agent independently failed (or there were none defined) —
-        # still return the connectors already parsed above (same reasoning
-        # as the branches above/below: an unrelated connector problem must
-        # not be hidden behind this).
+    if agents_raw and not agents:
+        # Every agent independently failed — still return the connectors
+        # already parsed above (same reasoning as the branches above/below:
+        # an unrelated connector problem must not be hidden behind this).
+        # Rules are skipped rather than each reported against an agent that
+        # is already reported. A file with NO agents defined is an empty
+        # deployment (see from_file()) and goes on to the rules, where any
+        # rule naming an agent fails on its own.
         issues.append(
             ConfigIssue(
                 "global", None,
-                "config.yaml must define at least one agent under 'agents:'",
+                "No agents parsed successfully — cannot resolve watcher entries.",
             )
         )
         mqd, sched = _max_queue_depth_and_scheduler_or_defaults(raw, issues)
@@ -1958,7 +1954,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
 
     # ── Watchers ──────────────────────────────────────────────────────────
     connector_names = {c.name for c in connectors}
-    if not connectors:
+    if connectors_raw and not connectors:
         # Every connector independently failed — from_file() could never
         # reach this point (an earlier raise would have stopped it first),
         # but collect_config() can legitimately get here. Nothing to
