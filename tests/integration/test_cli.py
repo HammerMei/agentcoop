@@ -1887,6 +1887,90 @@ class TestCLIConfigShow(_ConfigCLIBase):
         self.assertEqual(doc["config"]["connectors"][0]["raw"]["server"]["password"], "***")
 
 
+class TestCLIConfigShowRaw(_ConfigCLIBase):
+    """`config show --raw`: the file as written, masked, with its file digest —
+    printed even when the file does not validate (coop-keeper design §3.2/§3.10)."""
+
+    def test_json_is_the_masked_file_with_its_file_digest(self):
+        import hashlib
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["file_digest"],
+                         hashlib.sha256(Path(self.cfg_path).read_bytes()).hexdigest())
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["password"], "***")
+        self.assertEqual(doc["config"]["connectors"][0]["server"]["username"], "bot")
+        self.assertEqual(list(doc["config"]), ["connectors", "agents", "watcher_rules"])
+        self.assertEqual(doc["findings"], [])
+        self.assertNotIn("hunter2", stdout)
+
+    def test_an_invalid_file_is_still_shown_with_its_findings_and_exit_one(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["config"]["watcher_rules"][0]["agent"], "nobody",
+                         "the file is shown as written, for the keeper to fix")
+        self.assertTrue(any("nobody" in f["message"] for f in doc["findings"]))
+        self.assertNotIn("hunter2", stdout)
+
+    def test_text_mode_prints_masked_yaml_and_findings_on_stderr(self):
+        Path(self.cfg_path).write_text(Path(self.cfg_path).read_text().replace(
+            "agent: default", "agent: nobody"))
+        stdout, stderr, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw"], running=False)
+        self.assertEqual(code, 1)
+        self.assertRegex(stdout, r"File digest:  [0-9a-f]{64}")
+        self.assertIn("password: '***'", stdout)
+        self.assertNotIn("hunter2", stdout + stderr)
+        self.assertIn("[ERROR]", stderr)
+        self.assertIn("nobody", stderr)
+
+    def test_a_file_that_is_not_yaml_is_an_error_not_a_traceback(self):
+        Path(self.cfg_path).write_text("connectors: [")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 1)
+        doc = json.loads(stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIn("invalid YAML", doc["error"])
+
+    def test_an_empty_deployment_is_valid_and_shown(self):
+        Path(self.cfg_path).write_text("connectors: []\nagents: {}\n")
+        stdout, _, code = self._run_with(
+            ["config", "show", "--config", self.cfg_path, "--raw", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["config"], {"connectors": [], "agents": {}})
+
+
+class TestCLIConfigBackends(_ConfigCLIBase):
+
+    def test_reports_each_backend_with_its_command_and_whether_found(self):
+        def which(cmd):
+            return "/usr/local/bin/claude" if cmd == "claude" else None
+        with patch("gateway.config_edit.shutil.which", side_effect=which):
+            stdout, _, code = self._run_with(["config", "backends", "--json"], running=False)
+        self.assertEqual(code, 0)
+        doc = json.loads(stdout)
+        self.assertEqual(doc["backends"]["claude"],
+                         {"command": "claude", "found": True, "path": "/usr/local/bin/claude"})
+        self.assertEqual(doc["backends"]["opencode"],
+                         {"command": "opencode", "found": False, "path": None})
+
+    def test_text_mode_names_the_missing_ones(self):
+        with patch("gateway.config_edit.shutil.which", return_value=None):
+            stdout, _, code = self._run_with(["config", "backends"], running=False)
+        self.assertEqual(code, 0)
+        self.assertIn("claude", stdout)
+        self.assertIn("not found on PATH", stdout)
+
+
 class TestCLIStatusConfigLine(_ConfigCLIBase):
 
     def test_status_shows_the_active_digest_and_degraded_sections(self):

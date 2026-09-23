@@ -25,6 +25,7 @@ from gateway.config_diff import (
     config_digest,
     diff_configs,
     flatten_config,
+    redact_raw_document,
     redacted_config,
 )
 from gateway.core.config import ToolRule
@@ -281,6 +282,53 @@ class TestDigest(unittest.TestCase):
         doc = json.dumps(redacted_config(cfg))
         self.assertNotIn("t0k", doc)
         self.assertIn('"***"', doc)
+
+
+class TestRedactRawDocument(unittest.TestCase):
+    """`config show --raw`: the file as written, masked not missing."""
+
+    def test_credentials_are_masked_and_everything_else_kept_as_written(self):
+        doc = {
+            "connector_templates": {"default": {"reply_in_thread": False}},
+            "connectors": [{
+                "name": "rc", "type": "rocketchat", "inherits": "default",
+                "description": "managed by coop-keeper",
+                "server": {"url": "https://rc.example", "username": "bot", "password": "hunter2"},
+            }],
+            "agents": {"a": {"type": "claude", "working_directory": "/w"}},
+            "watcher_rules": [{"name": "w1", "connector": "rc", "agent": "a",
+                               "rooms": {"include": ["eng"]}}],
+        }
+        out = redact_raw_document(doc)
+        self.assertEqual(out["connectors"][0]["server"]["password"], "***")
+        self.assertEqual(out["connectors"][0]["server"]["username"], "bot")
+        self.assertEqual(out["connectors"][0]["inherits"], "default")
+        self.assertEqual(out["connectors"][0]["description"], "managed by coop-keeper")
+        self.assertEqual(list(out), list(doc), "key order is the file's")
+        self.assertNotIn("hunter2", json.dumps(out))
+        self.assertEqual(doc["connectors"][0]["server"]["password"], "hunter2", "input untouched")
+
+    def test_a_template_preset_or_agent_named_like_a_secret_is_shown(self):
+        doc = {
+            "tool_presets": {"secret-tools": [{"tool": "Read"}]},
+            "connector_templates": {"token-bots": {"server": {"token": "t0k"}}},
+            "agent_templates": {"password-helpers": {"timeout": 5}},
+            "watcher_templates": {"secret-rooms": {"session_idle_days": 3}},
+            "agents": {"secretary": {"type": "claude"}},
+        }
+        out = redact_raw_document(doc)
+        self.assertEqual(out["tool_presets"]["secret-tools"], [{"tool": "Read"}])
+        self.assertEqual(out["connector_templates"]["token-bots"]["server"]["token"], "***")
+        self.assertEqual(out["agent_templates"]["password-helpers"], {"timeout": 5})
+        self.assertEqual(out["watcher_templates"]["secret-rooms"], {"session_idle_days": 3})
+        self.assertEqual(out["agents"]["secretary"], {"type": "claude"})
+
+    def test_a_mapping_under_a_secret_key_is_masked_whole_at_any_depth(self):
+        doc = {"connectors": [{"name": "x", "server": {"client_secret": {"value": "s"}},
+                               "extra": {"deep": {"api_token": ["a", "b"]}}}]}
+        out = redact_raw_document(doc)
+        self.assertEqual(out["connectors"][0]["server"]["client_secret"], "***")
+        self.assertEqual(out["connectors"][0]["extra"]["deep"]["api_token"], "***")
 
 
 if __name__ == "__main__":

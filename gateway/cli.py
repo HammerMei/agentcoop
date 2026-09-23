@@ -270,6 +270,19 @@ def main():
         "--json", action="store_true",
         help="Emit the digest and the redacted config as a JSON document",
     )
+    config_show_p.add_argument(
+        "--raw", action="store_true",
+        help="Show the file as written (templates, inherits:, description, key order) "
+             "with credentials masked as '***', plus its file digest and validation "
+             "findings — printed even when the file does not validate",
+    )
+
+    config_backends_p = config_sub.add_parser(
+        "backends",
+        help="Report each supported agent backend type, its command and whether "
+             "the command is on PATH",
+    )
+    config_backends_p.add_argument("--json", action="store_true", help="Emit as JSON")
 
     config_migrate_env_p = config_sub.add_parser(
         "migrate-env",
@@ -771,7 +784,12 @@ def _run_config(args) -> None:
     elif args.config_cmd == "reload":
         _run_config_reload(args)
     elif args.config_cmd == "show":
-        _run_config_show(args)
+        if args.raw:
+            _run_config_show_raw(args)
+        else:
+            _run_config_show(args)
+    elif args.config_cmd == "backends":
+        _run_config_backends(args)
     elif args.config_cmd == "migrate-env":
         _run_config_migrate_env(args)
     else:
@@ -1083,6 +1101,67 @@ def _run_config_show(args) -> None:
         print()
         for path, value in flatten_config(config):
             print(f"{path}: {value}")
+    sys.exit(0)
+
+
+def _run_config_show_raw(args) -> None:
+    """Handle 'config show --raw [--json]' (coop-keeper design §3.10).
+
+    The file as written, credentials masked as `***`, its file digest, and the
+    validation findings — printed whether or not the file validates, because
+    the keeper reads a hand-written file with this before it can fix it. The
+    exit code still says whether the file is valid.
+    """
+    import yaml
+
+    from .config_diff import redact_raw_document
+    from .config_edit import DocumentError, read_document
+    from .config_validate import finding_to_dict, validate_config
+
+    try:
+        document, digest = read_document(args.config)
+    except DocumentError as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc),
+                              "config_path": os.path.abspath(args.config)}, indent=2))
+        else:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    result = validate_config(args.config)
+    findings = [finding_to_dict(f) for f in result.findings if f.severity != "lint"]
+    redacted = redact_raw_document(document)
+    if args.json:
+        print(json.dumps({
+            "ok": result.ok,
+            "config_path": os.path.abspath(args.config),
+            "file_digest": digest,
+            "config": redacted,
+            "findings": findings,
+        }, indent=2, default=str))
+    else:
+        print(f"Config:       {args.config}")
+        print(f"File digest:  {digest}")
+        print()
+        print(yaml.safe_dump(redacted, sort_keys=False, allow_unicode=True), end="")
+        for finding in findings:
+            print(f"[{finding['level'].upper()}] {finding['message']}", file=sys.stderr)
+    sys.exit(0 if result.ok else 1)
+
+
+def _run_config_backends(args) -> None:
+    """Handle 'config backends [--json]': each supported backend type, its
+    command and whether it is on PATH — the same lookup `config add agent`
+    refuses on."""
+    from .config_edit import backends
+
+    found = backends()
+    if args.json:
+        print(json.dumps({"ok": True, "backends": found}, indent=2))
+    else:
+        for backend_type, info in found.items():
+            where = info["path"] if info["found"] else "not found on PATH"
+            print(f"{backend_type:<10} {info['command']:<10} {where}")
     sys.exit(0)
 
 
