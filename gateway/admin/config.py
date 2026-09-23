@@ -143,6 +143,14 @@ class AdminConfigError(Exception):
     """Raised for missing/malformed config files or unknown/invalid profiles."""
 
 
+class AdminConfigNotFound(AdminConfigError):
+    """The profiles file does not exist. A subclass so the two callers that
+    treat "no file yet" as "no profiles" (`profiles`, `init`) can say so
+    without a pre-check — `Path.exists()` raises on an overlong path or an
+    unsearchable parent, which the loader's own error handling already
+    converts and a pre-check would not."""
+
+
 @dataclass
 class AdminProfile:
     """One named RC or MM server + admin credentials.
@@ -277,7 +285,7 @@ def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, d
             # docstring for why that default is unacceptable here.
             raw = yaml.load(f, Loader=_StrictLoader) or {}  # noqa: S506 - safe subclass
     except FileNotFoundError as e:
-        raise AdminConfigError(
+        raise AdminConfigNotFound(
             f"Admin config file not found: {config_path} "
             f"(pass --config, set {CONFIG_PATH_ENV_VAR}, or create it with "
             f"'coop-provision init <profile> ...')"
@@ -377,9 +385,12 @@ def masked_profiles(path: str | Path | None = None, *, missing_ok: bool = False)
     Reads the file as written: an unfilled skeleton is listed, not refused.
     With `missing_ok`, no file yet is no profiles — the state bootstrap
     starts from (coop-keeper design §3.2) — rather than an error."""
-    if missing_ok and not _resolve_config_path(path).exists():
+    try:
+        _, raw_profiles = load_raw_profiles(path)
+    except AdminConfigNotFound:
+        if not missing_ok:
+            raise
         return []
-    _, raw_profiles = load_raw_profiles(path)
     out = []
     for name, fields in raw_profiles.items():
         entry = {
@@ -413,9 +424,9 @@ def init_profile(
     if profile_type == "mattermost" and not team:
         raise AdminConfigError("'--team' is required for type=mattermost")
     config_path = _resolve_config_path(path)
-    if config_path.exists():
+    try:
         config_path, raw_profiles = load_raw_profiles(config_path)
-    else:
+    except AdminConfigNotFound:
         raw_profiles = {}
     if name in raw_profiles:
         raise AdminConfigError(

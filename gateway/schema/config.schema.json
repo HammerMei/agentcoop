@@ -94,14 +94,15 @@
       }
     },
     "connectors": {
-      "type": "array",
-      "description": "May be empty: a file with no connector, agent or rule is a valid empty deployment (`coop start` refuses to run one).",
+      "type": ["array", "null"],
+      "description": "May be empty, and a bare `connectors:` (YAML null) is empty too: a file with no connector, agent or rule is a valid empty deployment (`coop start` refuses to run one).",
       "items": {
         "$ref": "#/$defs/connector"
       }
     },
     "agents": {
-      "type": "object",
+      "type": ["object", "null"],
+      "description": "A bare `agents:` (YAML null) is the same as an empty mapping, as the loaders treat it.",
       "additionalProperties": {
         "$ref": "#/$defs/agent"
       }

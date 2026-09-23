@@ -390,7 +390,9 @@ def _run_file_command(args: argparse.Namespace) -> int:
         elif args.command == "profiles":
             listed = masked_profiles(args.config, missing_ok=True)
             if args.json:
-                print(json.dumps({"ok": True, "profiles": listed}, indent=2))
+                # default=str: hand-written metadata may be a YAML date or
+                # !!binary; listed as its string, not a TypeError.
+                print(json.dumps({"ok": True, "profiles": listed}, indent=2, default=str))
             elif not listed:
                 print("No profiles defined.")
             else:

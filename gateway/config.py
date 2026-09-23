@@ -260,7 +260,9 @@ class GatewayConfig:
             raise FileNotFoundError(f"Config file not found: {path}")
 
         with open(path) as f:
-            raw = yaml.safe_load(f) or {}
+            raw = yaml.safe_load(f)
+        if raw is None:
+            raw = {}  # None only: `[]`/`false`/`0`/`""` must hit the mapping check below
 
         if not isinstance(raw, dict):
             raise ValueError(
@@ -1807,7 +1809,9 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
         return None, [ConfigIssue("global", None, f"Config file not found: {path}")]
 
     with open(path) as f:
-        raw = yaml.safe_load(f) or {}
+        raw = yaml.safe_load(f)
+    if raw is None:
+        raw = {}  # None only — see from_file()
 
     if not isinstance(raw, dict):
         return None, [

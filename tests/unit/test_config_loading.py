@@ -1281,6 +1281,19 @@ class TestEmptyDeployment(unittest.TestCase):
             GatewayConfig.from_file(self._write("connectors: 5\n"))
         self.assertIn("'connectors:' must be a list", str(ctx.exception))
 
+    def test_a_falsy_non_mapping_document_is_refused_not_read_as_empty(self):
+        # The whole-document twin of the agents: case below — every falsy
+        # non-mapping spelling, on both loader paths.
+        for text in ("[]\n", "false\n", "0\n", "''\n"):
+            with self.assertRaises(ValueError, msg=text) as ctx:
+                GatewayConfig.from_file(self._write(text))
+            self.assertIn("mapping", str(ctx.exception))
+            config, issues = collect_config(self._write(text))
+            self.assertIsNone(config, text)
+            self.assertTrue(any("mapping" in i.message for i in issues), text)
+        self.assertEqual(GatewayConfig.from_file(self._write("# nothing\n")).connectors, [],
+                         "an empty file is YAML null, and null is the empty deployment")
+
     def test_a_falsy_non_mapping_agents_block_is_refused_not_read_as_empty(self):
         # `agents: []` is a malformed file, not an intentional empty deployment
         # — read as one, `config reload` would stop the fleet on a typo.

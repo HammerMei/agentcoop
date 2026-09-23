@@ -505,9 +505,28 @@ class TestMaskedProfiles(unittest.TestCase):
         self.assertEqual(listed[1]["team"], "lab")
         self.assertNotIn("pw", str(listed))
 
-    def test_a_missing_file_is_an_admin_config_error(self):
+    def test_a_missing_file_is_an_admin_config_error_unless_missing_ok(self):
         with self.assertRaises(AdminConfigError):
             masked_profiles("/nonexistent/p.yaml")
+        self.assertEqual(masked_profiles("/nonexistent/p.yaml", missing_ok=True), [])
+
+    def test_an_overlong_path_is_an_admin_config_error_even_with_missing_ok(self):
+        # No Path.exists() pre-check: it raises OSError on this path where the
+        # loader's own handling converts it (see load_profiles' docstring).
+        path = "/tmp/" + "x" * 5000 + ".yaml"
+        with self.assertRaises(AdminConfigError):
+            masked_profiles(path, missing_ok=True)
+        with self.assertRaises(AdminConfigError):
+            init_profile(path, "rc", profile_type="rocketchat", server_url="https://x", team=None)
+
+    def test_metadata_of_any_yaml_type_is_listed_not_rejected(self):
+        import datetime
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "p.yaml"
+            path.write_text("profiles:\n  odd:\n    type: 2026-01-01\n    server_url: !!binary aGk=\n")
+            listed = masked_profiles(path)
+        self.assertEqual(listed[0]["type"], datetime.date(2026, 1, 1))
+        self.assertEqual(listed[0]["server_url"], b"hi")
 
 
 class TestInitProfile(unittest.TestCase):

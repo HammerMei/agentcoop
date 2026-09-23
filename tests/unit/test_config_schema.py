@@ -188,6 +188,9 @@ class TestEmptyDeploymentValidates:
         assert not list(validator.iter_errors(
             {"connectors": [], "agents": {}, "watcher_rules": []}))
 
+    def test_bare_keys_are_valid_as_the_loaders_read_them(self, validator):
+        assert not list(validator.iter_errors({"connectors": None, "agents": None}))
+
     def test_templates_only_is_valid(self, validator):
         assert not list(validator.iter_errors({
             "tool_presets": {"readonly": [{"tool": "Read"}]},
