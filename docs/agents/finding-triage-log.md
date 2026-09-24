@@ -442,3 +442,23 @@ Notes:
 - Adoption: 3 of 7. Three concessions by rater 1 (F3, F4, F7), each on a cited clause or comment, none on a number.
 - Severity vs Codex: F6 P1 stands; **F7's P1 is inflated** (declared best effort); F2 outranks F7 (silent at planning, permanent deletion).
 - Finding kinds: 3 "a rule stated in one skill/section and missing from its sibling" (fixed as one sweep), 4 edge cases (a chain link, a hand-written id, a failed upgrade's failure, a sub-minute hand-edit race). **Converged by the owner's rule** — both raters: fix the three, stop requesting reviews.
+
+## 2026-09-24 — PR #184 round 4 (final, at the owner's request)
+
+**Chain detector:** 24 findings over 6 detector rounds, `--` on this one; no chain. The
+symlink chain of rounds 1–3 was **deleted** before this round (owner: symlinks are
+followed, not guarded), and no symlink finding returned. Security review: one finding.
+**Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **R4-F1** step 2's chain patch drops every username "no surviving bot uses", so a hand-written entry for another deployment's bot goes too (P2) | true, `cheap` text: subtract only this bot's name | true; asymmetric with add-bot, which preserves hand-written entries; `cheap`, lowest priority | **FIX** — remove-bot, §3.6, §3.7: only the removed bot's username, never another name |
+| **R4-F2** a plan running past its 10-minute lease can be taken over mid-execution; last round's fix only stops the first keeper deleting the replacement (P2) | DROP: follow-on edge of the round-3 fix; the design sells the expiry as the dead-keeper remedy | DROP, scored: 0–0.4 hits/yr (both factors guessed) × ~1 h × 0.56 → ≤ 0.2 h/yr against a new invariant in three skills; not a chain link by blame; the takeover is visible in the first keeper's report since round 3 | **DROP** — §3.8 best effort; a 30-minute lease would triple the dead-keeper stall the expiry exists to bound |
+| **R4-F3** `Bash(coop *)` auto-approves `coop send --attach ~/.agentcoop/config.yaml` — credentials to a chat room past the `Read` deny (P1) | true (`coop send --attach` exists; room names come from `coop list --all`); `cheap`: name the subcommands the skills run; the both-directions test enforces it | true and traced (`cli.py:150`, `control.py:741–749` pass the path unrestricted); falsifies §3.3's "none is known to"; `cheap`, first; OpenCode stays inside its documented residual (`head` already reads the file), no bash rules there | **FIX** — allow list is `coop config *`, `status`, `start`, `stop`, `reset *`; §3.3/§3.9 say why never `coop *`. `coop list --all` (AGENTS.md only) now prompts once |
+| **R4-F4** "none" to the rooms question still writes `include: ["*"]`, which serves the default rooms both servers auto-join a new account to, while the plan says DM-only (P1) | true; `rooms: {include: [], direct: true}` validates (checked); `cheap` | true on both platforms (MM `create_user` joins the team; RC `users.create` defaults `joinDefaultChannels`); contradicts §3.5's promise; `cheap` | **FIX** — add-bot and §3.5 |
+| **R4-F5** (security) `filter_sender: false` admits any server user as a guest; the built-in guest rule auto-approves `coop fetch-history --watcher <any>`, which the control handler serves on the honor system → another room's history (P2) | true mechanism; gateway's, tracked as #34 (token auth); the keeper default is §3.5's; not this change's | chain verified (`role_of` → guest rule `core/config.py:113–116` → global watcher lookup `control.py:371–379`, honor-system by its own docstring); RC only; security under ADR 0001 but a gateway defect the keeper widens the population for; FILE against #34 | **Not this PR** — replied with the chain and #34; the keeper-side lever (`filter_sender: true` by default) contradicts §3.5 and is the owner's call. No new issue: #34 already tracks the fix |
+
+Notes:
+- Adoption: 3 of 5. Both raters: F3 and F4 contradict a stated promise and are cheap; F1 is a consistency slip; F2 and F5 are the tail. **Not corner cases only** — but by the owner's instruction this was the last round.
+- Severity vs Codex: F3 P1 stands (the only finding in four rounds on the permission files that bit); F4 P1 stands on the broken promise, not on harm; F5's P2 belongs to the gateway.
+- Four rounds: 24 findings, 16 fixed, 7 dropped, 1 declined as another issue's. The symlink chain (3 findings) was deleted after the owner's ruling, so 2 of the 16 fixes were later removed.

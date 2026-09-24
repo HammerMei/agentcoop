@@ -2,7 +2,11 @@
   "agent": "",
   "permissions": {
     "allow": [
-      "Bash(coop *)",
+      "Bash(coop config *)",
+      "Bash(coop status)",
+      "Bash(coop start)",
+      "Bash(coop stop)",
+      "Bash(coop reset *)",
       "Bash(coop-provision *)",
       "Bash(mkdir *)",
       "Bash(mktemp)",

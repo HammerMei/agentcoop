@@ -42,7 +42,7 @@ profiles --json`, `coop config backends --json`.
 |---|---|
 | server username | the agent name |
 | email | `<username>@agentcoop.invalid` |
-| `rooms` | `{include: ["*"], direct: true}` |
+| `rooms` | `{include: ["*"], direct: true}`; when the operator answers "none" to the rooms question, `{include: [], direct: true}` — DM only, whatever rooms the server auto-joined the account to |
 | `allowed_users.owners` | the operator's username on that server (from the server's other connectors when they agree on one owner; otherwise ask) |
 | `allowed_users.guests` | `[]` |
 | `inherits` | `default` on connector, agent and rule |
@@ -83,7 +83,10 @@ new account to every room a rule of another connector **of the same server**
 names literally under `rooms.include` and does not veto under
 `rooms.except_for`. A glob cannot be expanded — ask which rooms it stands for.
 When nothing is found (first bot on the server), ask which rooms the bot
-should join; "none" leaves it reachable by direct message only. The plan lists
+should join; "none" leaves it reachable by direct message only — and then
+the rule is `rooms: {include: [], direct: true}`, because both servers put a
+new account into default rooms (Mattermost `town-square`/`off-topic`,
+Rocket.Chat `general`) and `include: ["*"]` would serve them. The plan lists
 every `add-to-channel`.
 
 ## Shared templates (first bot only)

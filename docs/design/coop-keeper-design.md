@@ -223,9 +223,11 @@ shipped `opencode.json` denies the same three paths to OpenCode's `read` and
 to the working directory); and the keeper reads configuration only through
 `coop config show --json` and `--raw --json`, whose output is secret-masked
 (§3.10). The residuals are known and documented rather than engineered away:
-a shell command may reach the file. On Claude Code none is known to: with
-the shipped file, the Read tool, `cat`, `head` and `cp` of `config.yaml` are
-all denied outright. On OpenCode a `cat` of a path outside the working
+a shell command may reach the file. On Claude Code the Read tool, `cat`,
+`head` and `cp` of `config.yaml` are all denied outright with the shipped
+file; a `coop` subcommand the keeper never needs, `coop send --attach`,
+would have uploaded it to a room under an allow-all `coop` rule, which is why
+the allow list names the subcommands the skills run rather than `coop *`. On OpenCode a `cat` of a path outside the working
 directory falls to `external_directory`'s default `ask` and prompts, while
 `head`, `sed` or a variable expansion, which OpenCode infers no path from,
 run and return the file — and on OpenCode v1 an "always allow" answer to any
@@ -310,7 +312,7 @@ Defaults, each overridable by the operator's wording:
 |---|---|
 | server username | the agent name; when a connector of the same installation already uses it (compared case-insensitively — an agent's second Mattermost team), no account is created — the new connector takes its credentials from that one with `--credentials-from`, and the keeper says so in the plan. A deactivated account of that name (a Mattermost bot removed earlier) is revived with `coop-provision reactivate-user --password-file` and a new password: when the keeper knows of it while planning, the plan says so; when `create-user` is what reveals it, the plan stops and the revival is confirmed on its own, since it is not what the operator approved |
 | email | `<username>@agentcoop.invalid` (a reserved TLD; both platforms check syntax only) |
-| `rooms` | `{include: ["*"], direct: true}` |
+| `rooms` | `{include: ["*"], direct: true}`; `{include: [], direct: true}` when the operator answers "none" to the rooms question |
 | `filter_sender` | `false` — anyone in a room the bot is in may talk to it; roles still apply |
 | `allowed_users.owners` | the operator's username on that server |
 | `allowed_users.guests` | `[]` |
@@ -330,7 +332,9 @@ added to `coop-provision`), so the keeper asks which rooms it stands for.
 When that discovery yields nothing — the first bot on a server has no
 earlier rules to learn from — the keeper asks the operator which rooms the
 bot should join, and accepts "none" as an answer that leaves the bot reachable
-by direct message only. The plan lists every `add-to-channel` it will run.
+by direct message only — with `rooms: {include: [], direct: true}`, since
+both servers place a new account in default rooms and `["*"]` would serve
+them. The plan lists every `add-to-channel` it will run.
 
 Ordering: the agent's directory and persona file first, because
 `working_directory` must exist when the file is validated
@@ -413,9 +417,10 @@ recreates the watcher on the next message.
    arriving now creates nothing.
 2. **Remove the configuration.** One `patch` removes the connector, unless
    another rule still references it; the agent, when no rule names it any
-   more; and the account's username from the agent-chain list, unless another
-   surviving bot still uses it (the default of naming accounts after the agent
-   makes that the ordinary case for an agent on two servers). `reload`
+   more; and this bot's username — that entry only, never another name in
+   the list — from the agent-chain list, unless another surviving bot still
+   uses it (the default of naming accounts after the agent makes that the
+   ordinary case for an agent on two servers). `reload`
    applies it. If this leaves the deployment empty — presets and templates
    only — `reload` accepts that (it stops the last connector) and `start`
    would refuse it (§3.10), so the plan then stops the daemon and says the
@@ -461,10 +466,11 @@ list replaces the template's wholesale, so a hand-written connector that
 inherits `default` and also sets its own list is as unaffected as one that
 inherits nothing. Every connector of the installation whose resolved list lacks the
 new username is patched individually, and the plan says so. Removal is the
-mirror image: every connector whose resolved list still carries a username no
-surviving bot uses is patched to drop it — the shared template and any
-entry-level override alike — so a deleted account cannot keep bypassing the
-sender allow-list through a list the keeper once added it to.
+mirror image: every connector whose resolved list still carries the removed
+bot's username is patched to drop that name — the shared template and any
+entry-level override alike, and only that name; a hand-written entry naming a
+bot of another deployment stays — so a deleted account cannot keep bypassing
+the sender allow-list through a list the keeper once added it to.
 
 ### 3.8 The plan is the unit of confirmation
 
@@ -557,7 +563,9 @@ perfect one (§3.3).
 
 Claude Code's `auto` permission mode cannot be selected from a project-local
 settings file, so the shipped `.claude/settings.json` uses explicit rules:
-allow `Bash(coop *)`, `Bash(coop-provision *)`, the handful of shell commands
+allow the `coop` subcommands the skills run — `config`, `status`, `start`,
+`stop`, `reset` — never `coop *` (that would auto-approve `coop send
+--attach <file>`), `Bash(coop-provision *)`, the handful of shell commands
 the skills run — `mkdir` for an agent's directory and the plan lock,
 `mktemp` and `openssl rand` for the password file, `rm` for the password
 file, the lock, a fragment and a removed agent's directory, `ls` for the

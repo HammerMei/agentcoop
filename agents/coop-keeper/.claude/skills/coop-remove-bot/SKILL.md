@@ -79,14 +79,17 @@ agents:
 connector_templates:
   default:
     agent_chain:
-      agent_usernames: [bob]         # the complete list minus usernames no surviving bot uses
+      agent_usernames: [bob]         # the complete list minus this bot's username only
 ```
 
 Agent chain is the mirror of creation: every connector whose resolved
-`agent_chain.agent_usernames` still carries a username no surviving bot uses
-is patched to drop it — the shared template and any entry-level list alike —
-so a deleted account cannot keep bypassing the sender allow-list. Lists are
-replaced wholesale: write each complete new list.
+`agent_chain.agent_usernames` still carries **this bot's** username is
+patched to drop it — the shared template and any entry-level list alike —
+unless a surviving connector of the installation still uses the username
+(case-insensitively; then the account stays and so does the name). Nothing
+else in a list is touched: a hand-written entry naming a bot of another
+deployment is that operator's, and dropping it would silence that bot's loop
+protection. Lists are replaced wholesale: write each complete new list.
 
 If this leaves the deployment empty (presets and templates only), `reload`
 accepts it and stops the last connector; then `coop stop`, and say the
