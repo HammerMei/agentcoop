@@ -90,8 +90,11 @@ account's DMs would otherwise go unanswered — and the plan says so.
 Agent chain is the mirror of creation: every connector whose resolved
 `agent_chain.agent_usernames` still carries **this bot's** username is
 patched to drop it — the shared template and any entry-level list alike —
-unless a surviving connector of the installation still uses the username
-(case-insensitively; then the account stays and so does the name). Nothing
+unless **any surviving connector, on any server**, still has that
+`server.username` (case-insensitively): the list is shared across servers, so
+the name protects the agent's other bots too. The account (step 3) is a
+different question — it is one installation's. The plan says which: "account
+deleted, name kept (bob@rc-lab still uses it)". Nothing
 else in a list is touched: a hand-written entry naming a bot of another
 deployment is that operator's, and dropping it would silence that bot's loop
 protection. Lists are replaced wholesale: write each complete new list.

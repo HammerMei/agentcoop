@@ -27,9 +27,12 @@ Before installing, ensure you have:
 - **Claude CLI or OpenCode installed** — at least one agent backend available
   - Claude CLI: https://claude.ai/download
   - OpenCode: https://github.com/anthropics/opencode
-- **A bot account on your chat server** — with permissions to post messages and read room history
-  - Rocket.Chat: a bot user account (username + password)
-  - Mattermost: a Bot Account access token, or a regular account's username + password — see [Connectors](#connectors) below
+- **Administrator access to that server** — coop-keeper creates each bot's
+  account itself, with a generated password, using an administrator's
+  credentials you type into `~/.agentcoop/admin-profiles.yaml`. Only a
+  hand-written `config.yaml` needs a pre-existing bot account (Rocket.Chat:
+  username + password; Mattermost: a Bot Account token or a regular account's
+  username + password — see [Connectors](#connectors))
 - **At least one owner username** — someone who can approve/deny tool calls in chat
 
 ---

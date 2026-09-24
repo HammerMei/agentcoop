@@ -214,7 +214,7 @@ transcript or the shell history.
 
 This is an instruction-level guarantee, backed by mechanical measures that
 are guardrails against accidental exposure, not a sandbox: the shipped
-`.claude/settings.json` denies `Read` on `config.yaml`, `admin-profiles.yaml`
+`.claude/settings.json` denies `Read` on `config.yaml`, `admin-profiles.yaml`, the generated `agents/.bot-password.*` files
 and `.config-backups/**` (Claude Code applies a `Read` deny to its `Edit`,
 `Write`, `Grep` and `Glob` tools and to the shell readers it recognises —
 `cat`, `head`, `tail`, `sed`, redirections — when they name the file); the
@@ -470,8 +470,9 @@ list replaces the template's wholesale, so a hand-written connector that
 inherits `default` and also sets its own list is as unaffected as one that
 inherits nothing. Every connector of the installation whose resolved list lacks the
 new username is patched individually, and the plan says so. Removal is the
-mirror image: every connector whose resolved list still carries the removed
-bot's username is patched to drop that name — the shared template and any
+mirror image: when no surviving bot on any server uses the username (the
+list is shared, so a name protects the agent's other bots too), every
+connector whose resolved list still carries it is patched to drop that name — the shared template and any
 entry-level override alike, and only that name; a hand-written entry naming a
 bot of another deployment stays — so a deleted account cannot keep bypassing
 the sender allow-list through a list the keeper once added it to.

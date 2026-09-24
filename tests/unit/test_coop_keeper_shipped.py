@@ -30,6 +30,7 @@ CREDENTIAL_PATHS = (
     "~/.agentcoop/config.yaml",
     "~/.agentcoop/admin-profiles.yaml",
     "~/.agentcoop/.config-backups/**",
+    "~/.agentcoop/agents/.bot-password.*",
 )
 
 # Programs the skills may run from the shell. An inline `code span` whose first
@@ -189,7 +190,7 @@ class TestPermissionFiles(unittest.TestCase):
         for tool in ("read", "edit"):
             rules = perm[tool]
             for p in ("*/.agentcoop/config.yaml", "*/.agentcoop/admin-profiles.yaml",
-                      "*/.agentcoop/.config-backups/*"):
+                      "*/.agentcoop/.config-backups/*", "*/.agentcoop/agents/.bot-password.*"):
                 self.assertEqual(rules.get(p), "deny", (tool, p))
         self.assertNotIn("bash", perm, "bash stays at OpenCode's default")
 

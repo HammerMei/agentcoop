@@ -112,6 +112,21 @@ cp -R ~/.agentcoop/repo/agents/coop-keeper ~/.agentcoop/agents/builtin/coop-keep
 refreshes only the files coop-keeper ships and leaves anything you add there
 alone.)
 
+### 5. Record the install for `coop upgrade`
+
+`coop upgrade` reads `~/.agentcoop/install_meta.json` to find the checkout;
+`install.sh` writes it, a manual install has to:
+
+```bash
+cat > ~/.agentcoop/install_meta.json <<META
+{
+  "method": "git",
+  "repo_path": "$HOME/.agentcoop/repo",
+  "version": "$(grep '^version' ~/.agentcoop/repo/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
+}
+META
+```
+
 ---
 
 ## Set up your first bot

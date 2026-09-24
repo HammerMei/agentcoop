@@ -462,3 +462,27 @@ Notes:
 - Adoption: 3 of 5. Both raters: F3 and F4 contradict a stated promise and are cheap; F1 is a consistency slip; F2 and F5 are the tail. **Not corner cases only** — but by the owner's instruction this was the last round.
 - Severity vs Codex: F3 P1 stands (the only finding in four rounds on the permission files that bit); F4 P1 stands on the broken promise, not on harm; F5's P2 belongs to the gateway.
 - Four rounds: 24 findings, 16 fixed, 7 dropped, 1 declined as another issue's. The symlink chain (3 findings) was deleted after the owner's ruling, so 2 of the 16 fixes were later removed.
+
+## 2026-09-24 — PR #184 round 5 (after an internal consistency sweep)
+
+**Before the round:** the previous two rounds each held "a rule stated here, missing there"
+findings, so an internal sweep enumerated that class (7 rows, all fixed in `677da46`) before
+Codex was asked again.
+**Chain detector:** fires — `coop-remove-bot/SKILL.md` streak 1 (R5-F1 lands on `677da46`),
+and `coop-add-bot/SKILL.md` carried over at streak 2 from rounds 3–4, so the tool prints
+"Do not patch again". Blame check (rater 2): the remove-bot paragraph was original until
+`a083725` and `677da46` touched other lines — one link on a fix, not two. Security: clean.
+**Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **R5-F1** step 2 keeps the removed bot's chain name only if "a surviving connector of the installation" uses it; a `bob` bot on another server loses its loop protection (P1) | true — my round-4 wording conflated the account's scope (installation) with the name's (global, §3.7); `cheap`, one phrase | same; the owning layer is §3.7, which never stated the retention condition: fix it there, mirror in the skill, add a §7 item | **FIX** — §3.7 states the condition, remove-bot mirrors it and tells the plan to say "account deleted, name kept", §7 item 16 |
+| **R5-F2** the manual install path no longer writes `install_meta.json`; `coop upgrade` exits "not found" (P2) | true — the removed `coop onboard --repo-path` wrote it; `cheap` doc step | same, loud (`upgrade.py`), ours because §3.12 removed the writer | **FIX** — INSTALL.md step 5 writes the three fields `install.sh` writes |
+| **R5-F3** `init`/`profiles` accepted as profile names (P2) | FIX as a bootstrap sentence (I had checked `init_profile` in `admin/config.py`, which does not refuse them) | **untrue**: `admin/cli.py:379–383` refuses both with a clear message before `init_profile` is reached | **DROP** — rater 1 conceded on the cited lines; the CLI owns the check and has it |
+| **R5-F4** user-guide prerequisites still tell users to create a bot account first (P2) | true, `cheap` | true; a wrong rationale outranks a small bug; keep the bot-account sentence for the hand-written path | **FIX** — administrator access is the prerequisite; a bot account only for a hand-written `config.yaml` |
+| **R5-F5** `Read(~/.agentcoop/agents/**)` allows reading `agents/.bot-password.*`; OpenCode has no `read` deny for it (P2) | true, silent, contradicts §3.3; `cheap`: one deny per file + the test lists | same; matches the owner's guardrail rule verbatim | **FIX** — denies in both files, both test lists, §3.3 names the file |
+
+Notes:
+- Adoption: 4 of 5. One concession by rater 1 (F3), on cited code. Severity: F1 P1 stands; F5 should outrank F2/F4 (silent, a promise); F3 was not a finding.
+- **Not corner cases only**: F1 and F5 contradict stated promises, F2 contradicts INSTALL.md's own text. By the stop-loss agreed with the owner ("stop when a round has no promise-contradicting finding") this round does not end the review on its own; the chain detector's "do not patch again" on `coop-add-bot` is a carry-over streak with no add-bot finding this round.
+- Five rounds: 29 findings, 20 fixed, 8 dropped, 1 declined as #34's.

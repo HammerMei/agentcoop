@@ -23,7 +23,8 @@
     "deny": [
       "Read(~/.agentcoop/config.yaml)",
       "Read(~/.agentcoop/admin-profiles.yaml)",
-      "Read(~/.agentcoop/.config-backups/**)"
+      "Read(~/.agentcoop/.config-backups/**)",
+      "Read(~/.agentcoop/agents/.bot-password.*)"
     ]
   }
 }
