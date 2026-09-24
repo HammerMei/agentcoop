@@ -28,7 +28,9 @@ profiles --json`, `coop config backends --json`.
   match the profile. Do not create a second one — offer to change the existing
   bot instead.
 - **Account already exists on this installation**: a connector of the same URL
-  (any team) whose `server.username` equals the chosen username. No account is
+  (any team) whose `server.username` equals the chosen username — compared
+  case-insensitively, as Rocket.Chat treats `ProbeBot` and `probebot` as one
+  login. No account is
   created; the new connector takes its credentials with `--credentials-from`
   (below).
 - **Name taken in config**: `coop config add`/`op: add` refuses it. Report the
@@ -177,9 +179,12 @@ it is released after step 6):
    exists.
 2. **Account** — one of:
    - `coop-provision <profile> create-user <username> <username>@agentcoop.invalid --password-file <path>`
-   - it reports the account exists and is deactivated (Mattermost) →
-     `coop-provision <profile> reactivate-user <username> --password-file <path>`;
-     the plan says the old account is revived with a new password
+   - it reports the account exists and is deactivated (Mattermost) → if the
+     plan already said the old account would be revived (you knew from this
+     session), run `coop-provision <profile> reactivate-user <username>
+     --password-file <path>`; if this is the first you learn of it, **stop** —
+     reviving an account and giving it a new password is not the plan the
+     operator confirmed — show that step and ask again before running it
    - it reports `already exists … — skipping` (the account is **active** and
      no connector of this installation uses it) → **stop before the
      configuration write**: the account's password is not the generated one,

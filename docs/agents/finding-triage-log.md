@@ -418,3 +418,27 @@ round 9 (a finding whose *meaning* the previous fix changed). Security review: c
 Notes:
 - Adoption: 4 of 4, all `cheap`, none scored. Rater 2 re-ranked by consequence F4 ≥ F2 > F3 > F1 (Codex: F4 P1, the rest P2 — agrees on the top, and F1's P2 is generous for what is a documented re-plan).
 - Finding kinds: 2 protocol gaps in the skills (lock span, canonicalisation), 1 installer exit code, 1 follow-on of the previous round's fix. The follow-on is the streak to watch; a symlink finding in round 3 stops the patching.
+
+## 2026-09-24 — PR #184 round 3
+
+**Chain detector:** 19 findings over 4 detector rounds; this round fires on
+`coop-add-bot/SKILL.md` (streak 1) and `gateway/upgrade.py` (streak 1). By inspection
+`upgrade.py` is **streak 2 on the symlink theme** — R1 ancestor guard → R2 file symlink →
+R3 the keeper root itself — each guard the precondition of the next finding; the detector
+sees 1 because R2's line predated R1's fix. The CLAUDE.md rule applies: no further patch.
+Security review: clean. **Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **R3-F1** the keeper directory or `agents/` itself a symlink defeats the ancestor guard (P2) | DROP — third link of the chain; owner: unsupported manipulation | DROP — same; the writes land where the operator pointed the link; owning layer is docs: one sentence in §3.1 | **DROP** — §3.1 now says symlinks in or at the managed directory are unsupported |
+| **R3-F2** `coop-add-bot`'s "no connector uses this username" compares case-sensitively; Rocket.Chat does not — the take-over branch could delete an account `ProbeBot`'s connector still uses (P2) | true, `cheap` text (remove-bot already says case-insensitive) | true, traced to a permanent RC deletion on false information; `cheap`; outranks F7 | **FIX** — add-bot and §3.5 say case-insensitively |
+| **R3-F3** a hand-written `server.team` given as an id vs the profile's name → keeper plans a duplicate bot; runtime refuses at reload (P2) | FIX as prose ("when the team field looks like an id, ask") | DROP: `config_validate.py:290` documents this blind spot as the runtime's to catch, loudly; the fix that removes it is a team-id lookup — PR ① surface; 0.002–0.04 hits/yr | **DROP** — rater 1 conceded on the cited validator comment and the loud refusal |
+| **R3-F4** `_remove_path` then `copytree`: a failed copy leaves the old skill gone (P2) | FIX — copy to a sibling, then swap (~3 lines) | DROP: the sibling is an unlisted path §3.1 promises never to touch (a crash leaves it forever); loud (`coop upgrade` warns, install.sh exits 1 since R2) and the next upgrade repairs it; failure-of-a-failure, net ≤ 0 | **DROP** — rater 1 conceded on the §3.1 promise |
+| **R3-F5** a plan running past its 10-minute lease removes another keeper's lock at cleanup (P2) | true, `cheap` text | true and correlated (the `.claude/settings.json` prompt on Claude Code can stall a plan); `cheap`: remove only if `holder` still names this plan; lease refresh is a new concept — skip | **FIX** — apply-config §8 |
+| **R3-F6** a deactivated account discovered only when `create-user` fails after the yes is revived without a new confirmation (P1) | true; `cheap`; consistent with "a yes covers the plan shown" | true, strongest of the round: the CLI deliberately refuses to auto-reactivate (`admin/base.py:100–130`), and the skill reinstated that decision unconfirmed | **FIX** — stop, show the revival, ask again; §3.5 says when the plan can and cannot know |
+| **R3-F7** a hand edit between step 2's write and step 3 can make the account shared again before `delete-user` (P1) | FIX as prose (re-read, compare digest) | DROP: §3.8/§4 declare best effort against mid-plan hand edits; nothing correlates an operator adding a connector for the username they just confirmed deleting, ~0.001/yr; the outcome is reasonable for the trigger | **DROP** — rater 1 conceded on §4 |
+
+Notes:
+- Adoption: 3 of 7. Three concessions by rater 1 (F3, F4, F7), each on a cited clause or comment, none on a number.
+- Severity vs Codex: F6 P1 stands; **F7's P1 is inflated** (declared best effort); F2 outranks F7 (silent at planning, permanent deletion).
+- Finding kinds: 3 "a rule stated in one skill/section and missing from its sibling" (fixed as one sweep), 4 edge cases (a chain link, a hand-written id, a failed upgrade's failure, a sub-minute hand-edit race). **Converged by the owner's rule** — both raters: fix the three, stop requesting reviews.

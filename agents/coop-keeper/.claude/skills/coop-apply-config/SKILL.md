@@ -153,6 +153,10 @@ rm -r ~/.agentcoop/agents/plan.lock
 rm ./.plans/<step>.yaml
 ```
 
+Before that `rm -r`, read `holder` once more: remove the lock only if it still
+names **this** plan. If a plan ran past its own expiry, another keeper may
+have taken the lock over; then leave it and say so in the report.
+
 Then report what was done, step by step, in the words of the plan.
 
 ## When a step fails

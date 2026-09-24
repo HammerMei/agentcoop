@@ -117,7 +117,9 @@ leftover file is the smaller harm. The `builtin/` directory exists so that an op
 which agents are the system's; an operator who wants a customised keeper
 copies it under `user/`. Unlike `contexts/`, there is no per-file "locally
 modified" check on the owned paths: protecting local edits to them would
-contradict the directory's meaning.
+contradict the directory's meaning. Symlinks planted inside the managed
+directory, or the directory itself being a link, are not a supported layout:
+the sync refuses the cases it can see cheaply and makes no further promise.
 
 The instruction-file pairing follows from how the two CLIs load files.
 Claude Code reads only `CLAUDE.md` and expands `@file` imports; OpenCode reads
@@ -304,7 +306,7 @@ Defaults, each overridable by the operator's wording:
 
 | Field | Default |
 |---|---|
-| server username | the agent name; when a connector of the same installation already uses it (an agent's second Mattermost team), no account is created — the new connector takes its credentials from that one with `--credentials-from`, and the keeper says so in the plan. When `create-user` reports the account exists but is deactivated (a Mattermost bot removed earlier), the plan uses `coop-provision reactivate-user --password-file` instead, and says the old account is being revived with a new password |
+| server username | the agent name; when a connector of the same installation already uses it (compared case-insensitively — an agent's second Mattermost team), no account is created — the new connector takes its credentials from that one with `--credentials-from`, and the keeper says so in the plan. A deactivated account of that name (a Mattermost bot removed earlier) is revived with `coop-provision reactivate-user --password-file` and a new password: when the keeper knows of it while planning, the plan says so; when `create-user` is what reveals it, the plan stops and the revival is confirmed on its own, since it is not what the operator approved |
 | email | `<username>@agentcoop.invalid` (a reserved TLD; both platforms check syntax only) |
 | `rooms` | `{include: ["*"], direct: true}` |
 | `filter_sender` | `false` — anyone in a room the bot is in may talk to it; roles still apply |
