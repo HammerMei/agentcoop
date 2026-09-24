@@ -120,6 +120,9 @@ with any model it supports, including free ones:
 cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 ```
 
+Claude Code asks you to trust the directory the first time you open it there;
+accept, or its permission rules are ignored and every command prompts.
+
 Then say what you want — "add a bot called bob to my Mattermost at
 https://mm.example, team lab, as a friendly release-notes writer". On a fresh
 machine it first asks for the server and your own username there, writes an

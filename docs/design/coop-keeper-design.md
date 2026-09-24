@@ -220,12 +220,14 @@ shipped `opencode.json` denies the same three paths to OpenCode's `read` and
 to the working directory); and the keeper reads configuration only through
 `coop config show --json` and `--raw --json`, whose output is secret-masked
 (§3.10). The residuals are known and documented rather than engineered away:
-a shell command reaches the file — on Claude Code `cp` prompts, because it is
-not on the allow list; on OpenCode a `cat` of a path outside the working
-directory falls to `external_directory`'s default `ask` and prompts too, while
-`head`, `sed` or a variable expansion, which OpenCode infers no path from,
-run — and on OpenCode v1 an "always allow" answer to any read prompt
-overrides configured denies for that session. Closing these would
+a shell command may reach the file. On Claude Code the lab found none that
+did: with the shipped file, the Read tool, `cat`, `head` and `cp` of
+`config.yaml` were all denied outright. On OpenCode a `cat` of a path outside
+the working directory falls to `external_directory`'s default `ask` and
+prompts, while `head`, `sed` or a variable expansion, which OpenCode infers
+no path from, run (lab: `head` returned the top of the file) — and on
+OpenCode v1 an "always allow" answer to any read prompt overrides configured
+denies for that session. Closing these would
 mean chasing a perfect rule set for an agent that runs on the operator's own
 machine, with the operator's own access to the files; the rule set here is
 deliberately the reasonable one.
@@ -283,7 +285,11 @@ build`, `.claude/settings.json` with `agent: ""` — created once and never
 overwritten. Without them a bot inherits whatever default agent the
 operator's own CLI configuration names, and answers as that persona (lab,
 scenario 4: a bot replied in the operator's personal agent's voice). Not a
-common setup, but the safer default; the operator may edit the files. A directory that already
+common setup, but the safer default; the operator may edit the files. On
+Claude Code the write of `.claude/settings.json` into the agent's directory
+prompts even under the allow rule — the CLI guards `.claude/` directories
+themselves (lab, Claude column, scenario 2) — so it is the one step of a
+plan that asks the operator; a refusal is reported and the plan goes on. A directory that already
 exists at that path and is not empty is not adopted: the name is refused
 with the reason, because creation would rewrite its `AGENTS.md` and a later
 removal would delete it. Its content is determined by what the operator said: text supplied verbatim is
@@ -538,7 +544,11 @@ empty-directory check, `date` for the lock's expiry, `which` — and the
 `Read`/`Edit` tools under `~/.agentcoop/agents/` (the plan lock lives there
 too, §3.8);
 deny the credential files named in §3.3. Everything else prompts, which is
-Claude Code's default. The allow list is derived from what the four skills
+Claude Code's default. The rules take effect only after the operator has
+accepted Claude Code's workspace-trust dialog for the directory (lab: until
+then every `coop` command prompted, and a headless session was refused all
+four session-start reads); the install and user documentation say to accept
+it. The allow list is derived from what the four skills
 actually execute (`tests/unit/test_coop_keeper_shipped.py` walks the skills),
 so a skill that gains a new command adds it here in the same change.
 

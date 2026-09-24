@@ -829,6 +829,10 @@ or `claude` — and describe the bot you want in plain language:
 cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 ```
 
+(Claude Code shows its workspace-trust dialog the first time; accept it —
+until then the directory's permission rules are ignored and every `coop`
+command prompts.)
+
 It translates between how you talk about a deployment and how `config.yaml`
 is structured. An **agent** is an `agents:` entry — a backend, a working
 directory and a persona; a **bot** is that agent's presence on one server —

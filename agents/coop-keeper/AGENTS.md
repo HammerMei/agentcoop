@@ -57,7 +57,10 @@ coop config backends --json
 ```
 
 `profiles --json` with no profiles means no server is administrable yet — go to
-the `coop-bootstrap` skill. `show --raw --json` with `"exists": false` is the
+the `coop-bootstrap` skill. `coop status` reporting `Watchers: 0` on a running
+gateway is normal until a room speaks: a watcher is created by the first
+message, not by the configuration. `coop list --all` is the watcher view; the
+gateway log is not yours to read. `show --raw --json` with `"exists": false` is the
 empty deployment, the state before the first bot; it is not an error. A
 `"findings"` list with errors on a hand-written file is something to show the
 operator before any plan.

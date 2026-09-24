@@ -57,7 +57,11 @@ persona agent of their own does not have every bot answer as that persona:
 `opencode.json` containing `{"default_agent": "build"}` and
 `.claude/settings.json` containing `{"agent": ""}`. `CLAUDE.md`,
 `opencode.json` and `.claude/settings.json` are created once and never
-overwritten if present — the operator may edit them.
+overwritten if present — the operator may edit them. On Claude Code, writing
+into a `.claude/` directory asks the operator even though the path is
+allowed — the CLI guards its own configuration directories — so that one
+write prompts once; if it is refused, say so in the report and carry on, the
+bot works without it.
 
 - Text the operator supplied verbatim is written verbatim.
 - An intent ("a professional lawyer, I have a car-insurance question") is
