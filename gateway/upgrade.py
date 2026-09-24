@@ -188,7 +188,10 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
                  removes what that release shipped.
 
     Anything not listed is left alone. The directory is created when absent —
-    installs made before the keeper shipped have no `agents/` at all.
+    installs made before the keeper shipped have no `agents/` at all. Symlinks
+    are followed, as everywhere else: an operator who links an owned path to
+    a file of their own gets that file overwritten on upgrade, which is what
+    the link asked for.
     """
     import shutil
 
@@ -202,8 +205,6 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
 
     for rel, status in manifest.items():
         target = dst / rel
-        if not target.parent.resolve().is_relative_to(dst.resolve()):
-            raise ValueError(f"{target.parent} resolves outside {dst}; is an ancestor a symlink?")
         if status == KEEPER_OBSOLETE:
             if _remove_path(target):
                 console.print(f"  Removed obsolete coop-keeper path: {rel}")
@@ -220,8 +221,8 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
             _remove_path(target)
             shutil.copytree(source, target)
         else:
-            if target.is_dir() or target.is_symlink():
-                _remove_path(target)  # a symlink is replaced, never written through
+            if target.is_dir():
+                _remove_path(target)
             shutil.copy2(source, target)
     console.print(f"  coop-keeper up to date at {dst}")
 

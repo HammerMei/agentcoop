@@ -142,33 +142,6 @@ class TestSyncKeeperDir:
         after = sorted(p.relative_to(tmp_path) for p in (tmp_path / "runtime").rglob("*"))
         assert before == after
 
-    def test_a_symlinked_ancestor_inside_the_keeper_dir_is_refused(self, tmp_path: Path):
-        """A `.claude` symlink to ~/.claude would otherwise receive the shipped
-        settings.json — an unlisted path rewritten through a link."""
-        repo = _make_repo(tmp_path, FILES, MANIFEST)
-        dst = tmp_path / "runtime" / KEEPER_DST_REL
-        dst.mkdir(parents=True)
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        (dst / ".claude").symlink_to(elsewhere)
-        with pytest.raises(ValueError):
-            sync_keeper_dir(repo, tmp_path / "runtime")
-        assert not (elsewhere / "settings.json").exists()
-
-    def test_a_symlinked_in_use_file_is_replaced_not_written_through(self, tmp_path: Path):
-        repo = _make_repo(tmp_path, FILES, MANIFEST)
-        dst = tmp_path / "runtime" / KEEPER_DST_REL
-        dst.mkdir(parents=True)
-        outside = tmp_path / "outside.md"
-        outside.write_text("theirs\n")
-        (dst / "AGENTS.md").symlink_to(outside)
-
-        sync_keeper_dir(repo, tmp_path / "runtime")
-
-        assert outside.read_text() == "theirs\n"
-        assert not (dst / "AGENTS.md").is_symlink()
-        assert (dst / "AGENTS.md").read_text() == "new agents\n"
-
     def test_no_shipped_keeper_dir_is_a_noop(self, tmp_path: Path):
         repo = tmp_path / "repo"
         repo.mkdir()

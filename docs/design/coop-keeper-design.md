@@ -117,9 +117,11 @@ leftover file is the smaller harm. The `builtin/` directory exists so that an op
 which agents are the system's; an operator who wants a customised keeper
 copies it under `user/`. Unlike `contexts/`, there is no per-file "locally
 modified" check on the owned paths: protecting local edits to them would
-contradict the directory's meaning. Symlinks planted inside the managed
-directory, or the directory itself being a link, are not a supported layout:
-the sync refuses the cases it can see cheaply and makes no further promise.
+contradict the directory's meaning. Symlinks are followed, as everywhere
+else in the runtime directory: an operator may link the keeper directory or a
+file in it wherever they like, and an owned path that is a link to a file of
+their own is overwritten on upgrade — that is what the link asked for, not a
+case the sync guards against.
 
 The instruction-file pairing follows from how the two CLIs load files.
 Claude Code reads only `CLAUDE.md` and expands `@file` imports; OpenCode reads
