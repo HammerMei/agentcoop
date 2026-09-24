@@ -24,7 +24,7 @@ profiles --json`, `coop config backends --json`.
   working directory and persona unchanged; create only a connector and a rule.
   Say so in the plan; do not ask for a persona.
 - **Agent already has a bot on this server**: a connector named by one of its
-  rules whose `server.url` (canonicalised) and, on Mattermost, `server.team`
+  rules whose `server.url` (canonicalised as AGENTS.md says) and, on Mattermost, `server.team`
   match the profile. Do not create a second one — offer to change the existing
   bot instead.
 - **Account already exists on this installation**: a connector of the same URL
@@ -167,7 +167,8 @@ uses that digest.
 
 ## Order of execution
 
-After the yes:
+After the yes — and after taking the plan lock (`coop-apply-config` step 4;
+it is released after step 6):
 
 1. **Directory and persona**: `mkdir -p ~/.agentcoop/agents/user/<agent>`,
    write `AGENTS.md`; write `CLAUDE.md`, `opencode.json` and

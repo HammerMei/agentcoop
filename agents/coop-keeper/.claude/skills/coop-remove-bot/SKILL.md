@@ -14,7 +14,7 @@ its backend session by design. Removing both in one edit takes the second path.
 ## Identify the bot
 
 From `coop config show --json`: the agent; the connector(s) named by its rules
-whose `server.url` (canonicalised) and, on Mattermost, `server.team` match the
+whose `server.url` (canonicalised as AGENTS.md says) and, on Mattermost, `server.team` match the
 profile; the rule(s) naming them. From `show --raw --json`: the file as
 written, so you see `inherits:` and entry-level `agent_chain` lists.
 
@@ -43,6 +43,9 @@ List the three steps with their exact effects, including: whether the gateway
 will be started first, whether the deployment becomes empty (and the gateway is
 stopped at the end), whether the account is deleted or kept and why, whether
 the directory is deleted or kept and why. Ask once.
+
+The plan lock (`coop-apply-config` step 4) is taken before step 1 and released
+after step 3 — the account and directory steps are part of the plan.
 
 ## Step 1 — detach the runtime
 

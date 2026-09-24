@@ -220,8 +220,8 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
             _remove_path(target)
             shutil.copytree(source, target)
         else:
-            if target.is_dir():
-                _remove_path(target)
+            if target.is_dir() or target.is_symlink():
+                _remove_path(target)  # a symlink is replaced, never written through
             shutil.copy2(source, target)
     console.print(f"  coop-keeper up to date at {dst}")
 

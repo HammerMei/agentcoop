@@ -238,8 +238,11 @@ name its connectors and rules however it likes. Both are derived from the
 resolved configuration (`coop config show --json`):
 
 - **The connectors of a server** are those whose `server.url` matches the
-  profile's after canonicalisation — scheme and host lower-cased, trailing
-  slash dropped, as the connector parsers already do with `rstrip("/")` — and,
+  profile's after canonicalisation — the runtime's `canonical_origin`
+  (`gateway/core/bot_identity.py`): scheme and host lower-cased, default port
+  and trailing slash and root dot dropped, IP literals canonical, path kept;
+  the keeper's prose and `coop config add connector --credentials-from` both
+  apply that rule — and,
   for Mattermost, whose `server.team` matches too. Room discovery and owner
   inference are scoped this way. A Mattermost **installation** — the URL
   alone — is the wider unit that accounts live in: a username is one account
@@ -497,7 +500,8 @@ reports the digest of the file it read; the write passes it back as
 the keeper re-plans and asks again. This is the correctness guarantee against
 concurrent editors, and it needs no lock.
 
-**One plan at a time.** Before executing, the keeper takes
+**One plan at a time.** Before executing — before the plan's first step, a
+directory or an account included, and until after its last — the keeper takes
 `~/.agentcoop/agents/plan.lock` — created with `mkdir`, which is atomic and
 fails if the directory exists — holding a description of the plan and an
 expiry a few minutes out; it removes the lock when the plan ends. A keeper that finds the

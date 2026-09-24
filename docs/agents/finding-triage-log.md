@@ -397,3 +397,24 @@ Notes:
 - Adoption: 7 of 8 (all seven through the `cheap` gate; none rests on a number). 1 DROP by design + score.
 - Finding kinds: 6 protocol/text gaps in the skills (the multi-write plan was under-specified — one concept, five findings), 1 code guard, 1 accepted design trade-off. No finding on production Python except F3.
 - Owner weighed in before triage on F1 (offer a take-over, not just a stop — adopted) and F3 (only if one/two lines — it was).
+
+## 2026-09-24 — PR #184 round 2
+
+**Chain detector:** 12 findings over 3 detector rounds (the security review counts as
+its own), `--` throughout, no chain by its rule. **By inspection, R2-F2 is the
+round-1 F3 fix found incomplete** — a symlinked *file* target where round 1 guarded a
+symlinked *ancestor*; its line (`copy2`) predates the fix, so blame cannot see it.
+Streak 1 for `gateway/upgrade.py`, the detector limitation already logged on #181
+round 9 (a finding whose *meaning* the previous fix changed). Security review: clean.
+**Control finding:** none. Agreement **uncorroborated**.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **R2-F1** `plan.lock` taken at the config write (apply-config step 4), after persona, account and rooms; two keepers can both create server state (P2) | true vs §3.8 "before executing"; `cheap` text: lock first thing after the yes, released after the last step incl. those outside config.yaml | same; adds that remove-bot's step 3 also ran after release; consequence milder than claimed (loser re-plans, password file kept) | **FIX** — apply-config §4 reworded; add-bot and remove-bot cross-reference it |
+| **R2-F2** a symlinked in-use *file* is written through by `copy2` (P2) | true; the symlink surface is now enumerated (ancestor / dir / file); one line, within the owner's bound | same; `if target.is_dir() or target.is_symlink(): _remove_path(target)`, one test | **FIX** — one line + test; noted as the round-1 fix's incompleteness, streak 1 |
+| **R2-F3** install.sh warns and exits 0 when the keeper sync fails, then says "Installation complete" (P2) | true; owner's quiet-success/loud-failure rule; `cheap`: `error` | same, plus: the block must move below the `install_meta.json` write or the remedy it names (`coop upgrade`) has nothing to read | **FIX** — moved after the meta write, `warn` → `error` (exit 1) |
+| **R2-F4** AGENTS.md's canonicalisation (lower-case, strip slash) is weaker than the runtime's `canonical_origin` (default port, root dot, IP form, path kept); removal step 3 can delete a shared account, permanently on Rocket.Chat (P1) | true, `silent` at planning time, high consequence; `cheap` text naming the runtime rule | same; layer: the concern is `bot_identity.canonical_origin`'s; also make `config_edit._canonical_origin` delegate to it (one line) so `--credentials-from` agrees with the daemon; durable fix (an `origin` field in `show --json`) is a named concept → FILE separately | **FIX** — AGENTS.md, design §3.4, both skills name the runtime rule; `config_edit` delegates. The `origin`-field idea is noted here, not filed: nothing in this PR needs it yet |
+
+Notes:
+- Adoption: 4 of 4, all `cheap`, none scored. Rater 2 re-ranked by consequence F4 ≥ F2 > F3 > F1 (Codex: F4 P1, the rest P2 — agrees on the top, and F1's P2 is generous for what is a documented re-plan).
+- Finding kinds: 2 protocol gaps in the skills (lock span, canonicalisation), 1 installer exit code, 1 follow-on of the previous round's fix. The follow-on is the streak to watch; a symlink finding in round 3 stops the patching.

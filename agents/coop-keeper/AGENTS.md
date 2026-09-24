@@ -113,8 +113,13 @@ shared part.
 Scope is derived from the resolved configuration, never from names:
 
 - **The connectors of a server** are those whose `server.url` matches the
-  profile's after canonicalisation (scheme and host lower-cased, trailing slash
-  dropped) and, on Mattermost, whose `server.team` matches too. A Mattermost
+  profile's after canonicalisation — the runtime's rule
+  (`gateway/core/bot_identity.py`, `canonical_origin`): scheme and host
+  lower-cased, a default port dropped (`https://chat.example:443` is
+  `https://chat.example`), a trailing dot on the host and a trailing slash
+  dropped, an IP literal in canonical form, **the path kept** — and, on
+  Mattermost, whose `server.team` matches too. Getting this wrong in the
+  "same installation" direction deletes a shared account. A Mattermost
   **installation** (the URL alone) is where accounts live: a username is one
   account across every team of that URL.
 - **The connectors of an agent** are those named by a rule whose `agent` is

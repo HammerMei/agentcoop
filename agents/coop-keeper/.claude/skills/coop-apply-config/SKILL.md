@@ -74,7 +74,14 @@ returns**, which must equal the `file_digest` the plan's own previous write
 returned — the same file, changed only by this plan. A different digest
 means someone else wrote in between: stop and re-plan from step 2.
 
-## 4. Take the lock
+## 4. Take the lock — first thing after the yes
+
+The lock covers the **whole** plan, not only the configuration write: take it
+before the plan's first step (a directory, an account, a room join) and
+release it after the last (an account deletion, a directory removal), so two
+keepers cannot both create server state and then have one lose the digest
+race. Other skills say "take the lock" at their step 1 and "release" at their
+end; this is what they mean.
 
 ```
 mkdir ~/.agentcoop/agents/plan.lock

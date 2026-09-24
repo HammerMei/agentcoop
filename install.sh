@@ -355,6 +355,19 @@ if [ -d "$REPO_DIR/contexts" ] && [ -n "$(ls "$REPO_DIR/contexts/" 2>/dev/null)"
 fi
 
 # ---------------------------------------------------------------------------
+# Write install_meta.json — required by `coop upgrade` to locate the repo.
+# ---------------------------------------------------------------------------
+COOP_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+cat > "$RUNTIME_DIR/install_meta.json" << EOF
+{
+  "method": "git",
+  "repo_path": "$REPO_DIR",
+  "version": "$COOP_VERSION"
+}
+EOF
+success "Wrote install_meta.json (version=$COOP_VERSION, repo=$REPO_DIR)"
+
+# ---------------------------------------------------------------------------
 # Install the coop-keeper agent directory.
 # Same code path as `coop upgrade`: the paths agents/coop-keeper/manifest.yaml
 # lists are written, anything else already in the directory is left alone —
@@ -372,21 +385,8 @@ if install_keeper_dir "$REPO_DIR" "$RUNTIME_DIR"; then
 elif [ $? -eq 2 ]; then
   info "No coop-keeper directory in this checkout — skipped"
 else
-  warn "coop-keeper directory not installed — run 'coop upgrade' later, or copy $REPO_DIR/agents/coop-keeper to $RUNTIME_DIR/agents/builtin/coop-keeper by hand"
+  error "coop-keeper could not be installed (see above). install_meta.json is written, so 'coop upgrade' can retry it once the cause is fixed."
 fi
-
-# ---------------------------------------------------------------------------
-# Write install_meta.json — required by `coop upgrade` to locate the repo.
-# ---------------------------------------------------------------------------
-COOP_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
-cat > "$RUNTIME_DIR/install_meta.json" << EOF
-{
-  "method": "git",
-  "repo_path": "$REPO_DIR",
-  "version": "$COOP_VERSION"
-}
-EOF
-success "Wrote install_meta.json (version=$COOP_VERSION, repo=$REPO_DIR)"
 
 # ---------------------------------------------------------------------------
 # Detect shell config file for source hint
