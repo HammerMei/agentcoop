@@ -82,6 +82,11 @@ connector_templates:
       agent_usernames: [bob]         # the complete list minus this bot's username only
 ```
 
+If the removed rule carried `direct: true` and a surviving connector of the
+same account (the agent's other Mattermost team) has a rule with
+`direct: false`, this fragment also sets that rule `direct: true` — the
+account's DMs would otherwise go unanswered — and the plan says so.
+
 Agent chain is the mirror of creation: every connector whose resolved
 `agent_chain.agent_usernames` still carries **this bot's** username is
 patched to drop it — the shared template and any entry-level list alike —

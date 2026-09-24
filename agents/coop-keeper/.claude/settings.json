@@ -7,6 +7,7 @@
       "Bash(coop start)",
       "Bash(coop stop)",
       "Bash(coop reset *)",
+      "Bash(coop list *)",
       "Bash(coop-provision *)",
       "Bash(mkdir *)",
       "Bash(mktemp)",

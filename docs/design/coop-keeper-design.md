@@ -393,6 +393,10 @@ operator to edit it. A working directory shared by more than one agent is a
 shared thing (§3.4): the plan names every agent the edit would reach, and the
 operator decides whether that is what they meant.
 
+When the removed bot's rule held the account's `direct: true` (§3.5: one
+connector of an account answers DMs), the surviving connector's rule takes it
+over in the same step-2 write, or the account's DMs would go unanswered.
+
 Removing a bot is confirmed once and then done in **three ordered steps**,
 every one subject to the shared-things rule (§3.4). The order exists because
 the daemon treats the two halves of a removal differently: a record whose
@@ -564,7 +568,7 @@ perfect one (§3.3).
 Claude Code's `auto` permission mode cannot be selected from a project-local
 settings file, so the shipped `.claude/settings.json` uses explicit rules:
 allow the `coop` subcommands the skills run — `config`, `status`, `start`,
-`stop`, `reset` — never `coop *` (that would auto-approve `coop send
+`stop`, `reset`, `list` — never `coop *` (that would auto-approve `coop send
 --attach <file>`), `Bash(coop-provision *)`, the handful of shell commands
 the skills run — `mkdir` for an agent's directory and the plan lock,
 `mktemp` and `openssl rand` for the password file, `rm` for the password

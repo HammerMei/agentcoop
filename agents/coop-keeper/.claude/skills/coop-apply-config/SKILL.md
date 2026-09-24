@@ -55,7 +55,8 @@ A `config.yaml` that does not exist yet dry-runs against the empty deployment
 ## 3. Ask once
 
 Print the plan — every account, room, persona, configuration and runtime step
-— and ask for a yes. On no, delete the fragment; nothing else exists.
+— and ask for a yes. On no, delete the fragment and the password file if the
+plan generated one; nothing else exists.
 
 A yes covers the plan that was shown, nothing else. If the fragment has to
 change after the yes — a field was misread, the dry run was not clean — the
@@ -144,7 +145,8 @@ Exactly one of, as the plan said:
   last connector and expires its records), then `coop stop`, and say the
   deployment is empty; `coop start` would refuse it.
 
-`coop status` says which state the gateway is in.
+`coop status` says which state the gateway is in; `coop list --all` shows the
+watcher records a reload changed.
 
 ## 8. Release and clean up
 
@@ -173,8 +175,9 @@ using the same commands.
 ## Persona-only changes
 
 A change to an agent's `AGENTS.md` under `~/.agentcoop/agents/user/<agent>/`
-is a plan of its own with no configuration write: show the new text, ask, write
-the file. Then offer `coop reset '<connector>:*'` for each connector of the
+is a plan of its own with no configuration write: show the new text, ask, take
+the lock (step 4 — a removal may be deleting that very directory), write the
+file, release the lock. Then offer `coop reset '<connector>:*'` for each connector of the
 agent (from `coop config show --json`: connectors named by rules whose `agent`
 is this agent) as an optional step: bots on either backend read the rewritten
 file on their next turn without it, and the plan says so; the reset gives a

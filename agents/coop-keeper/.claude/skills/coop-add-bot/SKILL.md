@@ -158,6 +158,9 @@ account whose password nobody has. There is no rollback of a created account.
 
 ## The dry run before the yes
 
+Generate the password file first (below) — the dry run reads `{from_file:}`
+too and refuses an absent or empty file.
+
 Run the fragment through `coop config patch --file … --dry-run --json` to get
 the plan's configuration section (see `coop-apply-config`). For a **new**
 agent this dry run reports exactly one expected error — the agent's
@@ -182,7 +185,11 @@ it is released after step 6):
    exists.
 2. **Account** — one of:
    - `coop-provision <profile> create-user <username> <username>@agentcoop.invalid --password-file <path>`
-   - it reports the account exists and is deactivated (Mattermost) → if the
+   - it reports `already exists but with a different email` (exit 1: an
+     account of that name belongs to someone else) → the same stop and the
+     same two ways on as the skip below
+   - it reports the account exists and is deactivated (Mattermost; Rocket.Chat
+     says the same for an account awaiting approval) → if the
      plan already said the old account would be revived (you knew from this
      session), run `coop-provision <profile> reactivate-user <username>
      --password-file <path>`; if this is the first you learn of it, **stop** —
@@ -246,7 +253,9 @@ it is released after step 6):
    added with `coop config add connector <name> --type … --server-url … --team …
    --credentials-from <existing> --owner <operator> --inherits default` (dry
    run, digest, write — same discipline), and the rule and agent-chain change go
-   in one fragment after it. The plan says both. Two more things are true of
+   in one fragment after it — and that fragment also merges the connector's
+   `description` (merged by `name`), since `add connector` has no flag for
+   it. The plan says both. Two more things are true of
    this case, and the plan states them up front: the rule gets
    `direct: false` — validation allows `direct: true` on only one connector
    of an account, a DM having no team, and the first team keeps it; and the
