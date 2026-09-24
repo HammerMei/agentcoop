@@ -362,13 +362,18 @@ fi
 # files there. On a first install the directory is absent and this is a copy.
 # ---------------------------------------------------------------------------
 install_keeper_dir() {
-  # $1 = repo dir, $2 = runtime dir
+  # $1 = repo dir, $2 = runtime dir. Exit 0 = installed, 2 = nothing shipped, 1 = failed.
   local src="$1/agents/coop-keeper"
-  [ -d "$src" ] || return 0
-  (cd "$1" && "$1/.venv/bin/python" -c 'import pathlib, sys, gateway.upgrade as u; u._sync_keeper_dir(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]))' "$1" "$2")
+  [ -d "$src" ] || return 2
+  (cd "$1" && "$1/.venv/bin/python" -c 'import pathlib, sys, gateway.upgrade as u; u.sync_keeper_dir(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]))' "$1" "$2")
 }
-install_keeper_dir "$REPO_DIR" "$RUNTIME_DIR"
-success "Installed coop-keeper to $RUNTIME_DIR/agents/builtin/coop-keeper/"
+if install_keeper_dir "$REPO_DIR" "$RUNTIME_DIR"; then
+  success "Installed coop-keeper to $RUNTIME_DIR/agents/builtin/coop-keeper/"
+elif [ $? -eq 2 ]; then
+  info "No coop-keeper directory in this checkout — skipped"
+else
+  warn "coop-keeper directory not installed — run 'coop upgrade' later, or copy $REPO_DIR/agents/coop-keeper to $RUNTIME_DIR/agents/builtin/coop-keeper by hand"
+fi
 
 # ---------------------------------------------------------------------------
 # Write install_meta.json — required by `coop upgrade` to locate the repo.

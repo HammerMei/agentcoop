@@ -1697,8 +1697,8 @@ def sanitize_pipe_message(message: str) -> str:
     AND `gateway/daemon.py`'s own pipe writes (lock-acquire/config-load/
     service-crash failures) — code-review finding:
     those two files used to each keep an independent inline copy of this
-    exact sanitization, applied inconsistently (only 2 of daemon.py's 5
-    write sites), so this is now the one place it's defined."""
+    exact sanitization, applied inconsistently across daemon.py's write
+    sites, so this is now the one place it's defined."""
     return message.replace("\n", " ").replace("\r", " ")
 
 

@@ -298,7 +298,7 @@ watcher_rules:
   (replaces the removed `coop onboard` wizard)
 - ✅ `coop config add/remove/patch/show --raw/backends` and
   `coop-provision init/check/profiles/reactivate-user` — the command surface
-  the keeper drives, usable by hand or from a script
+  coop-keeper drives, usable by hand or from a script
 - ✅ Self-upgrade via CLI command
 
 ---

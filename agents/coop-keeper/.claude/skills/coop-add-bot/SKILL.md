@@ -124,10 +124,11 @@ Every bot username goes into
 `connector_templates.default.agent_chain.agent_usernames`, so that bots do not
 answer each other without loop protection. Merge-patch replaces a list
 wholesale: write the complete list (existing entries plus the new username).
-Then check every connector **of this server** in the resolved config: one
-whose resolved `agent_chain.agent_usernames` lacks the new username has an
-entry-level list of its own — patch that entry's list too, in the same
-fragment, and say so in the plan.
+Then check every connector **of this installation** (same server URL, any
+team — accounts and the chain list live at that level) in the resolved
+config: one whose resolved `agent_chain.agent_usernames` lacks the new
+username has an entry-level list of its own — patch that entry's list too, in
+the same fragment, and say so in the plan.
 
 ## Password file
 
@@ -194,7 +195,7 @@ After the yes:
          url: https://mm.example
          team: lab
          username: bob
-         password: {from_file: /var/folders/.../tmp.XXXX}
+         password: {from_file: /Users/alice/.agentcoop/agents/.bot-password.XXXXXX}
        allowed_users: {owners: [alice], guests: []}
    agents:
      bob:

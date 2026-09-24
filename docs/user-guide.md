@@ -888,9 +888,9 @@ What it guarantees, and what it does not:
   step at a time. A kept password file is named in the report.
 - **Comments in `config.yaml` are not preserved**; `description:` is.
 
-`coop upgrade` refreshes the files the keeper ships (listed in its
+`coop upgrade` refreshes the files coop-keeper ships (listed in its
 `manifest.yaml`) and leaves everything else in the directory alone — your
-CLI's local settings, notes, a skill you added. To customise the keeper
+CLI's local settings, notes, a skill you added. To customise coop-keeper
 itself, copy the directory under `~/.agentcoop/agents/user/` and run it from
 there.
 

@@ -108,6 +108,10 @@ mkdir -p ~/.agentcoop/agents/builtin ~/.agentcoop/agents/user
 cp -R ~/.agentcoop/repo/agents/coop-keeper ~/.agentcoop/agents/builtin/coop-keeper
 ```
 
+(On a fresh install that is what `install.sh` does; afterwards `coop upgrade`
+refreshes only the files coop-keeper ships and leaves anything you add there
+alone.)
+
 ---
 
 ## Set up your first bot
@@ -141,10 +145,10 @@ What it manages, in `~/.agentcoop/`:
 | `config.yaml` | Connector, agent and watcher definitions — including credentials, stored directly as plain values, `0600` |
 | `admin-profiles.yaml` | Administrator credentials per server, for `coop-provision`; you fill these in, `0600` |
 | `agents/user/<agent>/` | Each agent's persona (`AGENTS.md`, plus a one-line `CLAUDE.md`) and working directory; `opencode.json`/`.claude/settings.json` pin the bot's CLI to its built-in agent |
-| `agents/builtin/coop-keeper/` | The keeper itself; `coop upgrade` refreshes the files it ships and leaves everything else there alone |
+| `agents/builtin/coop-keeper/` | Coop-keeper itself; `coop upgrade` refreshes the files it ships and leaves everything else there alone |
 | `install_meta.json` | Install method and version (used by `upgrade`) |
 
-Both platforms are supported the same way. The same commands the keeper drives
+Both platforms are supported the same way. The same commands coop-keeper drives
 — `coop config add/remove/patch`, `coop-provision` — are documented in the
 [user guide](docs/user-guide.md#editing-configuration-from-the-command-line)
 for use by hand or from a script.

@@ -9,21 +9,18 @@ install.sh and exercise it against a temp dir, so the rule is pinned without
 running the installer.
 """
 
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-INSTALL_SH = Path(__file__).resolve().parents[2] / "install.sh"
+from tests.helpers import INSTALL_SH, run_install_sh_function
 
 
 def _is_foreign(link: Path) -> int:
     """Exit status of is_foreign_command: 0 = foreign, 1 = ours or absent."""
-    script = (
-        f'eval "$(sed -n \'/^is_ours_console_script() {{/,/^}}/p; /^is_foreign_command() {{/,/^}}/p\' "{INSTALL_SH}")"\n'
-        f'is_foreign_command "{link}"'
-    )
-    return subprocess.run(["bash", "-c", script]).returncode
+    return run_install_sh_function(
+        ("is_ours_console_script", "is_foreign_command"), f'is_foreign_command "{link}"'
+    ).returncode
 
 
 class TestIsForeignCommand(unittest.TestCase):

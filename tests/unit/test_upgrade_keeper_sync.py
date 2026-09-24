@@ -13,16 +13,29 @@ import pytest
 
 from gateway.upgrade import (
     KEEPER_DST_REL,
+    KEEPER_IN_USE,
+    KEEPER_OBSOLETE,
     KEEPER_SRC_REL,
     _read_keeper_manifest,
-    _sync_keeper_dir,
     run_post_upgrade,
+    sync_keeper_dir,
 )
+from tests.helpers import assert_tree_copied
 
 REPO = Path(__file__).resolve().parents[2]
 
 
+class _Asserter:
+    """assert_tree_copied wants a TestCase-like assertEqual; this suite is pytest-style."""
+
+    def assertEqual(self, a, b, msg=None):
+        assert a == b, msg
+
+
 def _make_repo(tmp_path: Path, files: dict[str, str], manifest: str) -> Path:
+    """Local on purpose: it builds a *shipped keeper tree* (files under
+    agents/coop-keeper plus a manifest), which no other suite needs — the
+    gateway-config builders in tests/helpers.py model a different thing."""
     repo = tmp_path / "repo"
     src = repo / KEEPER_SRC_REL
     for rel, content in files.items():
@@ -33,13 +46,13 @@ def _make_repo(tmp_path: Path, files: dict[str, str], manifest: str) -> Path:
     return repo
 
 
-MANIFEST = """\
-AGENTS.md: in-use
-manifest.yaml: in-use
-.claude/settings.json: in-use
-.claude/skills/coop-add-bot: in-use
-.claude/skills/old-skill: obsolete
-retired.md: obsolete
+MANIFEST = f"""\
+AGENTS.md: {KEEPER_IN_USE}
+manifest.yaml: {KEEPER_IN_USE}
+.claude/settings.json: {KEEPER_IN_USE}
+.claude/skills/coop-add-bot: {KEEPER_IN_USE}
+.claude/skills/old-skill: {KEEPER_OBSOLETE}
+retired.md: {KEEPER_OBSOLETE}
 """
 
 FILES = {
@@ -56,7 +69,7 @@ class TestSyncKeeperDir:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
 
-        _sync_keeper_dir(repo, runtime)
+        sync_keeper_dir(repo, runtime)
 
         dst = runtime / KEEPER_DST_REL
         assert (dst / "AGENTS.md").read_text() == "new agents\n"
@@ -70,7 +83,7 @@ class TestSyncKeeperDir:
         dst.mkdir(parents=True)
         (dst / "AGENTS.md").write_text("old agents\n")
 
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
 
         assert (dst / "AGENTS.md").read_text() == "new agents\n"
 
@@ -83,7 +96,7 @@ class TestSyncKeeperDir:
         (skill / "SKILL.md").write_text("old skill\n")
         (skill / "stale-helper.md").write_text("gone in this release\n")
 
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
 
         assert (skill / "SKILL.md").read_text() == "new skill\n"
         assert not (skill / "stale-helper.md").exists()
@@ -96,14 +109,14 @@ class TestSyncKeeperDir:
         (old / "SKILL.md").write_text("obsolete\n")
         (dst / "retired.md").write_text("obsolete\n")
 
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
 
         assert not old.exists()
         assert not (dst / "retired.md").exists()
 
     def test_obsolete_path_that_is_already_gone_is_fine(self, tmp_path: Path):
         repo = _make_repo(tmp_path, FILES, MANIFEST)
-        _sync_keeper_dir(repo, tmp_path / "runtime")  # nothing to remove; must not raise
+        sync_keeper_dir(repo, tmp_path / "runtime")  # nothing to remove; must not raise
 
     def test_unlisted_paths_are_never_touched(self, tmp_path: Path):
         """settings.local.json, an operator's notes, an operator-added skill —
@@ -115,7 +128,7 @@ class TestSyncKeeperDir:
         (dst / ".claude" / "settings.local.json").write_text('{"mine": true}\n')
         (dst / "notes.md").write_text("operator notes\n")
 
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
 
         assert (dst / ".claude" / "skills" / "my-own-skill" / "SKILL.md").read_text() == "mine\n"
         assert (dst / ".claude" / "settings.local.json").read_text() == '{"mine": true}\n'
@@ -123,23 +136,23 @@ class TestSyncKeeperDir:
 
     def test_is_idempotent(self, tmp_path: Path):
         repo = _make_repo(tmp_path, FILES, MANIFEST)
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
         before = sorted(p.relative_to(tmp_path) for p in (tmp_path / "runtime").rglob("*"))
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
         after = sorted(p.relative_to(tmp_path) for p in (tmp_path / "runtime").rglob("*"))
         assert before == after
 
     def test_no_shipped_keeper_dir_is_a_noop(self, tmp_path: Path):
         repo = tmp_path / "repo"
         repo.mkdir()
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
         assert not (tmp_path / "runtime").exists()
 
     def test_in_use_entry_the_release_does_not_ship_is_skipped_with_a_warning(
         self, tmp_path: Path, capsys
     ):
         repo = _make_repo(tmp_path, FILES, MANIFEST + "missing.md: in-use\n")
-        _sync_keeper_dir(repo, tmp_path / "runtime")
+        sync_keeper_dir(repo, tmp_path / "runtime")
         assert "missing.md" in capsys.readouterr().out
         assert not (tmp_path / "runtime" / KEEPER_DST_REL / "missing.md").exists()
 
@@ -176,7 +189,7 @@ class TestRunPostUpgradeSyncsTheKeeper:
     def test_runs_after_the_symlink_step_against_runtime_dir(self, tmp_path: Path):
         repo = tmp_path / "repo"
         with patch("gateway.upgrade._ensure_local_bin_symlinks"), \
-             patch("gateway.upgrade._sync_keeper_dir") as sync, \
+             patch("gateway.upgrade.sync_keeper_dir") as sync, \
              patch("gateway.upgrade.RUNTIME_DIR", tmp_path / "rt"):
             run_post_upgrade(repo, from_version="1.0.0")
         sync.assert_called_once_with(repo, tmp_path / "rt")
@@ -185,26 +198,20 @@ class TestRunPostUpgradeSyncsTheKeeper:
         """Contract of run_post_upgrade: skippable, never fatal."""
         repo = tmp_path / "repo"
         with patch("gateway.upgrade._ensure_local_bin_symlinks"), \
-             patch("gateway.upgrade._sync_keeper_dir", side_effect=ValueError("bad manifest")):
+             patch("gateway.upgrade.sync_keeper_dir", side_effect=ValueError("bad manifest")):
             run_post_upgrade(repo, from_version="1.0.0")
         assert "bad manifest" in capsys.readouterr().out
 
-    def test_a_v0_install_does_not_sync(self, tmp_path: Path, capsys):
+    def test_a_v0_install_does_not_sync(self, tmp_path: Path):
         repo = tmp_path / "repo"
         with patch("gateway.upgrade._ensure_local_bin_symlinks"), \
-             patch("gateway.upgrade._sync_keeper_dir") as sync:
+             patch("gateway.upgrade.sync_keeper_dir") as sync:
             run_post_upgrade(repo, from_version="0.5.1")
         sync.assert_not_called()
-        capsys.readouterr()
 
     def test_the_shipped_tree_round_trips_through_the_sync(self, tmp_path: Path):
         """The real agents/coop-keeper/ syncs into an empty runtime dir and
         every shipped file arrives."""
         runtime = tmp_path / "runtime"
-        _sync_keeper_dir(REPO, runtime)
-        src = REPO / KEEPER_SRC_REL
-        dst = runtime / KEEPER_DST_REL
-        for f in src.rglob("*"):
-            if f.is_file():
-                rel = f.relative_to(src)
-                assert (dst / rel).read_bytes() == f.read_bytes(), rel
+        sync_keeper_dir(REPO, runtime)
+        assert_tree_copied(_Asserter(), REPO / KEEPER_SRC_REL, runtime / KEEPER_DST_REL)

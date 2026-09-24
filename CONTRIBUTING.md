@@ -26,8 +26,8 @@ cd agentcoop
 # Install all dependencies (including dev extras)
 uv sync
 
-# Set up config (interactive wizard — safe to skip for code-only changes)
-make setup
+# A running deployment is not needed for code-only changes; to get one,
+# run coop-keeper: cd ~/.agentcoop/agents/builtin/coop-keeper && opencode
 ```
 
 That's it. No virtualenv activation needed — prefix commands with `uv run` or use `make`.
@@ -61,7 +61,7 @@ instance is needed.  All network and subprocess calls are mocked.
 
 - **Type hints throughout** — all public functions and methods must be fully annotated
 - **No hardcoded paths** — use `Path.home()`, `Path(__file__)`, or constants; never `"/home/user/..."`
-- **No debug `print()`** — use `logging.getLogger(__name__)` inside library code; `console.print()` (Rich) is fine in CLI / wizard code
+- **No debug `print()`** — use `logging.getLogger(__name__)` inside library code; `console.print()` (Rich) is fine in CLI code
 - **Docstrings** — public functions and classes need a one-line summary; complex ones should document args and raises
 - **Imports** — stdlib first, third-party second, local last; no star imports
 
@@ -152,7 +152,7 @@ def connector_factory(cc: ConnectorConfig) -> Connector:
         return MyPlatformConnector(MyPlatformConfig.from_connector_config(cc))
 ```
 
-### 4. Teach the CLI and the keeper about it
+### 4. Teach the CLI and coop-keeper about it
 
 `coop config add connector --type` and `coop-provision init --type` accept
 the connector types the code knows (`gateway/config_edit.py`,

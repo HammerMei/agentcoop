@@ -725,3 +725,31 @@ def write_secret_file(directory, content: str = "s3cret\n", name: str = "pw") ->
     path = Path(directory) / name
     path.write_text(content)
     return str(path)
+
+
+# ── install.sh: run one of its functions in isolation ──────────────────────────
+
+INSTALL_SH = Path(__file__).resolve().parents[1] / "install.sh"
+
+
+def run_install_sh_function(names, call, **run_kw):
+    """Source the named `name() {...}` functions out of install.sh and run `call`.
+
+    `names` are the shell functions to extract (a function that calls another
+    must list both); `call` is the shell line to execute afterwards. Returns the
+    CompletedProcess, so a test can look at the exit status or the output. This
+    is how install.sh's rules are pinned without running the installer.
+    """
+    import subprocess
+
+    sed = "; ".join(f"/^{n}() {{/,/^}}/p" for n in names)
+    script = f'eval "$(sed -n \'{sed}\' "{INSTALL_SH}")"\n{call}'
+    return subprocess.run(["bash", "-c", script], **run_kw)
+
+
+def assert_tree_copied(testcase, src, dst):
+    """Every regular file under `src` exists under `dst` with identical bytes."""
+    for f in Path(src).rglob("*"):
+        if f.is_file():
+            rel = f.relative_to(src)
+            testcase.assertEqual((Path(dst) / rel).read_bytes(), f.read_bytes(), rel)

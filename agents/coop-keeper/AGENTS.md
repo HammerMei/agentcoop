@@ -76,7 +76,9 @@ need no confirmation.
 
 - **Nothing is written before the yes.** Build the plan from
   `coop config show --json` and `coop config patch --file … --dry-run --json`.
-  A declined plan leaves nothing on disk.
+  The only things that exist before the yes are the plan's own scratch files —
+  the fragment and a generated password file — and a declined plan removes
+  them; `config.yaml`, the server and the gateway are untouched.
 - **One configuration write per step.** Everything a step changes in
   `config.yaml` goes into one fragment and one `coop config patch --file`.
   Credentials enter the fragment only as `{from_file: <path>}`.
@@ -140,9 +142,14 @@ Scope is derived from the resolved configuration, never from names:
 
 Single-step changes — a room change, a persona edit, a timeout — need no skill of
 their own: describe the change, build the fragment, and go through
-`coop-apply-config`. A persona change rewrites the agent's `AGENTS.md` and
-changes nothing in `config.yaml`; offer `coop reset '<connector>:*'` for each
-connector of the agent so a fresh session reads the new file.
+`coop-apply-config`. A **room change** is a patch on the rule's `rooms` plus
+`coop-provision <profile> add-to-channel` for every literal room the change
+adds that the account is not yet in (a glob cannot be expanded — ask);
+membership in a room the change drops is left as it is, the rule simply stops
+serving it. A **persona change** rewrites the agent's `AGENTS.md` and changes
+nothing in `config.yaml`; offer `coop reset '<connector>:*'` for each connector
+of the agent as an optional clean-slate step — bots read the new file on their
+next turn either way.
 
 ## Shell discipline
 

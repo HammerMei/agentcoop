@@ -488,10 +488,7 @@ def main():
         # Before stop_daemon(), not after: validating inside the start half
         # would stop a healthy running gateway and then refuse to restart it,
         # leaving the operator worse off than before the command.
-        # Asked, not assumed: the flag means what its name says only if it
-        # is measured.
-        running, _pid = is_running()
-        _validate_or_exit(args.config, stops_a_running_gateway=running)
+        _validate_or_exit(args.config)
         stop_daemon()
         start_daemon(args.config)
 
@@ -873,7 +870,7 @@ def _run_config(args) -> None:
         sys.exit(1)
 
 
-def _validate_or_exit(config_path: str, *, stops_a_running_gateway: bool = False) -> None:
+def _validate_or_exit(config_path: str) -> None:
     """Refuse to start a gateway on a config `config validate` rejects.
 
     `start` used to hand the path straight to the daemon, which loads it with
@@ -1309,7 +1306,6 @@ def _run_config_backends(args) -> None:
             where = info["path"] if info["found"] else "not found on PATH"
             print(f"{backend_type:<10} {info['command']:<10} {where}")
     sys.exit(0)
-
 
 
 def _run_instructions(args) -> None:

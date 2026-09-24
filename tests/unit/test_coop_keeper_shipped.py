@@ -213,6 +213,18 @@ class TestPermissionFiles(unittest.TestCase):
             for cmd, _strict in _commands(path.read_text()):
                 self.assertTrue(allowed(cmd), f"{dirname}: no allow rule for `{cmd}`")
 
+    def test_every_bash_allow_rule_is_used_by_some_skill(self):
+        """The other direction of §3.9 "derived from the skills": a rule no skill
+        needs is a rule nobody will notice going stale."""
+        rules = [r[5:-1] for r in self.settings["permissions"]["allow"] if r.startswith("Bash(")]
+        commands = [c for path in _skill_files().values() for c, _ in _commands(path.read_text())]
+        for rule in rules:
+            prefix = rule[:-2] if rule.endswith(" *") else rule
+            self.assertTrue(
+                any(c == prefix or c.startswith(prefix + " ") for c in commands),
+                f"allow rule `{rule}` matches no command in any skill",
+            )
+
     def test_no_skill_command_is_a_compound(self):
         """Claude Code matches permissions per sub-command; a chained line would
         need every part allowed and reads worse in a plan."""

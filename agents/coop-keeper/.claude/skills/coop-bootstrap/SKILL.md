@@ -32,7 +32,8 @@ Runs when the session-start checks show one of:
      credentials: left empty for you to fill in
    ```
 
-4. On yes:
+4. On yes — under the plan lock like any other plan (`coop-apply-config`
+   step 4; release it after `init`):
 
    ```
    coop-provision init mm-lab --type mattermost --server-url https://mm.example --team lab

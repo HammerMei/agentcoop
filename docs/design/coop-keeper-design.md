@@ -97,9 +97,9 @@ Runtime layout:
 ```
 
 In the repository the shipped files live at `agents/coop-keeper/`, leaving
-room for further built-in agents beside it. `install.sh` copies the directory
-into `builtin/` whole (there is nothing to preserve on a first install).
-`coop upgrade` refreshes it **by manifest**: `manifest.yaml`, shipped in the
+room for further built-in agents beside it. `install.sh` and `coop upgrade`
+both bring `builtin/coop-keeper/` up to the shipped tree through one function
+(`gateway/upgrade.py`, `sync_keeper_dir`), **by manifest**: `manifest.yaml`, shipped in the
 directory, is one forever-growing list of the paths AgentCoop owns there,
 each marked `in-use` or `obsolete`. An `in-use` file is overwritten with the
 shipped one and an `in-use` directory is replaced as a unit, so a file a
@@ -439,7 +439,10 @@ omitted. The keeper therefore maintains a single list of every bot username
 in `connector_templates.default.agent_chain.agent_usernames`, appending on
 creation and removing on deletion. Own messages are dropped by each
 connector before this list is consulted, so a bot's own name in the shared
-list is harmless. `max_turns` and `ttl_seconds` keep their defaults.
+list is harmless. `max_turns` and `ttl_seconds` keep their defaults. The
+connectors this touches are those of the **installation** (§3.4): the
+account, and so the name in the list, is one across every team of a
+Mattermost URL.
 
 The list is shared across servers. A human on one server whose username
 equals a bot's username on another would be treated as an agent there
@@ -449,7 +452,7 @@ receives the shared list is decided from its resolved `agent_usernames` in
 `coop config show --json`, not from its `inherits:` value — an entry-level
 list replaces the template's wholesale, so a hand-written connector that
 inherits `default` and also sets its own list is as unaffected as one that
-inherits nothing. Every connector of the server whose resolved list lacks the
+inherits nothing. Every connector of the installation whose resolved list lacks the
 new username is patched individually, and the plan says so. Removal is the
 mirror image: every connector whose resolved list still carries a username no
 surviving bot uses is patched to drop it — the shared template and any
@@ -478,7 +481,14 @@ the file itself.
 configuration and from `patch --file --dry-run --json`, which returns the
 whole merged, masked result without touching the file — so the preview is
 the exact final state, and a declined plan leaves no edit on disk waiting for
-a later `start` to apply it.
+a later `start` to apply it. One dry run is allowed to fail before the yes:
+a plan that creates an agent's directory as its first step (§3.5) is
+dry-run before that directory exists, so "working directory does not exist"
+and the rule that follows from it are expected there; the dry run is
+repeated, and must be clean, once the directory exists and before the write.
+The plan's own scratch files — the fragment under the keeper's `.plans/` and
+the generated password file — do exist before the yes and are removed on a
+no.
 
 **A write applies only to the file it was planned against.** The dry run
 reports the digest of the file it read; the write passes it back as
@@ -536,18 +546,21 @@ perfect one (§3.3).
 Claude Code's `auto` permission mode cannot be selected from a project-local
 settings file, so the shipped `.claude/settings.json` uses explicit rules:
 allow `Bash(coop *)`, `Bash(coop-provision *)`, the handful of shell commands
-the skills run — `mkdir`/`rmdir` for an agent's directory and the plan lock,
-`mktemp`, `openssl rand` and `rm` for the password file, `ls` for the
-empty-directory check, `date` for the lock's expiry, `which` — and the
-`Read`/`Edit` tools under `~/.agentcoop/agents/` (the plan lock lives there
-too, §3.8);
+the skills run — `mkdir` for an agent's directory and the plan lock,
+`mktemp` and `openssl rand` for the password file, `rm` for the password
+file, the lock, a fragment and a removed agent's directory, `ls` for the
+empty-directory check, `date` for the lock's expiry — the `Read`/`Edit`
+tools under `~/.agentcoop/agents/` (the plan lock lives there too, §3.8), and
+`Read` on `install_meta.json` for the repository path (§3.11);
 deny the credential files named in §3.3. Everything else prompts, which is
 Claude Code's default. The rules take effect only after the operator has
 accepted Claude Code's workspace-trust dialog for the directory — until
 then every `coop` command prompts, and a headless session is refused even the
-session-start reads; the install and user documentation say to accept it. The allow list is derived from what the four skills
-actually execute (`tests/unit/test_coop_keeper_shipped.py` walks the skills),
-so a skill that gains a new command adds it here in the same change.
+session-start reads; the install and user documentation say to accept it.
+The allow list is derived from what the four skills actually execute
+(`tests/unit/test_coop_keeper_shipped.py` walks the skills in both directions:
+every command has a rule, every rule has a command), so a skill that gains a
+new command adds it here in the same change, and a rule nothing uses fails.
 
 OpenCode's defaults allow everything except `external_directory` — any path
 outside the working directory — which asks. The keeper's directory is not a
