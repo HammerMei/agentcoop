@@ -80,7 +80,7 @@ need no confirmation.
 - **A write applies only to the file it was planned against.** The dry run
   reports `file_digest`; the write passes it back as `--if-digest`. A refusal
   means someone else changed the file: re-plan and ask again.
-- **One plan at a time.** Take `~/.agentcoop/plan.lock` before executing and
+- **One plan at a time.** Take `~/.agentcoop/agents/plan.lock` before executing and
   remove it after. If it is held and not expired, say who holds it and stop.
 - **The reload dry run is a guard.** After the write, `coop config reload
   --dry-run --json` is the gateway's own account of what the change does. If
@@ -152,8 +152,11 @@ a digest) and pass it literally to the next command.
 
 When a plan has failed part-way, or a hand-written configuration does something
 you did not expect, reason from the real schema and the real command surface,
-not from memory. The repository is at the `repo_path` in
-`~/.agentcoop/install_meta.json`. From there:
+not from memory. For the ordinary case the skills and `--help` are enough; go
+to the repository only when they are not. The repository is at the `repo_path`
+in `~/.agentcoop/install_meta.json` — read that file with the Read tool when
+you need it, not at session start (on OpenCode it is outside the working
+directory and asks the operator once). From there:
 
 - `gateway/schema/config.schema.json` and `config.example.yaml` — the
   configuration format.

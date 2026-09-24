@@ -40,7 +40,11 @@ Read the result:
 
 - `ok: false` → the merged file does not validate. The `findings` say why. Fix
   the fragment or report the problem; do not ask for confirmation of a plan
-  that cannot be written.
+  that cannot be written. One exception: a plan that creates an agent's
+  directory as its first step (`coop-add-bot`) dry-runs before that directory
+  exists, so "working directory does not exist" and the rule that follows
+  from it are expected there — and the dry run is repeated, and must be
+  clean, once the directory exists and before the write.
 - `file_digest` → keep it; the write needs it.
 - `config` → the whole merged, masked document. This is the exact final state:
   show the relevant part of it in the plan, not a paraphrase.
@@ -53,19 +57,26 @@ A `config.yaml` that does not exist yet dry-runs against the empty deployment
 Print the plan — every account, room, persona, configuration and runtime step
 — and ask for a yes. On no, delete the fragment; nothing else exists.
 
+A yes covers the plan that was shown, nothing else. If the fragment has to
+change after the yes — a field was misread, the dry run was not clean — the
+yes is void: show the corrected plan and ask again. Never ask for a yes on a
+plan whose dry run failed.
+
 ## 4. Take the lock
 
 ```
-mkdir ~/.agentcoop/plan.lock
+mkdir ~/.agentcoop/agents/plan.lock
 ```
 
 `mkdir` is atomic: it fails when the directory exists, which means another
-plan holds the lock. When it fails, read `~/.agentcoop/plan.lock/holder`. If
-its `expires` is in the past (compare with `date -u +%Y-%m-%dT%H:%M:%SZ`),
-remove the directory with `rm -r ~/.agentcoop/plan.lock` and take it again;
-otherwise tell the operator who holds it and until when, and stop.
+plan holds the lock. When it fails, read `~/.agentcoop/agents/plan.lock/holder`
+**again, now** — never reuse an earlier read; the holder may have changed or
+expired since. If its `expires` is in the past (compare with
+`date -u +%Y-%m-%dT%H:%M:%SZ`), remove the directory with
+`rm -r ~/.agentcoop/agents/plan.lock` and take it again; otherwise tell the
+operator who holds it and until when, and stop.
 
-Once taken, write `~/.agentcoop/plan.lock/holder`:
+Once taken, write `~/.agentcoop/agents/plan.lock/holder`:
 
 ```text
 plan: <one line describing this plan>
@@ -73,7 +84,8 @@ started: <now, UTC ISO-8601>
 expires: <now + 10 minutes>
 ```
 
-The lock guards the deployment, so it lives in `~/.agentcoop/`, not here. Only
+The lock guards the deployment, so it lives under `~/.agentcoop/agents/`, not
+in this directory — a keeper copied under `user/` takes the same lock. Only
 keepers honour it; the config TUI and hand edits are caught by the digest.
 
 ## 5. Write
@@ -118,7 +130,7 @@ Exactly one of, as the plan said:
 ## 8. Release and clean up
 
 ```
-rm -r ~/.agentcoop/plan.lock
+rm -r ~/.agentcoop/agents/plan.lock
 rm ./.plans/<step>.yaml
 ```
 
@@ -126,8 +138,11 @@ Then report what was done, step by step, in the words of the plan.
 
 ## When a step fails
 
-Stop at the failing step. Release the lock. Say exactly which steps completed
-and which did not, quote the error, and undo nothing. A written configuration
+Stop at the failing step. Release the lock and report **before** you
+investigate anything: say exactly which steps completed and which did not,
+quote the error, name any kept file, and undo nothing. Do not start a repair
+— not even a "reversible" one — until the operator has seen the report and
+confirmed a repair step. A written configuration
 stays written; a created account stays created; a kept password file is named
 with its path. Repair is a new conversation of individually confirmed steps,
 using the same commands.

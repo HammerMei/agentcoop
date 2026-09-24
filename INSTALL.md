@@ -137,7 +137,7 @@ What it manages, in `~/.agentcoop/`:
 |------|---------|
 | `config.yaml` | Connector, agent and watcher definitions — including credentials, stored directly as plain values, `0600` |
 | `admin-profiles.yaml` | Administrator credentials per server, for `coop-provision`; you fill these in, `0600` |
-| `agents/user/<agent>/` | Each agent's persona (`AGENTS.md`, plus a one-line `CLAUDE.md`) and working directory |
+| `agents/user/<agent>/` | Each agent's persona (`AGENTS.md`, plus a one-line `CLAUDE.md`) and working directory; `opencode.json`/`.claude/settings.json` pin the bot's CLI to its built-in agent |
 | `agents/builtin/coop-keeper/` | The keeper itself; `coop upgrade` refreshes the files it ships and leaves everything else there alone |
 | `install_meta.json` | Install method and version (used by `upgrade`) |
 

@@ -183,7 +183,6 @@ class TestPermissionFiles(unittest.TestCase):
         # or deny directories — the paths the keeper writes under.
         ext = perm["external_directory"]
         self.assertEqual(ext.get("~/.agentcoop/agents/*"), "allow")
-        self.assertEqual(ext.get("~/.agentcoop/plan.lock/*"), "allow")
         self.assertTrue(all(v == "allow" for v in ext.values()), ext)
         # read/edit rules see the path relative to the working directory
         # (`../../.agentcoop/config.yaml`), so a `*/` prefix is what matches.

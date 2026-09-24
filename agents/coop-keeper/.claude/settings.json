@@ -15,8 +15,6 @@
       "Bash(which *)",
       "Read(~/.agentcoop/agents/**)",
       "Edit(~/.agentcoop/agents/**)",
-      "Read(~/.agentcoop/plan.lock/**)",
-      "Edit(~/.agentcoop/plan.lock/**)",
       "Read(~/.agentcoop/install_meta.json)"
     ],
     "deny": [

@@ -868,7 +868,7 @@ What it guarantees, and what it does not:
   yes; the plan shows the exact configuration the write produces (from a
   `--dry-run`), and a write applies only to the file it was planned against
   (`--if-digest`) — an edit in the TUI in between makes it re-plan, never
-  merge. One keeper plan runs at a time (`~/.agentcoop/plan.lock`).
+  merge. One keeper plan runs at a time (`~/.agentcoop/agents/plan.lock`).
 - **Shared things are named, never silently narrowed.** Before removing or
   rewriting anything used by another rule, agent or bot, it stops and offers
   the wider plan.

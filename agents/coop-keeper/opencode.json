@@ -3,8 +3,7 @@
   "default_agent": "build",
   "permission": {
     "external_directory": {
-      "~/.agentcoop/agents/*": "allow",
-      "~/.agentcoop/plan.lock/*": "allow"
+      "~/.agentcoop/agents/*": "allow"
     },
     "read": {
       "*/.agentcoop/config.yaml": "deny",

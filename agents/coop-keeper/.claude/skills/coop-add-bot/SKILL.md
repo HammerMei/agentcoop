@@ -51,8 +51,13 @@ profiles --json`, `coop config backends --json`.
 ## Persona
 
 Written to `~/.agentcoop/agents/user/<agent>/AGENTS.md`, with `CLAUDE.md`
-containing the single line `@AGENTS.md` beside it. `CLAUDE.md` is created once
-and never overwritten if present.
+containing the single line `@AGENTS.md` beside it. Two more files pin the
+bot's CLI to its built-in agent, so an operator whose CLI defaults to a
+persona agent of their own does not have every bot answer as that persona:
+`opencode.json` containing `{"default_agent": "build"}` and
+`.claude/settings.json` containing `{"agent": ""}`. `CLAUDE.md`,
+`opencode.json` and `.claude/settings.json` are created once and never
+overwritten if present — the operator may edit them.
 
 - Text the operator supplied verbatim is written verbatim.
 - An intent ("a professional lawyer, I have a car-insurance question") is
@@ -123,10 +128,12 @@ fragment, and say so in the plan.
 ## Password file
 
 ```
-mktemp
+mktemp ~/.agentcoop/agents/.bot-password.XXXXXX
 ```
 
-prints a `0600` path. Then, with that literal path:
+creates a `0600` file under `agents/` — the directory your file tools and
+shell are allowed to work in on both CLIs, and one that survives a reboot if
+the file has to be kept — and prints its path. Then, with that literal path:
 
 ```
 openssl rand -hex 24 > <path>
@@ -138,13 +145,26 @@ step and the configuration write, **keep the file**, name its path in the
 report, and reuse it when the plan is resumed — a fresh password would leave an
 account whose password nobody has. There is no rollback of a created account.
 
+## The dry run before the yes
+
+Run the fragment through `coop config patch --file … --dry-run --json` to get
+the plan's configuration section (see `coop-apply-config`). For a **new**
+agent this dry run reports exactly one expected error — the agent's
+`working_directory` does not exist yet, and the rule that names the agent
+cannot resolve — because the directory is created only after the yes. Show
+the plan with that noted; any other finding is a real problem in the
+fragment. After step 1 below has created the directory, run the dry run
+again: it must now be clean, and its `file_digest` is the one the write uses.
+
 ## Order of execution
 
 After the yes:
 
 1. **Directory and persona**: `mkdir -p ~/.agentcoop/agents/user/<agent>`,
-   write `AGENTS.md`, write `CLAUDE.md` if absent. First, because the
-   configuration write validates that `working_directory` exists.
+   write `AGENTS.md`; write `CLAUDE.md`, `opencode.json` and
+   `.claude/settings.json` if absent (`mkdir -p` the `.claude` directory).
+   First, because the configuration write validates that `working_directory`
+   exists.
 2. **Account** — one of:
    - `coop-provision <profile> create-user <username> <username>@agentcoop.invalid --password-file <path>`
    - it reports the account exists and is deactivated (Mattermost) →
@@ -198,7 +218,15 @@ After the yes:
    added with `coop config add connector <name> --type … --server-url … --team …
    --credentials-from <existing> --owner <operator> --inherits default` (dry
    run, digest, write — same discipline), and the rule and agent-chain change go
-   in one fragment after it. The plan says both.
+   in one fragment after it. The plan says both. Two more things are true of
+   this case, and the plan states them up front: the rule gets
+   `direct: false` — validation allows `direct: true` on only one connector
+   of an account, a DM having no team, and the first team keeps it; and the
+   account must be a **member of the new team** before its connector can
+   connect, which the room step gives it (`add-to-channel` through the new
+   team's profile adds the membership first) — so the room step runs
+   **before** the configuration write here too, or the reload leaves the new
+   connector degraded until it does.
 
 5. **Apply**: `reload`, or `start` when the gateway is stopped — the
    `coop-apply-config` steps.
