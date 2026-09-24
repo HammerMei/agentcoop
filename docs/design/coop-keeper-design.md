@@ -872,3 +872,6 @@ pull request:
 15. Make a step fail mid-plan (revoke the admin token after step 1 of a
     removal): the keeper stops, reports steps 1 done and 2–3 not, undoes
     nothing, and the repair proceeds as individual confirmed steps.
+16. Remove an agent's bot on one server while its bot on another survives:
+    the account is gone from the first server and the username is still in
+    the shared agent-chain list.
