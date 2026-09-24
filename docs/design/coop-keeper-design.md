@@ -110,11 +110,10 @@ shipped file adds an `in-use` line; removing one flips its line to
 removes what that release shipped. Skill directories carry a `coop-` prefix
 so an operator's own skill cannot collide with an owned path.
 
-This replaced an earlier rule — replace the whole tree, preserving only
-`.claude/settings.local.json` — during implementation. That rule needed the
-system to know every file a CLI might write into the directory, and it wiped
-anything the keeper or the operator had saved there; a leftover file is the
-smaller harm. The `builtin/` directory exists so that an operator can see
+Replacing the whole tree while preserving a named list of files was
+rejected: it requires knowing every file a CLI might write into the
+directory, and it destroys what the keeper or the operator saved there; a
+leftover file is the smaller harm. The `builtin/` directory exists so that an operator can see
 which agents are the system's; an operator who wants a customised keeper
 copies it under `user/`. Unlike `contexts/`, there is no per-file "locally
 modified" check on the owned paths: protecting local edits to them would
@@ -220,14 +219,13 @@ shipped `opencode.json` denies the same three paths to OpenCode's `read` and
 to the working directory); and the keeper reads configuration only through
 `coop config show --json` and `--raw --json`, whose output is secret-masked
 (§3.10). The residuals are known and documented rather than engineered away:
-a shell command may reach the file. On Claude Code the lab found none that
-did: with the shipped file, the Read tool, `cat`, `head` and `cp` of
-`config.yaml` were all denied outright. On OpenCode a `cat` of a path outside
-the working directory falls to `external_directory`'s default `ask` and
-prompts, while `head`, `sed` or a variable expansion, which OpenCode infers
-no path from, run (lab: `head` returned the top of the file) — and on
-OpenCode v1 an "always allow" answer to any read prompt overrides configured
-denies for that session. Closing these would
+a shell command may reach the file. On Claude Code none is known to: with
+the shipped file, the Read tool, `cat`, `head` and `cp` of `config.yaml` are
+all denied outright. On OpenCode a `cat` of a path outside the working
+directory falls to `external_directory`'s default `ask` and prompts, while
+`head`, `sed` or a variable expansion, which OpenCode infers no path from,
+run and return the file — and on OpenCode v1 an "always allow" answer to any
+read prompt overrides configured denies for that session. Closing these would
 mean chasing a perfect rule set for an agent that runs on the operator's own
 machine, with the operator's own access to the files; the rule set here is
 deliberately the reasonable one.
@@ -283,13 +281,12 @@ with the one-line `CLAUDE.md` beside it (§3.1), and two files that pin the
 bot's CLI to its built-in agent — `opencode.json` with `default_agent:
 build`, `.claude/settings.json` with `agent: ""` — created once and never
 overwritten. Without them a bot inherits whatever default agent the
-operator's own CLI configuration names, and answers as that persona (lab,
-scenario 4: a bot replied in the operator's personal agent's voice). Not a
+operator's own CLI configuration names, and answers as that persona. Not a
 common setup, but the safer default; the operator may edit the files. On
 Claude Code the write of `.claude/settings.json` into the agent's directory
 prompts even under the allow rule — the CLI guards `.claude/` directories
-themselves (lab, Claude column, scenario 2) — so it is the one step of a
-plan that asks the operator; a refusal is reported and the plan goes on. A directory that already
+themselves — so it is the one step of a plan that asks the operator; a
+refusal is reported and the plan goes on. A directory that already
 exists at that path and is not empty is not adopted: the name is refused
 with the reason, because creation would rewrite its `AGENTS.md` and a later
 removal would delete it. Its content is determined by what the operator said: text supplied verbatim is
@@ -372,12 +369,13 @@ A persona change rewrites the agent's `AGENTS.md` and changes nothing in
 `config.yaml`, so `reload` has nothing to apply. On Claude Code
 the gateway launches a fresh `claude` process for every turn with
 `--system-prompt-snapshot off` (`gateway/agents/claude/adapter.py`), so the
-rewritten file is read on the bot's next turn without further action. Whether
-an OpenCode session re-reads its instruction file mid-session is not
-established; the plan for a persona change therefore offers
-`coop reset '<connector>:*'` for each connector of the agent (§3.4) — all of
-them share the one persona file, and a fresh session does read it — as a
-confirmed runtime step, and states that on Claude Code it is optional.
+rewritten file is read on the bot's next turn without further action; an
+OpenCode session rebuilds its system prompt from the instruction file on
+every model step (opencode 1.18, `session/instruction.ts`), so the same holds
+there. The plan for a persona change still offers `coop reset
+'<connector>:*'` for each connector of the agent (§3.4) — all of them share
+the one persona file — as an optional, confirmed runtime step: it gives the
+bot a clean session rather than a mid-conversation change of voice.
 For an agent whose working directory is outside `agents/user/`, the keeper
 reports that it does not manage that agent's persona file and leaves the
 operator to edit it. A working directory shared by more than one agent is a
@@ -500,9 +498,9 @@ that dies mid-plan leaves nothing to clean up by hand. It lives under
 `~/.agentcoop/agents/`, not in the keeper's directory, because it guards the
 deployment, not one copy of the keeper — and under `agents/` rather than
 `~/.agentcoop/` itself because that is the one directory both CLIs'
-permission files already open to the keeper (§3.9); creating the lock at
-`~/.agentcoop/plan.lock` prompted on OpenCode on every plan (lab, scenario 2).
-No agent can be named `plan.lock`: the agent-name pattern has no `.`.
+permission files already open to the keeper (§3.9) — a lock directly under
+`~/.agentcoop/` prompts on OpenCode on every plan. No agent can be named
+`plan.lock`: the agent-name pattern has no `.`.
 
 After the write, `coop config reload --dry-run` runs as a guard, not a
 preview: it is the daemon's own account of what the confirmed edit will do,
@@ -545,10 +543,9 @@ empty-directory check, `date` for the lock's expiry, `which` — and the
 too, §3.8);
 deny the credential files named in §3.3. Everything else prompts, which is
 Claude Code's default. The rules take effect only after the operator has
-accepted Claude Code's workspace-trust dialog for the directory (lab: until
-then every `coop` command prompted, and a headless session was refused all
-four session-start reads); the install and user documentation say to accept
-it. The allow list is derived from what the four skills
+accepted Claude Code's workspace-trust dialog for the directory — until
+then every `coop` command prompts, and a headless session is refused even the
+session-start reads; the install and user documentation say to accept it. The allow list is derived from what the four skills
 actually execute (`tests/unit/test_coop_keeper_shipped.py` walks the skills),
 so a skill that gains a new command adds it here in the same change.
 
@@ -694,7 +691,7 @@ of `admin-profiles.yaml` moves from the current directory to
 `~/.agentcoop/admin-profiles.yaml`; `--config` and `COOP_ADMIN_CONFIG` still
 override it. The default `--log-file` moves the same way, to
 `~/.agentcoop/coop-provision.log`: the keeper runs the command from
-`builtin/coop-keeper/`, which an upgrade replaces wholesale (§3.1), and the
+`builtin/coop-keeper/`, whose owned files an upgrade refreshes (§3.1), and the
 full API error log is exactly what an operator needs after a failed plan.
 
 ### 3.11 Skills

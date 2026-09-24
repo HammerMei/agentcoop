@@ -153,8 +153,9 @@ A change to an agent's `AGENTS.md` under `~/.agentcoop/agents/user/<agent>/`
 is a plan of its own with no configuration write: show the new text, ask, write
 the file. Then offer `coop reset '<connector>:*'` for each connector of the
 agent (from `coop config show --json`: connectors named by rules whose `agent`
-is this agent) so a fresh session reads it; the gateway's Claude bots read the
-file on their next turn without a reset, and the plan says so. An agent whose
+is this agent) as an optional step: bots on either backend read the rewritten
+file on their next turn without it, and the plan says so; the reset gives a
+bot a clean session instead of a mid-conversation change of voice. An agent whose
 working directory is outside `agents/user/` is not yours to edit: say where the
 file is and leave it to the operator. A working directory shared by several
 agents is a shared thing: name every agent the edit reaches.
