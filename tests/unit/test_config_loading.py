@@ -93,9 +93,9 @@ class TestWorkingDirectoryValidation(unittest.TestCase):
     def test_tilde_working_directory_is_expanded(self):
         """Regression: working_directory: ~/foo must expand to the user's home
         directory, not be treated as a literal relative path segment named
-        '~' under the config file's directory (config.example.yaml and the
-        install-agent.md walkthroughs document `~/...` working_directory
-        values, so this must actually work)."""
+        '~' under the config file's directory (config.example.yaml and
+        INSTALL.md document `~/...` working_directory values, so this must
+        actually work)."""
         with tempfile.TemporaryDirectory() as home_dir:
             subdir = Path(home_dir) / "agent-work"
             subdir.mkdir()
@@ -499,10 +499,8 @@ class TestCacheDirGlobalResolution(unittest.TestCase):
 
 class TestDollarVarIsALiteralString(unittest.TestCase):
     """docs/design/config-tool.md decision 6, final revision: GatewayConfig.
-    from_file() no longer expands $VAR/${VAR} at all — secrets live directly
-    in config.yaml, and any pre-existing .env-backed config is auto-migrated
-    into that form (gateway/config_migrate.py) before this loader ever runs.
-    A string that happens to look like a placeholder — resolvable or not —
+    from_file() does not expand $VAR/${VAR} at all — secrets live directly
+    in config.yaml. A string that happens to look like a placeholder — resolvable or not —
     is accepted and used exactly as written, same as any other string; this
     also sidesteps the case a real secret's own value merely happens to
     resemble ${SOMETHING}."""

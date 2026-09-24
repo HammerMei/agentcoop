@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import shlex
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,7 +21,9 @@ CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 DEFAULT_CONFIG = os.environ.get("COOP_CONFIG", str(RUNTIME_DIR / "config.yaml"))
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
+    """The full `coop` argparse tree, separate from main() so tests can parse a
+    command line (the coop-keeper skills' commands, say) without running it."""
     parser = argparse.ArgumentParser(
         prog="coop",
         description="Standalone service bridging Rocket.Chat rooms to agent sessions",
@@ -132,17 +133,6 @@ def main():
              "bring the watcher back — use 'reset' there",
     )
     _watcher_target(expire_p)
-
-    # onboard
-    onboard_p = sub.add_parser(
-        "onboard",
-        help="Interactive setup wizard (run after install or to update config)",
-    )
-    onboard_p.add_argument(
-        "--repo-path",
-        default=None,
-        help="Path to the AgentCoop repo (stored in install metadata)",
-    )
 
     # upgrade
     sub.add_parser("upgrade", help="Upgrade AgentCoop to the latest version")
@@ -380,15 +370,6 @@ def main():
     )
     config_backends_p.add_argument("--json", action="store_true", help="Emit as JSON")
 
-    config_migrate_env_p = config_sub.add_parser(
-        "migrate-env",
-        help="One-time: fold .env secrets into config.yaml as literal values, then remove .env",
-    )
-    config_migrate_env_p.add_argument(
-        "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
-    )
-
     # schedule (sub-subcommands)
     schedule_p = sub.add_parser("schedule", help="Manage scheduled agent tasks")
     schedule_sub = schedule_p.add_subparsers(dest="schedule_cmd", help="Schedule subcommands")
@@ -473,6 +454,11 @@ def main():
         ),
     )
 
+    return parser
+
+
+def main():
+    parser = _build_parser()
     args = parser.parse_args()
 
     if not args.command:
@@ -502,10 +488,8 @@ def main():
         # Before stop_daemon(), not after: validating inside the start half
         # would stop a healthy running gateway and then refuse to restart it,
         # leaving the operator worse off than before the command.
-        # Asked, not assumed: with nothing running, stop_daemon() no-ops and
-        # start_daemon() can complete a pending migration exactly as `start`
-        # would, so refusing there would demand a separate command for no gain.
-        # The flag means what its name says only if it is measured.
+        # Asked, not assumed: the flag means what its name says only if it
+        # is measured.
         running, _pid = is_running()
         _validate_or_exit(args.config, stops_a_running_gateway=running)
         stop_daemon()
@@ -594,10 +578,6 @@ def main():
 
     elif args.command in _LIFECYCLE_VERBS:
         _run_lifecycle_verb(args)
-
-    elif args.command == "onboard":
-        from .onboard import run_onboard
-        run_onboard(repo_path=Path(args.repo_path) if args.repo_path else None)
 
     elif args.command == "upgrade":
         from .upgrade import run_upgrade
@@ -888,8 +868,6 @@ def _run_config(args) -> None:
         _run_config_backends(args)
     elif args.config_cmd in ("add", "remove", "patch"):
         _run_config_edit(args)
-    elif args.config_cmd == "migrate-env":
-        _run_config_migrate_env(args)
     else:
         print(f"Unknown config subcommand: {args.config_cmd}", file=sys.stderr)
         sys.exit(1)
@@ -909,73 +887,8 @@ def _validate_or_exit(config_path: str, *, stops_a_running_gateway: bool = False
     BEFORE forking (and, for `restart`, before stopping the running daemon), so
     the errors land on the terminal rather than in the log the daemon redirects
     into.
-
-    **A pending `.env` migration is performed here for `start`, refused for
-    `restart`.** `validate_config()` reads the raw document, where an unmigrated
-    `${RC_URL}` is still a literal string that fails the URL check — so validating
-    the unmigrated file would reject every config the daemon is about to migrate.
-
-    For `start` the answer is to migrate first, right here, and validate the
-    result. Skipping validation and leaving the migration to the daemon was
-    tried, and it reopened the hole this preflight closes: the migration's save
-    keeps errors the file already had, and `from_file()` accepts what
-    `validate_config()` refuses, so any config with a `.env` beside it booted
-    unvalidated. Nothing is running to damage, so migrating pre-fork is safe; the
-    daemon's own migration remains and is a no-op once `.env` is gone. A
-    migration that raises leaves both files untouched and refuses with the reason.
-
-    For `restart` migrating is not the question — `stop_daemon()` runs next, and
-    a config that cannot load would take a healthy gateway down and leave it
-    down, which is the outage the validate-before-stop order exists to prevent.
-    So `restart` refuses instead, and names the way through.
     """
-    from .config_migrate import has_pending_migration, migrate_env_to_config
     from .config_validate import validate_config
-
-    if has_pending_migration(config_path) and not stops_a_running_gateway:
-        # Nothing is running to protect, so do here what the daemon would have
-        # done after the fork — and then validate the RESULT. Deferring to the
-        # daemon deferred validation with it: the migration's save keeps errors
-        # the file already had, and the loader accepts what the validator refuses,
-        # so an env-backed config skipped the very gate this preflight is. The
-        # daemon's own migration stays, and is a no-op once `.env` is gone.
-        try:
-            migration = migrate_env_to_config(config_path)
-        except Exception as exc:
-            # A raise before the save leaves both files untouched; a raise after
-            # it (the `.env` move, the backup chmod) leaves config.yaml already
-            # rewritten. This handler cannot tell which, so it names where to look.
-            print(f"[ERROR] {config_path}: .env migration failed: {type(exc).__name__}: {exc}\n"
-                  f"  [ERROR] config.yaml may already have been rewritten and .env moved — "
-                  f"check {Path(config_path).parent / '.config-backups'} before retrying.",
-                  file=sys.stderr)
-            sys.exit(1)
-        if migration.migrated:
-            print(f"Migrated {migration.ref_count} secret reference(s) from .env into "
-                  f"{config_path}; .env moved to {migration.env_backup_path}")
-            # `start_daemon()` forks twice. An unflushed line in a block-buffered
-            # stdout (a pipe, a file) is inherited by every process and printed
-            # by each one that flushes on exit — three copies of one notice.
-            sys.stdout.flush()
-    elif stops_a_running_gateway and has_pending_migration(config_path):
-        # Every command named below is one the operator is meant to paste. A
-        # bare `coop config migrate-env` targets DEFAULT_CONFIG, so when this
-        # refusal came from an explicit `--config`, the paste would migrate and
-        # start a DIFFERENT file and leave this one refusing exactly as before.
-        # Empty for the default path, which needs no flag and reads better without.
-        sel = "" if config_path == DEFAULT_CONFIG else f" --config {shlex.quote(config_path)}"
-        print(
-            f"[ERROR] {config_path}: a .env file still sits beside it, so its "
-            f"secrets have not been folded in yet — refusing to restart, because "
-            f"stopping the gateway before that migration is what would leave it "
-            f"down.\n"
-            f"  [ERROR] Complete the migration first: 'coop config migrate-env"
-            f"{sel}', then 'coop restart{sel}'. (A 'coop stop' followed by "
-            f"'coop start{sel}' does it too — start migrates before it forks.)\n"
-            f"  [ERROR] If that .env is a leftover you no longer need, delete it.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     try:
         result = validate_config(config_path)
@@ -1397,37 +1310,6 @@ def _run_config_backends(args) -> None:
             print(f"{backend_type:<10} {info['command']:<10} {where}")
     sys.exit(0)
 
-
-def _run_config_migrate_env(args) -> None:
-    """Handle 'config migrate-env': the same one-time migration
-    gateway/daemon.py's start_daemon() runs automatically on every server
-    start — exposed standalone for a manual run, a dry check before
-    starting the gateway, or Docker's entrypoint script. No-op (exit 0,
-    clear message) if there's no .env to migrate."""
-    from .config_migrate import migrate_env_to_config
-
-    try:
-        result = migrate_env_to_config(args.config)
-    except Exception as e:
-        # Broad on purpose, matching gateway/daemon.py's own handling of
-        # this exact function: ValueError (unresolvable $VAR), OSError
-        # (FileNotFoundError, a PermissionError from env_path.rename()),
-        # and yaml.YAMLError (malformed config.yaml, from EditableConfig.
-        # load()'s yaml.safe_load()) all need the same clean treatment here
-        # — a raw traceback for any of them defeats the point of this
-        # command existing as a friendly, standalone entry point.
-        print(f"✗ Migration failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if not result.migrated:
-        print("Nothing to migrate — no .env file found.")
-        return
-
-    print(
-        f"✓ Migrated {result.ref_count} secret reference(s) from .env into "
-        f"{args.config}."
-    )
-    print(f"  .env moved to {result.env_backup_path}")
 
 
 def _run_instructions(args) -> None:

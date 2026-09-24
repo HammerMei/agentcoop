@@ -30,12 +30,6 @@ subcommand:
 ```bash
 # Validate config.yaml without starting the daemon or opening the TUI
 coop config validate [--lint]
-
-# One-time: fold .env secrets into config.yaml as literal values, then
-# remove .env (also runs automatically the next time you start the daemon
-# or open the TUI, if it detects a .env-backed config — this lets you do it
-# as a manual step or a dry run instead)
-coop config migrate-env
 ```
 
 ## Layout

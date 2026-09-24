@@ -1694,8 +1694,8 @@ def sanitize_pipe_message(message: str) -> str:
     daemon startup handshake pipe's line-oriented `info:`/`error:`/`ok`
     protocol — an embedded newline would split one message into multiple,
     unparseable protocol lines. Shared by `_write_startup_signal()` below
-    AND `gateway/daemon.py`'s own pipe writes (lock-acquire/config-
-    migration/config-load/service-crash failures) — code-review finding:
+    AND `gateway/daemon.py`'s own pipe writes (lock-acquire/config-load/
+    service-crash failures) — code-review finding:
     those two files used to each keep an independent inline copy of this
     exact sanitization, applied inconsistently (only 2 of daemon.py's 5
     write sites), so this is now the one place it's defined."""

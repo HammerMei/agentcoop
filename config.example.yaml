@@ -12,10 +12,7 @@
 # the `description:` field on an entry or template for a note that survives.
 #
 # $VAR / ${VAR} is NOT expanded — a value that happens to look like one is
-# used exactly as written, like any other string. (If you're upgrading from
-# an older setup that used a `.env` file with $VAR references, the next
-# `coop start` — or opening `coop config` —
-# migrates those into literal values here automatically, one-time.)
+# used exactly as written, like any other string.
 #
 # ── Format notes (v0.3+) ──────────────────────────────────────────────────────
 # This example uses the compact config format: named, reusable top-level

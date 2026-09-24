@@ -67,11 +67,8 @@ class FieldSpec:
     # Masks the widget's display (Input(password=True)). docs/design/
     # config-tool.md decision 6, final revision: secrets are stored
     # directly in config.yaml (chmod 0600) and $VAR/${VAR} is never
-    # resolved by anything but the one-time migration
-    # (gateway/config_migrate.py) — by the time this screen opens, a
-    # pre-existing .env-backed config has already been migrated (the TUI
-    # launch path triggers it, same as `coop start`), so a
-    # secret field's value is always its real, literal value here.
+    # resolved, so a secret field's value is always its real, literal
+    # value here.
     secret: bool = False
 
 

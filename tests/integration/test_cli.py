@@ -477,145 +477,6 @@ class TestCLIConfigValidate(_CLITestBase):
         self.assertIn("discard", stdout)
 
 
-class TestCLIConfigMigrateEnv(_CLITestBase):
-    """config migrate-env: standalone entry point for the same one-time
-    migration gateway/daemon.py's start_daemon() runs automatically."""
-
-    def setUp(self):
-        super().setUp()
-        self.agent_dir = Path(self.tmp) / "work"
-        self.agent_dir.mkdir()
-
-    def _write(self, yaml_text: str) -> str:
-        path = Path(self.tmp) / "config.yaml"
-        path.write_text(textwrap.dedent(yaml_text))
-        return str(path)
-
-    def _run_migrate(self, config_path: str):
-        return self._run(["config", "migrate-env", "--config", config_path])
-
-    def test_missing_config_path_reports_an_error_not_a_false_success(self):
-        """Round-2 code-review finding: a missing config path used to be
-        reported as a false 'Nothing to migrate' success (exit 0) whenever
-        no .env sat alongside it — because the .env-exists check ran before
-        confirming config.yaml itself existed. Must now report the missing
-        file clearly and exit non-zero."""
-        missing_path = str(Path(self.tmp) / "does-not-exist.yaml")
-        self.assertFalse(Path(missing_path).exists())
-
-        stdout, stderr, code = self._run_migrate(missing_path)
-
-        self.assertEqual(code, 1)
-        self.assertIn("Migration failed", stderr)
-        self.assertNotIn("Nothing to migrate", stdout)
-
-    def test_no_env_file_reports_nothing_to_do(self):
-        cfg_path = self._write(f"""\
-            connectors:
-              - name: rc
-                type: rocketchat
-                server: {{url: http://localhost:3000, username: bot, password: pw}}
-            agents:
-              default:
-                type: claude
-                working_directory: {self.agent_dir}
-            watcher_rules:
-              - name: w1
-                connector: rc
-                agent: default
-                rooms:
-                  include: [general]
-        """)
-        stdout, stderr, code = self._run_migrate(cfg_path)
-
-        self.assertEqual(code, 0)
-        self.assertIn("Nothing to migrate", stdout)
-
-    def test_migrates_and_reports_the_reference_count(self):
-        cfg_path = self._write(f"""\
-            connectors:
-              - name: rc
-                type: rocketchat
-                server: {{url: http://localhost:3000, username: bot, password: "${{RC_PASSWORD}}"}}
-            agents:
-              default:
-                type: claude
-                working_directory: {self.agent_dir}
-            watcher_rules:
-              - name: w1
-                connector: rc
-                agent: default
-                rooms:
-                  include: [general]
-        """)
-        (Path(self.tmp) / ".env").write_text("RC_PASSWORD=hunter2\n")
-
-        stdout, stderr, code = self._run_migrate(cfg_path)
-
-        self.assertEqual(code, 0)
-        self.assertIn("Migrated 1 secret reference(s)", stdout)
-        self.assertFalse((Path(self.tmp) / ".env").exists())
-        raw = yaml.safe_load(Path(cfg_path).read_text())
-        self.assertEqual(raw["connectors"][0]["server"]["password"], "hunter2")
-
-    def test_unresolvable_reference_exits_nonzero(self):
-        cfg_path = self._write(f"""\
-            connectors:
-              - name: rc
-                type: rocketchat
-                server: {{url: http://localhost:3000, username: bot, password: "${{MISSING_VAR}}"}}
-            agents:
-              default:
-                type: claude
-                working_directory: {self.agent_dir}
-            watcher_rules:
-              - name: w1
-                connector: rc
-                agent: default
-                rooms:
-                  include: [general]
-        """)
-        (Path(self.tmp) / ".env").write_text("UNRELATED=1\n")
-
-        stdout, stderr, code = self._run_migrate(cfg_path)
-
-        self.assertEqual(code, 1)
-        self.assertIn("Migration failed", stderr)
-        self.assertTrue((Path(self.tmp) / ".env").exists())
-
-    def test_plain_oserror_is_caught_cleanly_not_a_raw_traceback(self):
-        """Code-review finding: the original except clause only caught
-        (ValueError, FileNotFoundError) — a plain OSError (e.g. a
-        PermissionError from env_path.rename()) would have crashed with an
-        unhandled traceback instead of the clean '✗ Migration failed' message."""
-        cfg_path = self._write(f"""\
-            connectors:
-              - name: rc
-                type: rocketchat
-                server: {{url: http://localhost:3000, username: bot, password: pw}}
-            agents:
-              default:
-                type: claude
-                working_directory: {self.agent_dir}
-            watcher_rules:
-              - name: w1
-                connector: rc
-                agent: default
-                rooms:
-                  include: [general]
-        """)
-
-        with patch(
-            "gateway.config_migrate.migrate_env_to_config",
-            side_effect=OSError("disk full"),
-        ):
-            stdout, stderr, code = self._run_migrate(cfg_path)
-
-        self.assertEqual(code, 1)
-        self.assertIn("Migration failed", stderr)
-        self.assertIn("disk full", stderr)
-
-
 # ---------------------------------------------------------------------------
 # Tests: status command
 # ---------------------------------------------------------------------------
@@ -2535,17 +2396,6 @@ class _PreflightBase(unittest.TestCase):
         watcher_rules:
         """)
 
-    _ENV_BACKED = textwrap.dedent("""\
-        connectors:
-          - name: rc
-            type: rocketchat
-            server: {url: "${RC_URL}", username: bot, password: pw}
-        agents:
-          default: {type: claude, working_directory: /tmp}
-        watcher_rules:
-          - {name: w1, agent: default, connector: rc, rooms: {include: [general]}}
-        """)
-
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -2587,10 +2437,7 @@ class _PreflightBase(unittest.TestCase):
         main = _import_main()
         out, err = io.StringIO(), io.StringIO()
         code = 0
-        # `start` migrates in-process now, and the migration's `load_dotenv`
-        # writes the `.env` values into os.environ. Restore the environment
-        # after every case, or one test's RC_URL leaks into the next file's.
-        with patch.dict(os.environ), patch.object(sys, "argv", ["coop"] + argv), \
+        with patch.object(sys, "argv", ["coop"] + argv), \
                 redirect_stdout(out), redirect_stderr(err):
             try:
                 main()
@@ -2675,35 +2522,9 @@ class TestStartValidatesConfig(_PreflightBase):
         start.assert_called_once_with(cfg)
 
     # ── The preconditions the daemon's own boot sequence checks before
-    # `from_file()` — is_running → lock → migrate_env_to_config → from_file.
-    # Round 1 varied none of them: every test used a clean config with no
-    # `.env`, no lock and valid YAML, so the preflight's blindness to all
-    # three went unseen until review read it.
-
-
-    def test_a_pending_env_migration_skips_validation_rather_than_blocking_it(self):
-        """An unmigrated `${VAR}` is a literal string to `validate_config()`, so
-        validating before the daemon's migration would refuse every config the
-        migration exists to fix — and the migration runs after the fork, so it
-        could never be reached."""
-        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = self._write(self._ENV_BACKED)
-        # Precondition: this really is a config validate_config() rejects.
-        from gateway.config_validate import validate_config
-        self.assertFalse(validate_config(cfg).ok,
-                         "config must be rejected while the placeholder is literal")
-        with patch("gateway.daemon.start_daemon") as start:
-            self._run(["start", "--config", cfg])
-        start.assert_called_once_with(cfg)
-
-    def test_once_migrated_the_same_config_is_validated_again(self):
-        """The skip lasts exactly as long as `.env` does — one boot, not forever."""
-        cfg = self._write(self._ENV_BACKED)          # no .env beside it
-        with patch("gateway.daemon.start_daemon") as start:
-            _, err, code = self._run(["start", "--config", cfg])
-        self.assertEqual(code, 1)
-        start.assert_not_called()
-        self.assertIn("does not look like a URL", err)
+    # `from_file()` — is_running → lock → from_file. Round 1 varied none of
+    # them: every test used a clean config with no lock and valid YAML, so the
+    # preflight's blindness to them went unseen until review read it.
 
     def test_malformed_yaml_is_a_cli_error_not_a_traceback(self):
         """`collect_config()` lets YAMLError escape. The daemon used to catch it
@@ -2740,62 +2561,15 @@ class TestStartValidatesConfig(_PreflightBase):
         stop.assert_called_once()
         start.assert_called_once_with(cfg)
 
-    # ── Round 2 landed inside round 1's fix: the migration skip was written for
-    # `start`, where nothing is running to damage, and `restart` inherited it.
-
-    def test_restart_refuses_a_pending_migration_instead_of_stopping_first(self):
-        """`restart` runs stop_daemon() next, so deferring validation the way
-        `start` does would take a healthy gateway down for a config that cannot
-        load — the outage the validate-before-stop order exists to prevent."""
-        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = self._bad_config()
-        with patch("gateway.daemon.is_running", return_value=(True, 4242)), \
-                patch("gateway.daemon.stop_daemon") as stop, \
-                patch("gateway.daemon.start_daemon") as start:
-            _, err, code = self._run(["restart", "--config", cfg])
-        self.assertEqual(code, 1)
-        stop.assert_not_called()
-        start.assert_not_called()
-        self.assertIn("coop config migrate-env", err)
-
-    def test_restart_refuses_a_pending_migration_even_when_the_config_is_valid(self):
-        """Deliberate: the preflight cannot judge the post-migration document
-        without resolving `.env` into the process environment, so it declines to
-        guess. A stale or empty `.env` lands here too, which is the point — the
-        operator is shown the file and can delete it."""
-        (self.tmp / ".env").write_text("")
-        cfg = self._warning_only_config()
-        with patch("gateway.daemon.is_running", return_value=(True, 4242)), \
-                patch("gateway.daemon.stop_daemon") as stop, \
-                patch("gateway.daemon.start_daemon") as start:
-            _, err, code = self._run(["restart", "--config", cfg])
-        self.assertEqual(code, 1)
-        stop.assert_not_called()
-        start.assert_not_called()
-        self.assertIn("delete it", err)
-
-    def test_start_still_defers_a_pending_migration(self):
-        """The refusal is `restart`'s alone — `start` has no running gateway to
-        take down, so the daemon's own fail-closed migration stays in charge."""
-        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = self._write(self._ENV_BACKED)
-        with patch("gateway.daemon.start_daemon") as start:
-            self._run(["start", "--config", cfg])
-        start.assert_called_once_with(cfg)
-
-
 class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
     """One case per precondition the daemon inspects before `from_file()`.
 
     The boot sequence in `gateway/daemon.py` is the spec:
 
-        is_running → runtime lock → migrate_env_to_config
-                                      (config exists? → `.env`? → resolve)
-                                    → chmod → GatewayConfig.from_file
+        is_running → runtime lock → chmod → GatewayConfig.from_file
 
     Three review rounds each surfaced another entry the preflight did not know
-    about — is_running and the migration, then the migration again on the
-    `restart` path, then a missing config and a `resolve()` failure mode. Every
+    about — is_running, then a missing config and a `resolve()` failure mode. Every
     one was the same defect wearing a different hat, so the answer is this table
     rather than a fourth patch: an uncovered precondition now fails here instead
     of in a review.
@@ -2830,18 +2604,6 @@ class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
                 self.assertIn("Config file not found", r["err"])
                 self.assertNotIn("Traceback", r["err"])
 
-    def test_a_missing_config_beside_an_env_file_still_reads_as_missing(self):
-        """Not as a pending migration: `coop config migrate-env` cannot succeed
-        on a file that is not there, so recommending it would misdirect."""
-        (self.tmp / ".env").write_text("X=1\n")
-        cfg = str(self.tmp / "nope.yaml")
-        for verb in ("start", "restart"):
-            with self.subTest(verb=verb):
-                r = self._case(verb, cfg)
-                self.assertEqual(r["code"], 1)
-                self.assertIn("Config file not found", r["err"])
-                self.assertNotIn("migrate-env", r["err"])
-
     def test_a_symlink_loop_on_the_config_path_is_a_controlled_error(self):
         """`Path.resolve()` raises `RuntimeError` on 3.12 and returns the
         unresolved path on 3.13, so this asserts the outcome rather than the
@@ -2855,86 +2617,6 @@ class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
         self.assertFalse(r["started"])
         self.assertIn("[ERROR]", r["err"])
         self.assertNotIn("Traceback", r["err"])
-
-    def test_a_pending_migration_crossed_with_whether_a_gateway_is_running(self):
-        """The cross this table originally missed, which is how round 4 found a
-        defect the enumeration was supposed to prevent: the first version of
-        this row asserted that `restart` refuses, full stop, and so wrote the
-        bug in as the specification. Refusal is only correct when there is a
-        running gateway to protect."""
-        # One fixture per case: `start` now MIGRATES, which consumes the `.env`,
-        # so a shared fixture would leave the later cases nothing to refuse.
-        def fresh():
-            (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-            return self._write(self._ENV_BACKED)
-
-        r = self._case("start", fresh())
-        self.assertTrue(r["started"], "start migrates, validates the result, proceeds")
-        self.assertFalse((self.tmp / ".env").exists(), "the migration ran here, pre-fork")
-
-        r = self._case("restart", fresh())
-        self.assertTrue(r["started"], "nothing to protect — restart is a start")
-        self.assertTrue(r["stopped"], "stop_daemon() still runs; with nothing up it no-ops")
-
-        r = self._case("restart", fresh(), running=(True, 4242))
-        self.assertEqual(r["code"], 1)
-        self.assertFalse(r["stopped"], "a healthy gateway must not be stopped")
-        self.assertIn("migrate-env", r["err"])
-        self.assertTrue((self.tmp / ".env").exists(), "refusal touches nothing")
-
-    def test_an_env_backed_config_is_validated_after_its_migration_not_skipped(self):
-        """The round-6 finding, and the one that mattered: `start` used to skip
-        validation whenever a `.env` sat beside the config, on the theory that
-        the daemon would migrate. It did — and `EditableConfig.save()` keeps
-        errors the file already had, and `from_file()` accepts an empty password
-        that `validate_config()` rejects. So every env-backed config booted past
-        the gate this increment exists to add. Now: migrate, THEN validate."""
-        (self.tmp / ".env").write_text("")          # nothing to resolve; still "pending"
-        cfg = self._write(self._ENV_BACKED.replace('"${RC_URL}"', "https://chat.example.com")
-                                          .replace("password: pw", 'password: ""'))
-        for verb in ("start", "restart"):
-            with self.subTest(verb=verb):
-                (self.tmp / ".env").write_text("")
-                r = self._case(verb, cfg)
-                self.assertEqual(r["code"], 1)
-                self.assertFalse(r["started"] or r["stopped"])
-                self.assertIn("password is empty", r["err"])
-                # The migration itself succeeded and is deliberately kept: it is
-                # what the daemon would have done, and the next start validates
-                # the same file the same way.
-                self.assertFalse((self.tmp / ".env").exists())
-
-    def test_a_migration_that_cannot_resolve_refuses_and_changes_nothing(self):
-        """`migrate_env_to_config()` raises on an unresolvable reference and
-        leaves both files untouched; the preflight must say exactly that."""
-        (self.tmp / ".env").write_text("")
-        # A name no test and no shell defines — RC_URL itself may already sit in
-        # os.environ from an earlier case, and that would resolve it.
-        cfg = self._write(self._ENV_BACKED.replace("${RC_URL}", "${COOP_TEST_REF_NOBODY_SETS}"))
-        before = Path(cfg).read_text()
-        r = self._case("start", cfg)
-        self.assertEqual(r["code"], 1)
-        self.assertFalse(r["started"])
-        self.assertIn("[ERROR]", r["err"])
-        self.assertIn(".config-backups", r["err"], "the refusal says where to look, and does "
-                      "not claim nothing changed — a raise after the save has rewritten the file")
-        self.assertNotIn("nothing changed", r["err"])
-        self.assertNotIn("Traceback", r["err"])
-        self.assertEqual(Path(cfg).read_text(), before)
-        self.assertTrue((self.tmp / ".env").exists())
-
-    def test_the_refusal_shell_quotes_a_path_the_shell_would_split(self):
-        """The commands are meant to be pasted; a path with a space must survive
-        the paste as one argument."""
-        d = self.tmp / "my dir"
-        d.mkdir()
-        (d / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = d / "config.yaml"
-        cfg.write_text(self._ENV_BACKED)
-        r = self._case("restart", str(cfg), running=(True, 4242))
-        self.assertEqual(r["code"], 1)
-        self.assertIn(f"--config '{cfg}'", r["err"])
-        self.assertNotIn(f"--config {cfg}", r["err"])
 
     def test_malformed_yaml_is_a_controlled_error_for_both_verbs(self):
         cfg = self._write("connectors: [unclosed\nagents: {\n")
@@ -2964,29 +2646,6 @@ class TestPreflightCoversEveryBootPrecondition(_PreflightBase):
                 self.assertEqual(r["code"], 1)
                 self.assertFalse(r["started"] or r["stopped"])
                 self.assertNotIn("Traceback", r["err"])
-
-    def test_the_refusal_names_commands_that_target_the_config_it_refused(self):
-        """Every command in the refusal is one the operator is meant to paste.
-        A bare `coop config migrate-env` targets DEFAULT_CONFIG, so against an
-        explicit `--config` the paste would migrate a different file and leave
-        this one refusing exactly as before."""
-        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = self._write(self._ENV_BACKED)
-        r = self._case("restart", cfg, running=(True, 4242))
-        self.assertEqual(r["code"], 1)
-        for cmd in ("coop config migrate-env", "coop restart", "coop start"):
-            with self.subTest(cmd=cmd):
-                self.assertIn(f"{cmd} --config {cfg}", r["err"])
-
-    def test_the_refusal_omits_the_flag_for_the_default_config(self):
-        """The flag is noise when it names the path the command already uses."""
-        (self.tmp / ".env").write_text("RC_URL=https://chat.example.com\n")
-        cfg = self._write(self._ENV_BACKED)
-        with patch("gateway.cli.DEFAULT_CONFIG", cfg):
-            r = self._case("restart", cfg, running=(True, 4242))
-        self.assertEqual(r["code"], 1)
-        self.assertIn("'coop config migrate-env'", r["err"])
-        self.assertNotIn("--config", r["err"])
 
     def test_a_validation_error_refuses_and_a_warning_does_not(self):
         bad = self._case("start", self._bad_config())

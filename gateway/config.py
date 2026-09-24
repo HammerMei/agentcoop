@@ -4,27 +4,15 @@ Shared config dataclasses (``PermissionConfig``, ``ToolRule``, ``AgentConfig``,
 ``ConnectorConfig``, ``WatcherConfig``) are defined in ``gateway.core.config``
 and re-exported here so existing import paths continue to work.
 
-``GatewayConfig.from_file()`` no longer resolves ``$VAR``/``${VAR}`` in
+``GatewayConfig.from_file()`` does not resolve ``$VAR``/``${VAR}`` in
 config values (docs/design/config-tool.md decision 6, final revision) —
-secrets live directly in config.yaml (``chmod 0600``), and any pre-existing
-``.env``-backed config is auto-migrated into that form on the first
-``coop start`` (``gateway/config_migrate.py``) or the config
-TUI's launch, both enforced, not optional. An audit before removing this
-found ambient (non-``.env``) ``$VAR`` resolution had no real caller anywhere
-in this project — no systemd unit, no K8s manifest, no doc recommending it,
-no committed example using it; only unit tests exercising the mechanism
-itself. ``_expand_env_vars()``/``ENV_VAR_REF_RE`` below are KEPT (not dead
-code) — ``gateway/config_migrate.py``'s one-time migration still needs them
-to resolve a legacy ``.env``-backed value into a literal at migration time;
-they're simply no longer called from the normal load path. Once migrated
-(or if a value merely happens to look like ``${SOMETHING}``), it is treated
-as a plain string like any other — deliberately, so a password that
-happens to resemble a placeholder is never silently misinterpreted.
+secrets live directly in config.yaml (``chmod 0600``). A value that happens
+to look like ``${SOMETHING}`` is treated as a plain string like any other —
+deliberately, so a password that resembles a placeholder is never silently
+misinterpreted.
 """
 
 import logging
-import os
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -685,55 +673,6 @@ def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_f
 
 
 _config_logger = logging.getLogger("coop.config")
-
-# $VAR / ${VAR} reference pattern — the one place this is defined.
-# gateway/config_migrate.py's migration imports this directly (code-review
-# finding: it used to keep its own independent copy of this exact regex,
-# which had already drifted out of sync once).
-ENV_VAR_REF_RE = re.compile(r"\$\{?\w+")
-
-
-def _expand_env_vars(obj, _path: str = ""):
-    """Recursively expand $ENV_VAR and ${ENV_VAR} in string values.
-
-    NOT called by `GatewayConfig.from_file()` (see module docstring) — the
-    real gateway loader treats `$VAR`/`${VAR}` as a plain literal string,
-    same as everything else. This function's only remaining caller is
-    `gateway/config_migrate.py`'s one-time migration, which uses it to
-    resolve a legacy `.env`-backed value into its literal form.
-
-    Raises ValueError when an unresolved placeholder (e.g. ``${MISSING_VAR}``)
-    is detected, so a migration fails loudly rather than silently writing
-    the literal placeholder string into config.yaml as if it were the real
-    secret value.
-    """
-    if isinstance(obj, str):
-        expanded = os.path.expandvars(obj)
-        # Check for unresolved placeholders on the *original* string, not the
-        # expanded result.  Scanning the expanded value causes false positives
-        # when a resolved secret itself contains a $WORD pattern (e.g. a
-        # password like "myPass$HM").  A placeholder is truly unresolved only
-        # when it still appears verbatim in the expanded output.
-        unresolved = [
-            m.group()
-            for m in ENV_VAR_REF_RE.finditer(obj)
-            if m.group() in expanded
-        ]
-        if unresolved:
-            raise ValueError(
-                f"Unresolved environment variable in config key '{_path}': {expanded!r}. "
-                f"Set the environment variable or remove the placeholder from config.yaml."
-            )
-        return expanded
-    elif isinstance(obj, dict):
-        return {
-            k: _expand_env_vars(v, f"{_path}.{k}" if _path else k)
-            for k, v in obj.items()
-        }
-    elif isinstance(obj, list):
-        return [_expand_env_vars(item, f"{_path}[{i}]") for i, item in enumerate(obj)]
-    return obj
-
 
 # ── Per-entity parsing, extracted out of GatewayConfig.from_file() ──────────
 #

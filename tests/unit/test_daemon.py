@@ -161,10 +161,10 @@ class TestWaitForStartupSignal(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
     def test_info_line_is_printed_to_the_console_on_success(self):
-        """A one-time config migration (gateway/config_migrate.py) reports
-        via an 'info:' line — must reach stdout, not just the log file, per
-        the user-requested "not a completely silent operation" ask."""
-        data = b"info:Migrated 1 secret reference(s) from .env into config.yaml.\nok\n"
+        """A startup notice reports via an 'info:' line — must reach stdout,
+        not just the log file, per the user-requested "not a completely silent
+        operation" ask."""
+        data = b"info:Migrated 1 secret reference(s) into config.yaml.\nok\n"
         read_fd = self._make_pipe_with_data(data)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             with self.assertRaises(SystemExit) as ctx:
@@ -174,7 +174,7 @@ class TestWaitForStartupSignal(unittest.TestCase):
 
     def test_info_line_is_printed_even_when_degraded(self):
         data = (
-            b"info:Migrated 1 secret reference(s) from .env into config.yaml.\n"
+            b"info:Migrated 1 secret reference(s) into config.yaml.\n"
             b"error:Some sidecar failed\nok\n"
         )
         read_fd = self._make_pipe_with_data(data)

@@ -49,9 +49,8 @@ def kind_label(kind: str) -> str:
     return _KIND_LABELS.get(kind, kind)
 
 
-# Key names whose values are masked when rendered — mirrors the fields the
-# onboard wizard already treats as secrets (gateway/onboard.py's _write_env:
-# only credentials, never url/host/team/username).
+# Key names whose values are masked when rendered — credentials only, never
+# url/host/team/username.
 _SECRET_KEY_NAMES = frozenset({"password", "secret", "token"})
 
 def provenance_label(provenance: Provenance, template_name: str | None = None) -> str:
