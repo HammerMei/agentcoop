@@ -522,9 +522,13 @@ was not told about — the keeper stops and shows it before `reload` (or
 configuration, the chat server and the daemon can all be changed by someone
 else — an operator in the TUI, an admin on the server, a message that
 creates a watcher. The keeper does not try to accommodate that. Where a step
-can detect it (the digest, a `create-user` that finds the account already
-there) it fails loudly with the error it met; otherwise the plan proceeds
-and the outcome is whatever the interleaving produced.
+can detect it — the digest; a `create-user` that finds the account already
+there, which the CLI reports as a skip with exit 0 and the keeper treats as a
+stop, since the account's password is not the generated one — it stops with
+what it met; otherwise the plan proceeds and the outcome is whatever the
+interleaving produced. A plan with two writes (§3.5's second team, §3.6's
+removal) is confirmed once on both fragments; the second is dry-run again
+after the first write and written against the digest that write returned.
 
 **No rollback.** When a step fails, the plan stops there, says exactly which
 steps completed and which did not, and does nothing to undo them. A failure

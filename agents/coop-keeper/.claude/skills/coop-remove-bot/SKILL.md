@@ -61,7 +61,11 @@ claiming the room, a message arriving now creates nothing.
 
 ## Step 2 — remove the configuration
 
-One fragment through `coop-apply-config`:
+One fragment through `coop-apply-config`. It is the second write of one
+confirmed plan ("a plan with more than one write"): before the yes its dry
+run reports only the reference to the rule step 1 removes; after step 1 it
+takes a clean dry run whose `file_digest` equals the one step 1's write
+returned, and writes with that.
 
 ```yaml
 connectors:

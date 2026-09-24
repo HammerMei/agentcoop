@@ -374,3 +374,26 @@ Notes:
 - Owner's ruling: no further Codex round; ship on green tests + CI.
 
 **Status: open.** Settles with the round-4 entry.
+
+## 2026-09-24 — PR #184 round 1 (coop-keeper PR ②)
+
+**Chain detector:** 8 findings (7 review + 1 security) on `3572ae5`, first round, `--`, no chain.
+**Control finding:** none — still no settled entry. Agreement **uncorroborated**.
+Increment: design §6 item 2. Seven of eight findings land on the keeper's prose (skills,
+AGENTS.md, design §3.8) — the artifact under review is instructions read by a model, so
+"cheap" is lines of prose.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `create-user` prints "already exists — skipping", exit 0, when an active account with the expected email exists and no connector uses it; the skill then writes a password the account does not have (P1) | true (`admin/cli.py:309-328`); loud but late (auth fails at reload); `cheap`: stop before the write, offer another name or a confirmed take-over (MM deactivate→reactivate, RC delete→create) — the owner's direction | true; `cheap`: one bullet + a §3.8 correction ("fails loudly" is wrong about the CLI) | **FIX** — both; §3.8 corrected too |
+| **F2** second team + "none" rooms → no team membership → connector cannot connect (P1) | true (only `add-to-channel` reaches `add_user_to_team`; lab saw the degrade); `cheap` text | true; `cheap` two lines; an `add-to-team` subcommand is PR ① surface | **FIX** — "none" is not an answer in the second-team case |
+| **F3** a symlinked ancestor inside the keeper dir lets the sync write outside it (P2) | scored → DROP (0.01–0.05 hits/yr, discount 0.32, unsupported manipulation per the owner) or a 2-line loud refusal | true; `cheap` runs first: one `is_relative_to` check + one test satisfies the owner's one/two-line ruling | **FIX** — rater 1 conceded on the cheaper fix (one line, existing test file), not on the score |
+| **F4/F5** a two-write plan's second fragment cannot dry-run clean before the yes and its digest is stale after write 1 (P1, P1) | true as a protocol gap; the lab keeper already did the right thing; `cheap` text, owned by `coop-apply-config` not the two callers | same, layer: apply-config; one ~4-line rule fixes both | **FIX** — one rule in apply-config: later fragments may show only the findings the earlier write removes; re-dry-run after it; write against the digest the previous write returned |
+| **F6** the post-yes dry run's new digest is adopted, bypassing the guard on the creation path (P2) | true, `silent`; `cheap`: the second digest must equal the first | true, `silent`; cheaper: write with the first digest | **FIX** — the digest must equal the first dry run's; a difference means someone else wrote |
+| **F7** presence check on `tool_presets` instead of `tool_presets.readonly-builtins` (P2) | true, `cheap` | true, `cheap` | **FIX** |
+| **F8** (security) shared agent-chain list across installations lets a same-named human bypass the sender allow-list (P2) | design §3.7 accepts and documents it; not this increment's job | true mechanism (`sender_policy.py:28`); scored: 0.001–0.1 hits/yr, keeper connectors set `filter_sender: false` so unaffected, fix 4–8 h + tax → net ≤ 0 | **DROP** — accepted in §3.7, mitigated by the template's `filter_sender: false`; revisit if that default changes |
+
+Notes:
+- Adoption: 7 of 8 (all seven through the `cheap` gate; none rests on a number). 1 DROP by design + score.
+- Finding kinds: 6 protocol/text gaps in the skills (the multi-write plan was under-specified — one concept, five findings), 1 code guard, 1 accepted design trade-off. No finding on production Python except F3.
+- Owner weighed in before triage on F1 (offer a take-over, not just a stop — adopted) and F3 (only if one/two lines — it was).

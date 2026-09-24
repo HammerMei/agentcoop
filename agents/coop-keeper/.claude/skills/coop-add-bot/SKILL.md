@@ -86,7 +86,8 @@ every `add-to-channel`.
 
 ## Shared templates (first bot only)
 
-If `show --raw --json` shows no `tool_presets`, or no `default` entry in
+If `show --raw --json` shows no `tool_presets.readonly-builtins` (a
+hand-written file may have other presets), or no `default` entry in
 `connector_templates`, `agent_templates` or `watcher_templates`, the fragment
 creates the missing ones as its first edit. They carry only what is the same
 on every server and backend:
@@ -159,7 +160,10 @@ agent this dry run reports exactly one expected error — the agent's
 cannot resolve — because the directory is created only after the yes. Show
 the plan with that noted; any other finding is a real problem in the
 fragment. After step 1 below has created the directory, run the dry run
-again: it must now be clean, and its `file_digest` is the one the write uses.
+again: it must now be clean, and its `file_digest` must equal the one the
+first dry run reported — nothing of this plan has written `config.yaml` yet,
+so a different digest means someone else did (stop, re-plan). The write
+uses that digest.
 
 ## Order of execution
 
@@ -175,6 +179,15 @@ After the yes:
    - it reports the account exists and is deactivated (Mattermost) →
      `coop-provision <profile> reactivate-user <username> --password-file <path>`;
      the plan says the old account is revived with a new password
+   - it reports `already exists … — skipping` (the account is **active** and
+     no connector of this installation uses it) → **stop before the
+     configuration write**: the account's password is not the generated one,
+     so a connector written now cannot log in. Report it, keep the password
+     file, and offer two confirmed ways on: another username; or taking the
+     account over — on Mattermost `delete-user` (deactivates) then
+     `reactivate-user --password-file <path>`, on Rocket.Chat `delete-user`
+     (permanent) then `create-user` — saying that whoever used the account
+     loses access to it. Resume only when the operator has chosen.
    - an existing connector of this installation already uses the username →
      no account; the connector step uses `--credentials-from <that connector>`.
 3. **Rooms**: `coop-provision <profile> add-to-channel <username> <room>` for
@@ -218,7 +231,8 @@ After the yes:
          agent_usernames: [alice-bot, bob]
    ```
 
-   **Second team on one installation** is the one case that takes two writes:
+   **Second team on one installation** is the one case that takes two writes
+   (`coop-apply-config`, "a plan with more than one write"):
    a fragment cannot copy another connector's credentials, so the connector is
    added with `coop config add connector <name> --type … --server-url … --team …
    --credentials-from <existing> --owner <operator> --inherits default` (dry
@@ -228,10 +242,12 @@ After the yes:
    `direct: false` — validation allows `direct: true` on only one connector
    of an account, a DM having no team, and the first team keeps it; and the
    account must be a **member of the new team** before its connector can
-   connect, which the room step gives it (`add-to-channel` through the new
-   team's profile adds the membership first) — so the room step runs
-   **before** the configuration write here too, or the reload leaves the new
-   connector degraded until it does.
+   connect, which only the room step gives it (`add-to-channel` through the
+   new team's profile adds the membership first; there is no add-to-team
+   command) — so here "none" is not an answer to the room question: the plan
+   joins at least one room of the new team (every Mattermost team has
+   `town-square`), and the room step runs **before** the configuration write,
+   or the reload leaves the new connector degraded until it does.
 
 5. **Apply**: `reload`, or `start` when the gateway is stopped — the
    `coop-apply-config` steps.

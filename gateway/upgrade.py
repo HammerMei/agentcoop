@@ -202,6 +202,8 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
 
     for rel, status in manifest.items():
         target = dst / rel
+        if not target.parent.resolve().is_relative_to(dst.resolve()):
+            raise ValueError(f"{target.parent} resolves outside {dst}; is an ancestor a symlink?")
         if status == KEEPER_OBSOLETE:
             if _remove_path(target):
                 console.print(f"  Removed obsolete coop-keeper path: {rel}")

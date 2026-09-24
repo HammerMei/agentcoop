@@ -62,6 +62,18 @@ change after the yes — a field was misread, the dry run was not clean — the
 yes is void: show the corrected plan and ask again. Never ask for a yes on a
 plan whose dry run failed.
 
+**A plan with more than one write** (a removal's two steps, the second-team
+connector and its rule) is confirmed once, on all its fragments together. Its
+first write is planned and written like any single write. Each later fragment
+is dry-run before the yes too, and may report **only** the findings the
+earlier write removes — the rule that still names a connector about to go,
+the rule that names a connector about to be created — which the plan says;
+anything else is a real problem. After the earlier write, the later fragment
+takes its own clean dry run and writes with the `file_digest` **that dry run
+returns**, which must equal the `file_digest` the plan's own previous write
+returned — the same file, changed only by this plan. A different digest
+means someone else wrote in between: stop and re-plan from step 2.
+
 ## 4. Take the lock
 
 ```
