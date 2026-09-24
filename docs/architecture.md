@@ -84,13 +84,12 @@ graph TD
 | Module | Purpose | Key Classes/Functions |
 |---|---|---|
 | **daemon.py** | Unix double-fork daemonization, PID lock, signal handling | `is_running()`, `daemonize()`, `run_daemon()` |
-| **cli.py** | argparse CLI entry point (start/stop/restart/status/list/pause/resume/reset/send/onboard/upgrade) | `main()`, command dispatch |
+| **cli.py** | argparse CLI entry point (start/stop/restart/status/list/pause/resume/reset/expire/send/config/schedule/upgrade) | `main()`, `_build_parser()`, command dispatch |
 | **service.py** | Top-level orchestrator; wires connectors + agents + permission brokers | `GatewayService`, `AgentRuntimeManager`, `ConnectorEntry` |
 | **control.py** | Unix socket ControlServer; routes CLI commands to daemon | `ControlServer`, `handle_cli_command()` |
 | **config.py** | YAML loader with cross-validation | `GatewayConfig`, `AgentConfig`, `PermissionConfig` |
 | **runtime_lock.py** | Shared PID file and runtime directory utilities | `RUNTIME_DIR`, `LOCK_FILE`, `acquire()`, `release()` |
-| **onboard.py** | Interactive setup wizard for initial configuration | `run_wizard()` |
-| **upgrade.py** | Self-upgrade logic for daemon updates | `upgrade_if_needed()` |
+| **upgrade.py** | Self-upgrade: git pull, uv sync, context files, the coop-keeper directory by manifest | `run_upgrade()`, `run_post_upgrade()`, `_sync_keeper_dir()` |
 | **state.py** | Legacy state compatibility helpers | — |
 | **core/connector.py** | Platform-agnostic Connector ABC and normalized message types | `Connector` ABC, `IncomingMessage`, `Room`, `User`, `UserRole` |
 | **core/session_manager.py** | Thin orchestrator delegating to collaborators; wires connector + agents + state | `SessionManager` |
@@ -579,10 +578,7 @@ config.yaml (user-editable)
 
 Secrets are stored directly in config.yaml as literal values (chmod'd
 `0600`). `$VAR`/`${VAR}` is NOT expanded — a value that happens to look
-like one is used as a plain string, same as any other. A legacy config
-still using a colocated `.env` file with `$VAR`/`${VAR}` references is
-auto-migrated to literal values on first `coop start` (or
-before the config TUI opens) — see `gateway/config_migrate.py`. See
+like one is used as a plain string, same as any other. See
 `docs/migration-0.2.md` for the compact-format rationale and
 `gateway/schema/config.schema.json` for the field-level JSON Schema. Run
 `coop config validate --lint` to check a config.yaml without

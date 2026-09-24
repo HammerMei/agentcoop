@@ -1,0 +1,21 @@
+# Paths in this directory that AgentCoop owns, relative to the directory.
+#
+# `coop upgrade` reads the shipped copy of this file and, for each entry:
+#   in-use   — a file is overwritten with the shipped one; a directory is
+#              replaced as a unit (removed, then copied).
+#   obsolete — removed if present, file or directory.
+# Anything not listed here is never touched: the CLI's own state files, the
+# operator's notes, an operator-added skill.
+#
+# This list only grows. Adding a shipped file adds an `in-use` line; removing
+# one flips its line to `obsolete`. A line is never deleted, so an upgrade from
+# any earlier release still cleans up what that release shipped.
+AGENTS.md: in-use
+CLAUDE.md: in-use
+manifest.yaml: in-use
+opencode.json: in-use
+.claude/settings.json: in-use
+.claude/skills/coop-bootstrap: in-use
+.claude/skills/coop-add-bot: in-use
+.claude/skills/coop-remove-bot: in-use
+.claude/skills/coop-apply-config: in-use

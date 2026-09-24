@@ -72,7 +72,7 @@ keeper directory. Both entry modes stay — `curl | bash`, which clones to
 The script ends by printing the command that starts the keeper:
 
 ```
-cd ~/.agentcoop/agents/builtin/coop-keeper && claude     # or: opencode
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 ```
 
 Runtime layout:
@@ -82,27 +82,40 @@ Runtime layout:
   config.yaml                       # 0600
   admin-profiles.yaml               # 0600; the new default path for coop-provision
   agents/
-    builtin/coop-keeper/            # shipped; overwritten on upgrade
+    builtin/coop-keeper/            # shipped; refreshed by manifest on upgrade
       AGENTS.md                     # the keeper's instructions, in full
       CLAUDE.md                     # one line: @AGENTS.md
-      .claude/skills/<name>/SKILL.md
+      manifest.yaml                 # the paths AgentCoop owns here (below)
+      .claude/skills/coop-<name>/SKILL.md
       .claude/settings.json         # Claude Code permission rules (§3.9)
+      opencode.json                 # OpenCode permission rules (§3.9)
     user/<agent>/                   # one per operator-created agent
       CLAUDE.md                     # the persona
 ```
 
 In the repository the shipped files live at `agents/coop-keeper/`, leaving
 room for further built-in agents beside it. `install.sh` copies the directory
-into `builtin/`; `coop upgrade` replaces the whole `builtin/coop-keeper/`
-tree with the shipped one, preserving only `.claude/settings.local.json` —
-the one file a CLI writes into the directory (session state lives under
-`~/.claude/projects/` and `~/.local/share/opencode/`, not here). Replacing
-rather than overwriting means a skill or instruction file a release removes
-is gone after the upgrade instead of loading beside its replacement. The `builtin/`
-directory exists so that an operator can see which agents are the system's;
-an operator who wants a customised keeper copies it under `user/`. Unlike
-`contexts/`, there is no per-file "locally modified" check: protecting local
-edits would contradict the directory's meaning.
+into `builtin/` whole (there is nothing to preserve on a first install).
+`coop upgrade` refreshes it **by manifest**: `manifest.yaml`, shipped in the
+directory, is one forever-growing list of the paths AgentCoop owns there,
+each marked `in-use` or `obsolete`. An `in-use` file is overwritten with the
+shipped one and an `in-use` directory is replaced as a unit, so a file a
+release dropped from inside a skill does not linger; an `obsolete` path is
+removed if present; **anything not listed is never touched**. Adding a
+shipped file adds an `in-use` line; removing one flips its line to
+`obsolete`, and the line stays, so an upgrade from any earlier release still
+removes what that release shipped. Skill directories carry a `coop-` prefix
+so an operator's own skill cannot collide with an owned path.
+
+This replaced an earlier rule — replace the whole tree, preserving only
+`.claude/settings.local.json` — during implementation. That rule needed the
+system to know every file a CLI might write into the directory, and it wiped
+anything the keeper or the operator had saved there; a leftover file is the
+smaller harm. The `builtin/` directory exists so that an operator can see
+which agents are the system's; an operator who wants a customised keeper
+copies it under `user/`. Unlike `contexts/`, there is no per-file "locally
+modified" check on the owned paths: protecting local edits to them would
+contradict the directory's meaning.
 
 The instruction-file pairing follows from how the two CLIs load files.
 Claude Code reads only `CLAUDE.md` and expands `@file` imports; OpenCode reads
@@ -189,14 +202,26 @@ account — the report says what exists, and the operator decides. The value
 never appears in the conversation, and therefore never in the CLI's session
 transcript or the shell history.
 
-This is an instruction-level guarantee, backed by two mechanical measures:
-the shipped `.claude/settings.json` denies the `Read` and `Edit` tools on
-`config.yaml`, `admin-profiles.yaml` and `.config-backups/**`, and the
-keeper reads configuration only through `coop config show --json` and
-`--raw --json`, whose output is secret-masked (§3.10). The deny rules do not govern the shell: a `cat` of
-either file is an unlisted command, which on Claude Code prompts the operator
-and on OpenCode — whose defaults allow everything — runs. That residual risk
-is documented rather than engineered away in this version.
+This is an instruction-level guarantee, backed by mechanical measures that
+are guardrails against accidental exposure, not a sandbox: the shipped
+`.claude/settings.json` denies `Read` on `config.yaml`, `admin-profiles.yaml`
+and `.config-backups/**` (Claude Code applies a `Read` deny to its `Edit`,
+`Write`, `Grep` and `Glob` tools and to the shell readers it recognises —
+`cat`, `head`, `tail`, `sed`, redirections — when they name the file); the
+shipped `opencode.json` denies the same three paths to OpenCode's `read` and
+`edit` tools (as `*/.agentcoop/config.yaml` — those rules see a path relative
+to the working directory); and the keeper reads configuration only through
+`coop config show --json` and `--raw --json`, whose output is secret-masked
+(§3.10). The residuals are known and documented rather than engineered away:
+a shell command reaches the file — on Claude Code `cp` prompts, because it is
+not on the allow list; on OpenCode a `cat` of a path outside the working
+directory falls to `external_directory`'s default `ask` and prompts too, while
+`head`, `sed` or a variable expansion, which OpenCode infers no path from,
+run — and on OpenCode v1 an "always allow" answer to any read prompt
+overrides configured denies for that session. Closing these would
+mean chasing a perfect rule set for an agent that runs on the operator's own
+machine, with the operator's own access to the files; the rule set here is
+deliberately the reasonable one.
 
 ### 3.4 Scoping a step to a server or to an agent
 
@@ -292,7 +317,12 @@ configuration entry the plan touches — presets and templates if absent, the
 connector, the agent, the rule, the agent-chain list — validated and written
 as a whole (§3.8). One write, one validation, one backup: there is no state
 between "connector added" and "rule added" for a failure to leave behind or
-for a preview to miss.
+for a preview to miss. The one exception is the second team on a Mattermost
+installation: a fragment cannot copy another connector's credentials, so
+that connector is added with `coop config add connector --credentials-from`
+(one write) and the rule and agent-chain change follow in one fragment (a
+second write), both under the same dry-run/digest discipline, and the plan
+says so.
 
 An agent name becomes a directory name under `agents/user/`, so `coop
 config add agent` and the keeper both accept only a single path component:
@@ -470,17 +500,40 @@ one input to that repair.
 
 ### 3.9 Permissions for the keeper itself
 
-OpenCode allows every operation by default; nothing is shipped for it.
+Both CLIs get the same shape of rule set, and the same restraint: allow the
+paths and commands the keeper must use, deny the credential files, and leave
+everything else at the CLI's own default. It is a reasonable guardrail, not a
+perfect one (§3.3).
+
 Claude Code's `auto` permission mode cannot be selected from a project-local
-settings file, so the shipped `.claude/settings.json` uses explicit rules
-instead: allow `Bash(coop *)`, `Bash(coop-provision *)`, the handful of
-shell commands the skills run — `mkdir` for an agent's directory, `mktemp`,
-`openssl rand` and `rm` for the password file, `which` for the
-session-start checks — and the `Read`/`Write`/`Edit` tools under `~/.agentcoop/agents/`;
-deny the credential files named in §3.3. Everything else prompts. The allow
-list is derived from what the four skills actually execute, so a skill that
-gains a new command adds it here in the same change. The permission file is the one place where a provider-specific file
-is shipped; `AGENTS.md` refers to no provider-specific feature.
+settings file, so the shipped `.claude/settings.json` uses explicit rules:
+allow `Bash(coop *)`, `Bash(coop-provision *)`, the handful of shell commands
+the skills run — `mkdir`/`rmdir` for an agent's directory and the plan lock,
+`mktemp`, `openssl rand` and `rm` for the password file, `ls` for the
+empty-directory check, `date` for the lock's expiry, `which` — and the
+`Read`/`Edit` tools under `~/.agentcoop/agents/` and `~/.agentcoop/plan.lock/`;
+deny the credential files named in §3.3. Everything else prompts, which is
+Claude Code's default. The allow list is derived from what the four skills
+actually execute (`tests/unit/test_coop_keeper_shipped.py` walks the skills),
+so a skill that gains a new command adds it here in the same change.
+
+OpenCode's defaults allow everything except `external_directory` — any path
+outside the working directory — which asks. The keeper's directory is not a
+git repository, so `~/.agentcoop/config.yaml` and `~/.agentcoop/agents/user/…`
+are both "external" to it, and without a config every persona write would
+prompt. The shipped `opencode.json` therefore carries one `permission` block
+(the v1 object form, which OpenCode v2 migrates and v1 requires): allow
+`external_directory` on `~/.agentcoop/agents/*` and `~/.agentcoop/plan.lock/*`
+(that check sees `<dir>/*`, so it can only speak about directories), and deny
+`read` and `edit` on the three credential paths as `*/.agentcoop/…` (those
+checks see a path relative to the working directory, so a `~/…` pattern would
+never match). Nothing else — no bash patterns, no change to the bash default;
+a `cat` of a credential file falls to `external_directory`'s default `ask`.
+Both files also pin the CLI's default agent to its built-in one
+(`"agent": ""` for Claude Code, `"default_agent": "build"` for OpenCode): an
+operator whose CLI defaults to a persona agent of their own would otherwise
+run the keeper *as* that persona, and `AGENTS.md` would compete with it. `AGENTS.md` and the skills refer to no
+provider-specific feature.
 
 ### 3.10 Command surface
 
@@ -610,11 +663,17 @@ full API error log is exactly what an operator needs after a failed plan.
 
 ### 3.11 Skills
 
-Four skills, for the flows that have order and consequences: `bootstrap`,
-`add-bot`, `remove-bot`, `apply-config`. Single-step operations — a persona
-edit, a room change — are described in `AGENTS.md` and end in `apply-config`.
-Putting an existing agent on a second server is `add-bot` with an existing
-agent, not a separate skill. `AGENTS.md` itself is kept short in this version
+Four skills, for the flows that have order and consequences: `coop-bootstrap`,
+`coop-add-bot`, `coop-remove-bot`, `coop-apply-config` (the `coop-` prefix
+keeps the owned skill directories from colliding with an operator's, §3.1).
+Single-step operations — a persona edit, a room change — are described in
+`AGENTS.md` and end in `coop-apply-config`. Putting an existing agent on a
+second server is `coop-add-bot` with an existing agent, not a separate skill.
+Skill frontmatter is `name` (equal to the directory name — OpenCode v1 keys a
+skill by `name`, v2 by the directory) and `description`, the two fields every
+CLI reads; the same `.claude/skills/` directory serves Claude Code and both
+OpenCode lines. No `.opencode/` directory is shipped: OpenCode v1 writes a
+`package.json` and `node_modules/` into one that exists. `AGENTS.md` itself is kept short in this version
 — the keeper's role, the vocabulary translation, the credential rule, the
 session-start checks, the plan rule — and grows from what testing shows it
 needs. One thing it does carry in full: **where the authoritative

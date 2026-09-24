@@ -48,15 +48,18 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making 
 
 ### Install (AI-guided, recommended)
 
-The easiest way to install is to ask your AI agent to do it for you — it handles dependencies, configuration, and any troubleshooting automatically.
+Install the files, then let coop-keeper — AgentCoop's built-in admin agent —
+set up your first bot in a conversation. It works with either coding CLI;
+OpenCode runs on any model it supports, free ones included.
 
-In Claude Code or OpenCode, run this prompt:
-
+```bash
+curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 ```
-Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md
-```
 
-> Prefer a native install? See [INSTALL.md](INSTALL.md) for step-by-step instructions.
+Tell it which server you use and what bot you want; it creates the account, the
+persona and the configuration, shows you the plan first, and never asks for a
+password. See [INSTALL.md](INSTALL.md) for the details and the manual steps.
 
 ---
 

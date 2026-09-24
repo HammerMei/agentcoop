@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # AgentCoop installer
-# Usage:  bash install.sh [--no-onboard]
+# Usage:  bash install.sh [--force]
 # Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
-# Or:     curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash -s -- --no-onboard
+#
+# Installs files and nothing else: uv/Python, the `coop` and `coop-provision`
+# commands, the example context files, install_meta.json and the coop-keeper
+# agent directory. Configuration is done afterwards by running coop-keeper
+# with your own coding CLI — the script ends by printing the command.
 #
 # Flags:
-#   --no-onboard   Skip the interactive setup wizard (for AI agents / automated installs)
 #   --force        Replace a `coop` command already on PATH that is not AgentCoop's
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
-NO_ONBOARD=false
 FORCE=false
 for arg in "$@"; do
   case "$arg" in
-    --no-onboard) NO_ONBOARD=true ;;
     --force) FORCE=true ;;
   esac
 done
@@ -354,8 +355,23 @@ if [ -d "$REPO_DIR/contexts" ] && [ -n "$(ls "$REPO_DIR/contexts/" 2>/dev/null)"
 fi
 
 # ---------------------------------------------------------------------------
-# Write install_meta.json — always, regardless of --no-onboard
-# This is required by `coop upgrade` to locate the repo.
+# Install the coop-keeper agent directory.
+# Same code path as `coop upgrade`: the paths agents/coop-keeper/manifest.yaml
+# lists are written, anything else already in the directory is left alone —
+# so re-running the installer over an existing install keeps the operator's
+# files there. On a first install the directory is absent and this is a copy.
+# ---------------------------------------------------------------------------
+install_keeper_dir() {
+  # $1 = repo dir, $2 = runtime dir
+  local src="$1/agents/coop-keeper"
+  [ -d "$src" ] || return 0
+  (cd "$1" && "$1/.venv/bin/python" -c 'import pathlib, sys, gateway.upgrade as u; u._sync_keeper_dir(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]))' "$1" "$2")
+}
+install_keeper_dir "$REPO_DIR" "$RUNTIME_DIR"
+success "Installed coop-keeper to $RUNTIME_DIR/agents/builtin/coop-keeper/"
+
+# ---------------------------------------------------------------------------
+# Write install_meta.json — required by `coop upgrade` to locate the repo.
 # ---------------------------------------------------------------------------
 COOP_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
 cat > "$RUNTIME_DIR/install_meta.json" << EOF
@@ -366,19 +382,6 @@ cat > "$RUNTIME_DIR/install_meta.json" << EOF
 }
 EOF
 success "Wrote install_meta.json (version=$COOP_VERSION, repo=$REPO_DIR)"
-
-# ---------------------------------------------------------------------------
-# Run onboard wizard (skipped when --no-onboard is passed)
-# ---------------------------------------------------------------------------
-if [ "$NO_ONBOARD" = true ]; then
-  info "Skipping setup wizard (--no-onboard). Configure manually:"
-  info "  1. Create ~/.agentcoop/.env with RC_URL, RC_USERNAME, RC_PASSWORD"
-  info "  2. Create ~/.agentcoop/config.yaml"
-  info "  3. Run: coop start"
-else
-  info "Launching setup wizard..."
-  "$VENV_BIN" onboard --repo-path "$REPO_DIR"
-fi
 
 # ---------------------------------------------------------------------------
 # Detect shell config file for source hint
@@ -409,7 +412,9 @@ printf '  To use AgentCoop in your current shell, run:\n'
 printf '    source %s\n' "$SHELL_RC"
 printf '  Or restart your terminal.\n'
 printf '\n'
-printf '  Start the gateway:   coop start\n'
-printf '  Check status:        coop status\n'
-printf '  View logs:           tail -f ~/.agentcoop/gateway.log\n'
+printf '  Set up your first bot with coop-keeper, using either CLI:\n'
+printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && opencode\n'
+printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && claude\n'
+printf '\n'
+printf '  Then:  coop status          tail -f ~/.agentcoop/gateway.log\n'
 printf '\n'
