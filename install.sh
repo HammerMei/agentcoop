@@ -12,8 +12,9 @@
 # config.yaml, state, logs, coop-keeper. If that directory is taken or unusable,
 # set the variable before the FIRST install:
 #   COOP_HOME=/srv/coop bash install.sh
-# A non-default location is exported from ~/.bashrc / ~/.zshrc so `coop` finds it.
-# Changing it later does not move an existing installation.
+# The script then ends by printing the line to add to your shell startup file
+# so later shells find it. Changing it later does not move an existing
+# installation.
 #
 # Flags:
 #   --force        Replace a `coop` command already on PATH that is not AgentCoop's
@@ -61,58 +62,30 @@ coop_home_dir() {
   esac
   printf '%s\n' "$raw"
 }
-rc_exports_coop_home() {
-  # $1 = rc file, $2 = dir. 0 when an ACTIVE (uncommented) `export COOP_HOME=`
-  # line in the file assigns exactly $2 — quoted either way or bare. A
-  # commented-out line is not an export, and `/srv/coop-old` is not `/srv/coop`.
-  grep -E '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$1" 2>/dev/null \
-    | sed -E "s/^[[:space:]]*export[[:space:]]+COOP_HOME=//; s/[[:space:]]*$//; s/^'(.*)'$/\1/; s/^\"(.*)\"$/\1/" \
-    | { while IFS= read -r val; do [ "$val" = "$2" ] && exit 0; done; exit 1; }
-}
-persist_coop_home() {
-  # $1 = runtime dir. A non-default location is exported from the shell rc files
-  # (the PATH block below does the same), so `coop`, `coop upgrade` and the
-  # keeper's CLI calls resolve the same directory in later shells. An rc file
-  # that already exports a DIFFERENT value is left alone and named, never
-  # stacked: which line wins would depend on file order.
-  local dir="$1" rc quoted active_rc="" active_ok=false
-  [ "$dir" = "$HOME/.agentcoop" ] && return 0
-  # Single-quoted, with any single quote in the path closed, escaped and
-  # reopened: a `$`, backtick or quote in the directory is then a literal in
-  # the rc file, not something the next shell expands or runs.
-  quoted="'$(printf '%s' "$dir" | sed "s/'/'\\\\''/g")'"
-  case "$SHELL" in
-    */bash) active_rc="$HOME/.bashrc" ;;
-    */zsh)  active_rc="$HOME/.zshrc" ;;
+coop_home_hint() {
+  # $1 = runtime dir. The line that makes later shells find a non-default
+  # COOP_HOME, in the login shell's own syntax ($SHELL). Printed for the
+  # operator to add; the installer writes no shell startup file for it — a
+  # value-carrying line in someone else's rc file has more edge cases (an
+  # existing export, a commented one, quoting, a read-only file, fish/csh)
+  # than the rare case is worth, and rc files never covered cron or a
+  # service manager anyway.
+  case "${SHELL:-}" in
+    */fish)        printf "set -gx COOP_HOME '%s'\n" "$1" ;;
+    */csh|*/tcsh)  printf "setenv COOP_HOME '%s'\n" "$1" ;;
+    *)             printf "export COOP_HOME='%s'\n" "$1" ;;
   esac
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    [ -f "$rc" ] || continue
-    if rc_exports_coop_home "$rc" "$dir"; then
-      [ "$rc" = "$active_rc" ] && active_ok=true
-      continue
-    fi
-    if grep -Eq '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$rc" 2>/dev/null; then
-      printf '[WARNING] %s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
-      continue
-    fi
-    printf '\n# Added by AgentCoop installer\nexport COOP_HOME=%s\n' "$quoted" >> "$rc"
-    [ "$rc" = "$active_rc" ] && active_ok=true
-  done
-  if [ "$active_ok" = false ]; then
-    # The shell the operator actually uses did not get it — fish or another
-    # shell (only bash/zsh rc files are written), or its rc file is missing —
-    # and without the export the next `coop` silently uses ~/.agentcoop.
-    printf '[WARNING] COOP_HOME was not added to your shell'"'"'s startup file (%s); export COOP_HOME=%s there yourself.\n' "${SHELL:-unknown shell}" "$quoted" >&2
-  fi
 }
 runtime_dir_is_ours() {
   # $1 = runtime dir. 0 when it does not exist yet, or is a real directory owned
   # by the invoking user that other users cannot write to. Everything the
   # installer puts under it — the repo clone that `~/.local/bin/coop` runs from
-  # above all — trusts the directory, so a directory another local user
-  # pre-created, links, or can write into would let them replace `coop` itself.
-  # (`~/.agentcoop` sits under $HOME and passes on any sane account; the check
-  # exists for a COOP_HOME placed under a shared parent such as /tmp.)
+  # above all — trusts the directory. This guards the accidental case: a
+  # COOP_HOME typed under a shared parent such as /tmp, a stray symlink, a
+  # world-writable mode. It is not a defence against another account on the
+  # same host — multi-tenant hosts are outside what AgentCoop promises
+  # (SECURITY.md, requirements §14.5), so group-writable directories, parent
+  # directories and the like are deliberately not examined.
   [ -e "$1" ] || [ -L "$1" ] || return 0
   if [ -L "$1" ]; then
     printf '[ERROR] %s is a symbolic link; COOP_HOME must be a real directory.\n' "$1" >&2; return 1
@@ -130,7 +103,12 @@ runtime_dir_is_ours() {
 }
 RUNTIME_DIR=$(coop_home_dir) || exit 1
 runtime_dir_is_ours "$RUNTIME_DIR" || exit 1
-export COOP_HOME="$RUNTIME_DIR"
+# Only a COOP_HOME the operator set is exported (expanded) to the Python steps
+# below: the default is not validated as an explicit value by gateway/paths.py,
+# and a $HOME the explicit-value rule would refuse must keep installing.
+if [ -n "${COOP_HOME:-}" ]; then
+  export COOP_HOME="$RUNTIME_DIR"
+fi
 
 # ---------------------------------------------------------------------------
 # OS / architecture detection
@@ -443,7 +421,6 @@ esac
 mkdir -p "$RUNTIME_DIR"
 if [ "$RUNTIME_DIR" != "$HOME/.agentcoop" ]; then
   info "Runtime directory: $RUNTIME_DIR (COOP_HOME)"
-  persist_coop_home "$RUNTIME_DIR"
 fi
 
 # ---------------------------------------------------------------------------
@@ -521,6 +498,12 @@ printf '\n'
 printf '  To use AgentCoop in your current shell, run:\n'
 printf '    source %s\n' "$SHELL_RC"
 printf '  Or restart your terminal.\n'
+if [ "$RUNTIME_DIR" != "$HOME/.agentcoop" ]; then
+  printf '\n'
+  printf '  This install lives in %s. Add this line to %s so every\n' "$RUNTIME_DIR" "$SHELL_RC"
+  printf '  later shell (and anything that starts coop) finds it:\n'
+  printf '    %s\n' "$(coop_home_hint "$RUNTIME_DIR")"
+fi
 printf '\n'
 printf '  Set up your first bot with coop-keeper, using either CLI:\n'
 printf '    cd %s/agents/builtin/coop-keeper && opencode\n' "$RUNTIME_DIR"

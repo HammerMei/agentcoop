@@ -57,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state, logs, the control socket, the attachment cache default, coop-keeper
   and, for a `curl | bash` install, the `repo/` clone — follows it. `install.sh`
   installs there when the variable is set (`COOP_HOME=/srv/coop bash install.sh`)
-  and adds the export to `~/.bashrc`/`~/.zshrc` (or says so when neither
-  exists); install and `coop upgrade` write coop-keeper's
+  and ends by printing the line to add to your shell startup file — it does
+  not write the file; install and `coop upgrade` write coop-keeper's
   permission files and skills for that directory. Must be an absolute,
   canonical path spelled only with letters, digits, `.`, `_`, `-` and `/`;
   an existing directory must be a real one the installing user owns and

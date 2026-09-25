@@ -724,9 +724,9 @@ Everything AgentCoop keeps lives under one **runtime directory**: `config.yaml`,
 coop-keeper and the agents it creates, and the `repo/` clone a `curl | bash` install
 makes. That directory is `$COOP_HOME` when the variable is set, otherwise
 `~/.agentcoop`. Wherever this guide writes `~/.agentcoop/…`, read `$COOP_HOME/…` if
-you set one — the installer adds the export to `~/.bashrc` and `~/.zshrc` when you
-install somewhere else (`COOP_HOME=/srv/coop bash install.sh`), and tells you to do
-it yourself when neither file exists.
+you set one. When you install somewhere else (`COOP_HOME=/srv/coop bash install.sh`)
+the installer ends by printing the line to add to your shell startup file, in your
+shell's syntax; it does not write the file for you.
 
 A **relative path** in `config.yaml` — `working_directory`, `context_inject_files`,
 `attachments.cache_dir_global` — is resolved against that directory, **not** against
