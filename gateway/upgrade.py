@@ -121,6 +121,112 @@ def _sync_context_files(
             )
 
 
+# ---------------------------------------------------------------------------
+# coop-keeper directory sync (design: docs/design/coop-keeper-design.md §3.1)
+# ---------------------------------------------------------------------------
+
+KEEPER_SRC_REL = Path("agents") / "coop-keeper"
+KEEPER_DST_REL = Path("agents") / "builtin" / "coop-keeper"
+KEEPER_MANIFEST = "manifest.yaml"
+KEEPER_IN_USE = "in-use"
+KEEPER_OBSOLETE = "obsolete"
+
+
+def _read_keeper_manifest(src: Path) -> dict[str, str]:
+    """Return {relative path: "in-use" | "obsolete"} from the shipped manifest.
+
+    The manifest is a flat YAML mapping. Anything else — a missing file, a
+    non-mapping, an unknown status — raises ValueError, because an upgrade that
+    guessed which paths it owns would be worse than one that skipped the step
+    and said so.
+    """
+    import yaml
+
+    text = (src / KEEPER_MANIFEST).read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"{src / KEEPER_MANIFEST}: expected a mapping of path -> status")
+    out: dict[str, str] = {}
+    for rel, status in data.items():
+        if not isinstance(rel, str) or not rel or rel.startswith("/") or ".." in Path(rel).parts:
+            raise ValueError(f"{src / KEEPER_MANIFEST}: bad path {rel!r}")
+        if status not in (KEEPER_IN_USE, KEEPER_OBSOLETE):
+            raise ValueError(f"{src / KEEPER_MANIFEST}: {rel}: status must be in-use or obsolete, not {status!r}")
+        out[rel] = status
+    return out
+
+
+def _remove_path(target: Path) -> bool:
+    """Remove a file, symlink or directory tree; True if something was removed."""
+    import shutil
+
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
+        return True
+    if target.exists() or target.is_symlink():
+        target.unlink()
+        return True
+    return False
+
+
+def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
+    """Bring ~/.agentcoop/agents/builtin/coop-keeper/ up to the shipped release.
+
+    Also makes sure `agents/user/` exists — the directory the keeper creates
+    agents under (design §3.1 layout). install.sh calls this too, through the
+    repo's interpreter, so a first install and an upgrade are one code path.
+
+    Manifest-driven, so that nothing the operator or a CLI put in the directory
+    is touched: `.claude/settings.local.json`, notes, an operator-added skill.
+    For each entry of the shipped `manifest.yaml`:
+
+      in-use   — a file is overwritten with the shipped copy; a directory is
+                 replaced as a unit (removed, then copied), so a file a release
+                 dropped from inside a shipped skill does not linger.
+      obsolete — removed if present (file or directory). The line stays in the
+                 manifest forever, so an upgrade from any earlier release still
+                 removes what that release shipped.
+
+    Anything not listed is left alone. The directory is created when absent —
+    installs made before the keeper shipped have no `agents/` at all. Symlinks
+    are followed, as everywhere else: an operator who links an owned path to
+    a file of their own gets that file overwritten on upgrade, which is what
+    the link asked for.
+    """
+    import shutil
+
+    src = repo_path / KEEPER_SRC_REL
+    if not src.is_dir():
+        return
+    dst = runtime_dir / KEEPER_DST_REL
+    manifest = _read_keeper_manifest(src)
+    dst.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "agents" / "user").mkdir(parents=True, exist_ok=True)
+
+    for rel, status in manifest.items():
+        target = dst / rel
+        if status == KEEPER_OBSOLETE:
+            if _remove_path(target):
+                console.print(f"  Removed obsolete coop-keeper path: {rel}")
+            continue
+        source = src / rel
+        if not source.exists():
+            console.print(
+                f"  [yellow]Warning:[/yellow] coop-keeper manifest lists {rel} as in-use "
+                "but the release does not ship it — skipped."
+            )
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            _remove_path(target)
+            shutil.copytree(source, target)
+        else:
+            if target.is_dir():
+                _remove_path(target)
+            shutil.copy2(source, target)
+    console.print(f"  coop-keeper up to date at {dst}")
+
+
 def _find_uv() -> str:
     """Return the path to the uv executable.
 
@@ -465,6 +571,12 @@ def run_post_upgrade(repo_path: Path, from_version: str = "") -> None:
         print(MESSAGE, file=sys.stderr, end="")
         return
     _ensure_local_bin_symlinks(repo_path)
+    # Idempotent and skippable, per the contract above: a manifest problem is
+    # reported and leaves the rest of the upgrade intact.
+    try:
+        sync_keeper_dir(repo_path, RUNTIME_DIR)
+    except (OSError, ValueError) as e:
+        console.print(f"  [yellow]Warning:[/yellow] coop-keeper directory not updated: {e}")
 
 
 # Executed by `python -c` in the pulled tree. Deliberately tiny: everything it

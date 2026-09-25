@@ -4,7 +4,7 @@
 #
 # ── Volume mounts ─────────────────────────────────────────────────────────────
 #
-#   ~/.agentcoop/config/     ONLY config.yaml + .env
+#   ~/.agentcoop/config/     ONLY config.yaml
 #                                      Entrypoint symlinks them one level up.
 #                                      Safe to bind-mount — does NOT overwrite
 #                                      the runtime directory.
@@ -29,11 +29,6 @@
 #
 #   acg-config/ must contain:
 #     └── config.yaml   full gateway config (secrets in plaintext — chmod 600)
-#
-#   .env is no longer required: if acg-config/ still has one from before this
-#   change, it's picked up on first start, its secret(s) folded into
-#   config.yaml as literal values, and then removed automatically (one-time —
-#   see `coop config migrate-env` for a manual/dry run).
 #
 #   See docker/docker-compose.example/config/ for a ready-to-copy template.
 #
@@ -67,31 +62,17 @@ error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; 
 # Symlink config files from $RUNTIME_DIR/config (Mode 1)
 # or generate them from env vars (Mode 2)
 #
-# $RUNTIME_DIR/config is the safe bind-mount point — it only holds config.yaml + .env,
+# $RUNTIME_DIR/config is the safe bind-mount point — it only holds config.yaml,
 # so mounting it never overwrites the rest of ~/.agentcoop.
 # -----------------------------------------------------------------------------
 MOUNTED_CONFIG="$RUNTIME_DIR/config/config.yaml"
-MOUNTED_ENV="$RUNTIME_DIR/config/.env"
 
 if [ -f "$MOUNTED_CONFIG" ]; then
     # ── Mode 1: symlink from mounted $RUNTIME_DIR/config ──────────────────────────────
-    # Keyed off config.yaml ALONE, not "both files present": the gateway
-    # auto-migrates a .env-backed secret into config.yaml on its first start
-    # (one-time, docs/design/config-tool.md decision 6 revisited) and
-    # removes .env once done. Requiring .env here would make Mode 1
-    # misdetect as Mode 2 (and demand -e RC_URL=... again, or hard-fail) on
-    # every container restart after that first migration.
     info "Config mode: volume mount ($RUNTIME_DIR/config detected)"
 
     ln -sf "$MOUNTED_CONFIG" "$RUNTIME_DIR/config.yaml"
     success "Symlinked: $RUNTIME_DIR/config.yaml → $MOUNTED_CONFIG"
-
-    # .env is optional now — only present for a config not yet migrated.
-    if [ -f "$MOUNTED_ENV" ]; then
-        ln -sf "$MOUNTED_ENV" "$RUNTIME_DIR/.env"
-        chmod 600 "$MOUNTED_ENV"
-        success "Symlinked: $RUNTIME_DIR/.env → $MOUNTED_ENV"
-    fi
 
 else
     # ── Mode 2: generate config from env vars ────────────────────────────────
@@ -105,10 +86,8 @@ else
     AGENT_TYPE="${AGENT_TYPE:-claude}"
     info "Generating config: agent=$AGENT_TYPE, owners=$COOP_OWNER_USERS"
 
-    # Credentials go straight into config.yaml as plaintext (chmod 600, same
-    # as onboard.py's own generator) — no .env, matching the rest of the
-    # project post-decision-6-revisited. config.yaml is chmod'd below, right
-    # after it's written.
+    # Credentials go straight into config.yaml as plaintext (chmod 600).
+    # config.yaml is chmod'd below, right after it's written.
 
     # Generate config.yaml. Deliberately a QUOTED heredoc ('PYEOF') so bash
     # never text-substitutes RC_URL/USERNAME/PASSWORD into the Python source
@@ -194,7 +173,7 @@ config = {
 config_path = os.path.join(runtime_dir, "config.yaml")
 with open(config_path, "w") as f:
     yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-os.chmod(config_path, 0o600)  # holds a plaintext secret now — same as .env always was
+os.chmod(config_path, 0o600)  # holds a plaintext secret
 
 print(f"[AgentCoop] Written: {config_path}")
 print(f"[AgentCoop]   agent={agent_type}, rooms={watcher_rooms}, owners={owner_users}")

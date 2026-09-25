@@ -37,7 +37,7 @@ One chat server's administrative credentials in `admin-profiles.yaml`, read by `
 _Avoid_: admin config, server config
 
 **coop-keeper**:
-The built-in admin agent, installed at `~/.agentcoop/agents/builtin/coop-keeper/` once it ships, which an operator runs with their own `claude` or `opencode` CLI to create, change and remove bots (`docs/design/coop-keeper-design.md`). Replaces the removed `coop onboard` wizard.
+The built-in admin agent, installed at `~/.agentcoop/agents/builtin/coop-keeper/`, which an operator runs with their own `claude` or `opencode` CLI to create, change and remove bots (`docs/design/coop-keeper-design.md`). Replaces the removed `coop onboard` wizard.
 _Avoid_: onboarding agent, the wizard, keeper (in documentation — fine in speech)
 
 ### Permissions

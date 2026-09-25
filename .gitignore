@@ -33,3 +33,6 @@ e2e-logs/
 # editor swap files
 *.swp
 *.swo
+
+# The coop-keeper agent directory ships its Claude Code settings and skills.
+!agents/coop-keeper/.claude/

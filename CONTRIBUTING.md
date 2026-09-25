@@ -26,8 +26,8 @@ cd agentcoop
 # Install all dependencies (including dev extras)
 uv sync
 
-# Set up config (interactive wizard — safe to skip for code-only changes)
-make setup
+# A running deployment is not needed for code-only changes; to get one,
+# run coop-keeper: cd ~/.agentcoop/agents/builtin/coop-keeper && opencode
 ```
 
 That's it. No virtualenv activation needed — prefix commands with `uv run` or use `make`.
@@ -41,7 +41,7 @@ That's it. No virtualenv activation needed — prefix commands with `uv run` or 
 make test
 
 # Run a specific test file
-uv run pytest tests/test_onboard.py -v
+uv run pytest tests/unit/test_config_edit.py -v
 
 # Run tests matching a keyword
 uv run pytest tests/ -k "test_detect_backends" -v
@@ -61,7 +61,7 @@ instance is needed.  All network and subprocess calls are mocked.
 
 - **Type hints throughout** — all public functions and methods must be fully annotated
 - **No hardcoded paths** — use `Path.home()`, `Path(__file__)`, or constants; never `"/home/user/..."`
-- **No debug `print()`** — use `logging.getLogger(__name__)` inside library code; `console.print()` (Rich) is fine in CLI / wizard code
+- **No debug `print()`** — use `logging.getLogger(__name__)` inside library code; `console.print()` (Rich) is fine in CLI code
 - **Docstrings** — public functions and classes need a one-line summary; complex ones should document args and raises
 - **Imports** — stdlib first, third-party second, local last; no star imports
 
@@ -83,7 +83,6 @@ gateway/
 ├── config.py           # YAML loader → GatewayConfig dataclasses
 ├── daemon.py           # daemonization, PID file, signal handling
 ├── service.py          # top-level orchestrator
-├── onboard.py          # interactive setup wizard (Rich)
 ├── upgrade.py          # upgrade command logic
 │
 ├── core/
@@ -153,15 +152,13 @@ def connector_factory(cc: ConnectorConfig) -> Connector:
         return MyPlatformConnector(MyPlatformConfig.from_connector_config(cc))
 ```
 
-### 4. Add to the onboard wizard
+### 4. Teach the CLI and coop-keeper about it
 
-```python
-# gateway/onboard.py — _step_select_connector()
-connectors = [
-    ("rocketchat", "Rocket.Chat"),
-    ("myplatform", "My Platform"),   # add here
-]
-```
+`coop config add connector --type` and `coop-provision init --type` accept
+the connector types the code knows (`gateway/config_edit.py`,
+`gateway/admin/cli.py`); add yours there, and add a profile backend under
+`gateway/admin/` if coop-keeper should provision accounts on it. Document the
+connector's prompt-prefix format in `CLAUDE.md`.
 
 ### 5. Write tests
 

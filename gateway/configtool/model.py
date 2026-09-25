@@ -32,7 +32,7 @@ environment references, and loading through it would have written a
 resolved secret in plain text on save. That's no longer a live concern —
 ``from_file()`` doesn't resolve ``$VAR`` at all anymore (docs/design/
 config-tool.md decision 6, final revision: secrets live directly in
-config.yaml, any ``.env``-backed config is auto-migrated on first use) — but
+config.yaml) — but
 the plain-``yaml.safe_load``/plain-``yaml.dump`` round-trip stays exactly as
 important for the two reasons that remain.
 """
@@ -197,18 +197,14 @@ class EditableConfig:
            rejected because connector2 was still broken, and vice versa.
         3. Only on success: copy the real file to a timestamped backup under
            `<config_dir>/.config-backups/` (`config.yaml.bak.<unix-ts>`,
-           matching gateway/onboard.py's own backup step, which writes to
-           the same directory) and atomically replace it with the temp file
+           in the same directory) and atomically replace it with the temp file
            (`os.replace` — atomic on POSIX, so a reader/the daemon never
            observes a partially-written config.yaml).
 
         `config.yaml` and every backup snapshot can hold a plaintext secret
         — secrets are stored directly in config.yaml (docs/design/
-        config-tool.md decision 6 revisited; a not-yet-migrated `.env`
-        reference gets folded in as a literal value by
-        `gateway/config_migrate.py`, never the other direction). Both
-        `config.yaml` itself and each backup file are chmod'd 0600 here
-        (matching the treatment `.env` used to get) — `config.yaml`
+        config-tool.md decision 6 revisited). Both `config.yaml` itself and
+        each backup file are chmod'd 0600 here — `config.yaml`
         specifically needs this on EVERY save because writing `tmp_path` via
         plain `open(..., "w")` takes the process umask, not whatever
         permissions the real file had before; without this line, a manual
@@ -234,9 +230,7 @@ class EditableConfig:
         # Write to the TARGET of a symlinked config.yaml, not to the link:
         # `os.replace(tmp, link)` would swap the link itself for a regular
         # file, leaving the real file untouched and the deployment that
-        # repoints the link (Docker mode 1, `config_migrate.py`'s "Symlink
-        # safety") silently editing the wrong one. Same precedent as
-        # config_migrate.py, which resolves first for the same reason.
+        # repoints the link (Docker mode 1) silently editing the wrong one.
         target = self.path.resolve()
         tmp_path = target.with_name(target.name + ".tmp")
         try:

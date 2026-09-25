@@ -36,7 +36,7 @@ rm -f ~/.local/bin/agent-chat-gateway ~/.local/bin/acg-provision
 #    logs a warning at every start while it is there.
 rm -f ~/.opencode/plugins/role-enforcement.ts
 
-# 4. Install AgentCoop and run its setup wizard
+# 4. Install AgentCoop, then set up your bots with coop-keeper
 curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
 ```
 

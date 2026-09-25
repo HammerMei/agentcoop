@@ -84,7 +84,7 @@ RUN if [ "$OPENCODE_VERSION" = "latest" ]; then \
 #   3. `coop upgrade` can be run inside the container
 # -----------------------------------------------------------------------------
 COPY . /root/.agentcoop/repo
-RUN bash /root/.agentcoop/repo/install.sh --no-onboard
+RUN bash /root/.agentcoop/repo/install.sh
 
 # -----------------------------------------------------------------------------
 # Pre-create all mountable directories

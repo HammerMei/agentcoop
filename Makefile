@@ -12,9 +12,6 @@ help: ## Show this help
 install: ## Install dependencies (uv sync)
 	uv sync
 
-setup: ## Run the interactive setup wizard (idempotent — skips if config exists)
-	uv run coop onboard --repo-path "$(CURDIR)"
-
 test: ## Run test suite
 	uv run pytest tests/ -v --tb=short
 

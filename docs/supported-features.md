@@ -293,7 +293,12 @@ watcher_rules:
 - ✅ Combined text + attachment sends
 
 #### Configuration & Upgrade
-- ✅ Interactive onboard wizard (first-run setup)
+- ✅ coop-keeper — the built-in admin agent that creates, changes and removes
+  bots in a conversation with the operator's own `opencode` or `claude` CLI
+  (replaces the removed `coop onboard` wizard)
+- ✅ `coop config add/remove/patch/show --raw/backends` and
+  `coop-provision init/check/profiles/reactivate-user` — the command surface
+  coop-keeper drives, usable by hand or from a script
 - ✅ Self-upgrade via CLI command
 
 ---
@@ -304,13 +309,9 @@ watcher_rules:
 - ✅ YAML configuration file
 - ✅ Secrets stored directly in `config.yaml` (chmod'd `0600` automatically —
   both by the config TUI and by `coop start`)
-- ✅ Auto-migration: a legacy `.env`-backed config (`$VAR`/`${VAR}` references
-  resolved from a colocated `.env` file) is folded into `config.yaml` as
-  literal values on first start (or before the config TUI opens), then
-  `.env` is removed (one-time; also available as `coop config
-  migrate-env` for a manual run). After migration — or for any config
-  written from scratch — `$VAR`/`${VAR}` is not a recognized syntax; a value
-  that merely looks like one is a plain string, used as written.
+- ✅ `$VAR`/`${VAR}` is not a recognized syntax; a value that merely looks
+  like one is a plain string, used as written (the v0-era `.env` migration
+  has been removed)
 - ✅ Multi-connector setup (multiple chat instances)
 - ✅ Multi-agent setup (different agents per watcher)
 - ✅ Cross-field validation (e.g., agent timeout > permission timeout)
@@ -391,9 +392,8 @@ watcher_rules:
   - Webhook-based (push) connectors not yet implemented
   - Both chat connectors are pull-based (persistent WebSocket)
   - Voice gateway connector is experimental — see [Voice Gateway](#voice-gateway-experimental-) section
-  - Mattermost's onboarding CLI wizard (`coop onboard`) and a
-    real E2E docker test harness are not yet implemented (config.yaml must be
-    hand-written for now) — planned as a follow-up
+  - A real E2E docker test harness is not yet implemented — planned as a
+    follow-up
 
 ### Agent Backends
 

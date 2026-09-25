@@ -27,22 +27,27 @@ Before installing, ensure you have:
 - **Claude CLI or OpenCode installed** — at least one agent backend available
   - Claude CLI: https://claude.ai/download
   - OpenCode: https://github.com/anthropics/opencode
-- **A bot account on your chat server** — with permissions to post messages and read room history
-  - Rocket.Chat: a bot user account (username + password)
-  - Mattermost: a Bot Account access token, or a regular account's username + password — see [Connectors](#connectors) below
+- **Administrator access to that server** — coop-keeper creates each bot's
+  account itself, with a generated password, using an administrator's
+  credentials you type into `~/.agentcoop/admin-profiles.yaml`. Only a
+  hand-written `config.yaml` needs a pre-existing bot account (Rocket.Chat:
+  username + password; Mattermost: a Bot Account token or a regular account's
+  username + password — see [Connectors](#connectors))
 - **At least one owner username** — someone who can approve/deny tool calls in chat
 
 ---
 
 ## Installation
 
-For detailed installation instructions, see [install-agent.md](install-agent.md).
+For detailed installation instructions, see [INSTALL.md](../INSTALL.md).
 
 Quick summary:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
-# The installer clones to ~/.agentcoop/repo, links `coop` into ~/.local/bin
-# and runs the setup wizard that writes ~/.agentcoop/config.yaml.
+# The installer clones to ~/.agentcoop/repo, links `coop` and `coop-provision`
+# into ~/.local/bin and installs coop-keeper. Then set up your first bot:
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
+# See "Managing Bots with coop-keeper" below.
 coop start
 ```
 
@@ -427,8 +432,8 @@ connectors:
     context_inject_files: []
 ```
 
-> Mattermost has no onboarding CLI wizard support yet — this block must be hand-written
-> (unlike Rocket.Chat, which `coop onboard` can generate for you).
+> coop-keeper writes this block for you on either platform; the reference below is
+> for reading a hand-written file or editing one by hand.
 
 **Connector Fields:**
 
@@ -727,12 +732,8 @@ filled-in copy to version control, plaintext here is safe.
 
 The gateway does **not** expand `$VAR`/`${VAR}` in config values — a string
 that happens to look like a placeholder is used exactly as written, like
-any other string. If you're upgrading from an older setup that used a
-`.env` file with `${VAR}` references, the next `coop start`
-(or opening `coop config`) folds those values into `config.yaml`
-as literal text and removes `.env` automatically — one-time, no action
-needed. Run `coop config migrate-env` first if you'd rather
-do that as a manual step or a dry run.
+any other string. (The v0-era `.env` migration is gone; a config that still
+uses `${VAR}` references must be rewritten with literal values.)
 
 ---
 
@@ -819,6 +820,82 @@ bug report or compare between machines. With the daemon running it also shows
 the active digest and warns when the file differs, so "I edited but forgot to
 reload" is visible. `config validate --json` and `config reload --json` emit
 structured output.
+
+### Managing Bots with coop-keeper
+
+coop-keeper is the built-in admin agent, installed at
+`~/.agentcoop/agents/builtin/coop-keeper/`. Run it from that directory with
+your own coding CLI — `opencode` (any model it supports, free ones included)
+or `claude` — and describe the bot you want in plain language:
+
+```bash
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
+```
+
+(Claude Code shows its workspace-trust dialog the first time; accept it —
+until then the directory's permission rules are ignored and every `coop`
+command prompts.)
+
+It translates between how you talk about a deployment and how `config.yaml`
+is structured. An **agent** is an `agents:` entry — a backend, a working
+directory and a persona; a **bot** is that agent's presence on one server —
+the connector (the account), the agent, and the rule binding them. An agent
+can have one bot per server.
+
+What it does, and how:
+
+- **Bootstrap.** With no `admin-profiles.yaml` yet, it asks for the platform,
+  the server URL, the team (Mattermost) and your own username there, writes a
+  profile with empty credential fields (`coop-provision init`), asks you to
+  fill them in with an editor, and verifies them (`coop-provision <profile>
+  check`). It never sees the credential.
+- **Create a bot.** It creates the server account with a generated password
+  it passes by file and never reads, joins the rooms other bots on that server
+  serve (asking about globs and about the first bot on a server), writes the
+  persona to `~/.agentcoop/agents/user/<agent>/AGENTS.md`, and saves the
+  connector, agent and rule in **one** configuration write. The first bot also
+  creates the shared `tool_presets` and the `default` templates every later bot
+  inherits — edit those to change every bot at once. Every bot username is kept
+  in `connector_templates.default.agent_chain.agent_usernames` so bots do not
+  answer each other without loop protection.
+- **Change a bot.** A room change is a patch on the rule plus the channel
+  joins; a persona change rewrites `AGENTS.md` and offers `coop reset` for the
+  agent's connectors. Adding an existing agent to a second server reuses its
+  entry and persona.
+- **Remove a bot.** Three ordered steps, confirmed once: detach the rule and
+  reload (the gateway reclaims the room's records), remove the connector, the
+  agent when nothing else uses it and the agent-chain entry and reload, then
+  delete the account and the agent's directory — each only when no surviving
+  bot, rule or agent still uses it. Mattermost deactivates accounts;
+  Rocket.Chat deletes them.
+
+What it guarantees, and what it does not:
+
+- **The plan is the unit of confirmation.** Nothing is written before you say
+  yes; the plan shows the exact configuration the write produces (from a
+  `--dry-run`), and a write applies only to the file it was planned against
+  (`--if-digest`) — an edit in the TUI in between makes it re-plan, never
+  merge. One keeper plan runs at a time (`~/.agentcoop/agents/plan.lock`).
+- **Shared things are named, never silently narrowed.** Before removing or
+  rewriting anything used by another rule, agent or bot, it stops and offers
+  the wider plan.
+- **Credentials never pass through it.** Its instructions forbid it; its
+  shipped permission files (`.claude/settings.json`, `opencode.json`) deny the
+  credential files to its file tools and allow only the paths it operates on;
+  every `coop`/`coop-provision` output it reads masks credentials as `***`.
+  These are guardrails against accidental exposure on your own machine, not a
+  sandbox — a determined model on OpenCode can still run a shell command that
+  reads a file, and an "always allow" answer widens what it may do.
+- **No rollback.** A plan that fails part-way stops, reports which steps
+  completed, and undoes nothing; you and it repair the state one confirmed
+  step at a time. A kept password file is named in the report.
+- **Comments in `config.yaml` are not preserved**; `description:` is.
+
+`coop upgrade` refreshes the files coop-keeper ships (listed in its
+`manifest.yaml`) and leaves everything else in the directory alone — your
+CLI's local settings, notes, a skill you added. To customise coop-keeper
+itself, copy the directory under `~/.agentcoop/agents/user/` and run it from
+there.
 
 ### Editing Configuration from the Command Line
 
@@ -1072,8 +1149,8 @@ coop send <room> --connector rc-main "message"
 ### Setup
 
 ```bash
-# Interactive setup wizard (creates config interactively)
-coop onboard [--repo-path PATH]
+# Create, change and remove bots in a conversation with coop-keeper
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 
 # Interactive config TUI — edit an existing config.yaml (see docs/config-tool.md)
 coop config
@@ -1801,7 +1878,7 @@ tail -f ~/.agentcoop/gateway.log
 
 ## Getting Help
 
-- **Documentation:** See [install-agent.md](install-agent.md) for installation details
+- **Documentation:** See [INSTALL.md](../INSTALL.md) for installation details
 - **Logs:** `tail -f ~/.agentcoop/gateway.log`
 - **GitHub:** https://github.com/HammerMei/agentcoop/issues
 - **Community:** Discuss on Anthropic's community forum

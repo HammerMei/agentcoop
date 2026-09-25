@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 
 from .config import GatewayConfig
-from .config_migrate import migrate_env_to_config
 from .runtime_lock import LOCK_FILE as PID_FILE  # noqa: F401 — re-exported for cli.py
 from .runtime_lock import RUNTIME_DIR, locked_pid
 from .runtime_lock import acquire as _lock_acquire
@@ -26,15 +25,11 @@ LOG_FILE = RUNTIME_DIR / "gateway.log"
 def _harden_config_permissions(config_path: str) -> None:
     """Chmod config.yaml to 0600, unconditionally.
 
-    Code-review finding: `migrate_env_to_config()`'s own `cfg.save()` only
-    chmods config.yaml when a migration actually ran (i.e. only when a
-    `.env` file existed) — a hand-written config.yaml that never had a
-    companion `.env` (exactly what the docs now recommend) was never
-    getting this protection from `coop start` at all,
-    contradicting the documented guarantee. Extracted as its own function
-    so it's unit-testable without going through `os.fork()` (this whole
-    module's docstring already notes `start_daemon()` itself isn't
-    unit-testable that way).
+    config.yaml holds plaintext secrets, and the documented guarantee is that
+    `coop start` protects it whether or not anything else ever did. Extracted
+    as its own function so it's unit-testable without going through
+    `os.fork()` (this whole module's docstring already notes `start_daemon()`
+    itself isn't unit-testable that way).
     """
     Path(config_path).chmod(0o600)
 
@@ -68,15 +63,14 @@ def _wait_for_startup_signal(read_fd: int) -> None:
 
     Protocol written by the daemon:
       - Zero or more ``info:<message>\\n`` lines for informational notices
-        that happened during startup but didn't fail anything (e.g. a one-
-        time config migration) — always shown, success or degraded.
+        that happened during startup but didn't fail anything — always
+        shown, success or degraded.
       - Zero or more ``error:<message>\\n`` lines for non-fatal startup failures.
       - A final ``ok\\n`` line to confirm the startup sequence completed.
 
     If the pipe closes without an ``ok`` line the daemon crashed before completing
-    startup (e.g. config error, unhandled exception, a FAILED one-time config
-    migration — see gateway/config_migrate.py's fail-closed contract).  In
-    that case we report failure and exit 1; the specific reason lives only
+    startup (e.g. config error, unhandled exception).  In that case we
+    report failure and exit 1; the specific reason lives only
     in the log (matching how every other fatal startup failure already
     behaves here — config load, lock acquisition, etc.).
 
@@ -205,52 +199,16 @@ def start_daemon(config_path: str) -> None:
             pass
         sys.exit(1)
 
-    # One-time migration: fold a .env-backed secret directly into
-    # config.yaml as a literal value, then remove .env (docs/design/
-    # config-tool.md decision 6 revisited — enforced migration rather than
-    # indefinitely supporting both forms). No-op, every subsequent start,
-    # once .env is gone. Failure is fatal and fail-closed, same as the
-    # lock-acquire/config-load failures below — a half-migrated config is
-    # worse than refusing to start.
-    try:
-        migration = migrate_env_to_config(config_path)
-    except Exception as e:
-        logger.error("Config migration failed: %s", e)
-        try:
-            os.write(
-                write_fd,
-                f"error:Config migration failed: {sanitize_pipe_message(str(e))}\n".encode(),
-            )
-            os.close(write_fd)
-        except OSError:
-            pass
-        _cleanup()
-        sys.exit(1)
-
-    if migration.migrated:
-        msg = (
-            f"Migrated {migration.ref_count} secret reference(s) from .env "
-            f"into config.yaml; .env moved to {migration.env_backup_path}."
-        )
-        logger.info(msg)
-        try:
-            os.write(write_fd, f"info:{sanitize_pipe_message(msg)}\n".encode())
-        except OSError:
-            pass
-
-    # config.yaml can hold a plaintext secret whether or not a migration
-    # just ran (e.g. a hand-written config.yaml that never had a .env) —
-    # chmod it unconditionally rather than relying on migrate_env_to_config()
-    # having done it as a side effect of its own cfg.save(). Best-effort:
-    # code-review finding — a read-only bind mount or a config.yaml owned
-    # by a different uid than the daemon process (both realistic in Docker)
-    # makes chmod() raise PermissionError even though the file is perfectly
-    # loadable; that must not block startup, just warn. (config_path's own
-    # existence is already guaranteed by this point — migrate_env_to_config()
-    # raises FileNotFoundError above, caught and fatal, before this line is
-    # ever reached — so only a permissions failure can land here.)
+    # config.yaml holds plaintext secrets — chmod it 0600 on every start.
+    # Best-effort: a read-only bind mount or a config.yaml owned by a
+    # different uid than the daemon process (both realistic in Docker) makes
+    # chmod() raise PermissionError even though the file is perfectly
+    # loadable; that must not block startup, just warn. A missing file is
+    # left for from_file() below to report as the config-load failure it is.
     try:
         _harden_config_permissions(config_path)
+    except FileNotFoundError:
+        pass  # from_file() reports the missing config below
     except OSError as e:
         logger.warning("Could not chmod config.yaml to 0600: %s", e)
 

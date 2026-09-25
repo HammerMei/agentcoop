@@ -20,28 +20,15 @@ curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh
 ```
 
 This will:
-1. Clone the repo to `~/agentcoop`
+1. Clone the repo to `~/.agentcoop/repo`
 2. Install dependencies with `uv sync`
 3. Create symlinks at `~/.local/bin/coop` and `~/.local/bin/coop-provision`
-4. Launch the interactive setup wizard
+4. Install coop-keeper, the built-in admin agent, to `~/.agentcoop/agents/builtin/coop-keeper/`
 
-### Option B: AI-guided install with Claude Code
+It installs files and nothing else. Configuration is done next, in a
+conversation with coop-keeper (see [Set up your first bot](#set-up-your-first-bot)).
 
-Ask Claude Code to install AgentCoop:
-
-```
-claude "Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md"
-```
-
-Claude will read the install guide and walk you through the setup interactively.
-
-### Option C: AI-guided install with opencode
-
-```
-opencode "Please install AgentCoop by following the instructions at https://raw.githubusercontent.com/HammerMei/agentcoop/main/docs/install-agent.md"
-```
-
-### Option D: Manual install
+### Option B: Manual install
 
 See the [Manual Steps](#manual-steps) section below.
 
@@ -114,31 +101,72 @@ Add `~/.local/bin` to your PATH if needed (add to `~/.zshrc` or `~/.bashrc`):
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### 4. Run the setup wizard
+### 4. Install coop-keeper
 
 ```bash
-coop onboard --repo-path ~/.agentcoop/repo
+mkdir -p ~/.agentcoop/agents/builtin ~/.agentcoop/agents/user
+cp -R ~/.agentcoop/repo/agents/coop-keeper ~/.agentcoop/agents/builtin/coop-keeper
+```
+
+(On a fresh install that is what `install.sh` does; afterwards `coop upgrade`
+refreshes only the files coop-keeper ships and leaves anything you add there
+alone.)
+
+### 5. Record the install for `coop upgrade`
+
+`coop upgrade` reads `~/.agentcoop/install_meta.json` to find the checkout;
+`install.sh` writes it, a manual install has to:
+
+```bash
+cat > ~/.agentcoop/install_meta.json <<META
+{
+  "method": "git",
+  "repo_path": "$HOME/.agentcoop/repo",
+  "version": "$(grep '^version' ~/.agentcoop/repo/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
+}
+META
 ```
 
 ---
 
-## Configuration
+## Set up your first bot
 
-The `onboard` wizard creates two files in `~/.agentcoop/`:
+Configuration is a conversation with **coop-keeper**, the built-in admin agent.
+Run it from its directory with whichever coding CLI you use — OpenCode works
+with any model it supports, including free ones:
 
-| File | Purpose |
+```bash
+cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
+```
+
+Claude Code asks you to trust the directory the first time you open it there;
+accept, or its permission rules are ignored and every command prompts.
+
+Then say what you want — "add a bot called bob to my Mattermost at
+https://mm.example, team lab, as a friendly release-notes writer". On a fresh
+machine it first asks for the server and your own username there, writes an
+empty profile to `~/.agentcoop/admin-profiles.yaml` for you to fill in with an
+administrator's credentials in an editor, and checks that they work. It then
+shows the whole plan — the account it will create, the rooms it will join, the
+persona it will write, the exact configuration it will save, and whether the
+gateway will be reloaded or started — and asks once. It never asks for, reads
+or repeats a password: bot passwords are generated into a file it passes by
+path, and it reads configuration only through commands that mask credentials.
+
+What it manages, in `~/.agentcoop/`:
+
+| Path | Purpose |
 |------|---------|
-| `config.yaml` | Connector, agent, and watcher definitions — including credentials, stored directly as plain values |
+| `config.yaml` | Connector, agent and watcher definitions — including credentials, stored directly as plain values, `0600` |
+| `admin-profiles.yaml` | Administrator credentials per server, for `coop-provision`; you fill these in, `0600` |
+| `agents/user/<agent>/` | Each agent's persona (`AGENTS.md`, plus a one-line `CLAUDE.md`) and working directory; `opencode.json`/`.claude/settings.json` pin the bot's CLI to its built-in agent |
+| `agents/builtin/coop-keeper/` | Coop-keeper itself; `coop upgrade` refreshes the files it ships and leaves everything else there alone |
 | `install_meta.json` | Install method and version (used by `upgrade`) |
 
-`config.yaml` is chmod'd `0600` automatically (by the wizard, by `coop start`, and by the config TUI on every save), so putting credentials directly in it is safe as long as you don't commit your filled-in copy to version control. `$VAR`/`${VAR}` references are not expanded — if you're upgrading from an older setup that used a `.env` file, the next `coop start` (or opening `coop config`) migrates it into `config.yaml` automatically, one-time.
-
-**Mattermost:** the `onboard` wizard only walks through Rocket.Chat setup today — it does not
-yet generate a Mattermost `connectors:` block. To add a Mattermost connector, run the wizard
-for your first (Rocket.Chat) connector as usual, then hand-edit `config.yaml` to add a second
-connector with `type: mattermost` — see the [Connectors](user-guide.md#connectors) section of
-the user guide for the full field reference and a worked example (including the
-`server.team`/`server.token` fields Mattermost needs that Rocket.Chat doesn't).
+Both platforms are supported the same way. The same commands coop-keeper drives
+— `coop config add/remove/patch`, `coop-provision` — are documented in the
+[user guide](docs/user-guide.md#editing-configuration-from-the-command-line)
+for use by hand or from a script.
 
 ### Watcher room formats
 
@@ -237,24 +265,12 @@ Common causes:
 - Invalid config YAML — run `coop config validate` to check syntax, cross-references,
   and per-connector credentials without starting the daemon (add `--lint` to also flag redundant
   defaults)
-- Wrong Rocket.Chat credentials — verify RC_URL, RC_USERNAME, RC_PASSWORD in `~/.agentcoop/.env`
+- Wrong Rocket.Chat credentials — verify `server.url`/`server.username`/`server.password` in `config.yaml`
 - Wrong Mattermost credentials — verify `server.url`/`server.team`/`server.token` (or `username`/`password`) in `config.yaml`
 - Bot account not added to the watched room in Rocket.Chat, or not a member of the configured `server.team` in Mattermost
 
-### Permission denied errors
+### Changing a bot later
 
-The `.env` file should be readable only by you:
-```bash
-chmod 600 ~/.agentcoop/.env
-```
-
-### Running onboard again
-
-Re-running `onboard` when a config already exists offers three options:
-1. Update existing (keeps old values, you can change them)
-2. Start fresh (backs up old files with a timestamp)
-3. Cancel
-
-```bash
-coop onboard
-```
+Run coop-keeper again from its directory and say what should change — a
+persona, the rooms a bot serves, a second server for an existing agent, or a
+removal. Every change is shown as a plan before anything is written.

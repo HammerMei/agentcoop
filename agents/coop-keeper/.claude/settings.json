@@ -1,0 +1,30 @@
+{
+  "agent": "",
+  "permissions": {
+    "allow": [
+      "Bash(coop config *)",
+      "Bash(coop status)",
+      "Bash(coop start)",
+      "Bash(coop stop)",
+      "Bash(coop reset *)",
+      "Bash(coop list *)",
+      "Bash(coop-provision *)",
+      "Bash(mkdir *)",
+      "Bash(mktemp)",
+      "Bash(mktemp *)",
+      "Bash(openssl rand *)",
+      "Bash(rm *)",
+      "Bash(ls *)",
+      "Bash(date *)",
+      "Read(~/.agentcoop/agents/**)",
+      "Edit(~/.agentcoop/agents/**)",
+      "Read(~/.agentcoop/install_meta.json)"
+    ],
+    "deny": [
+      "Read(~/.agentcoop/config.yaml)",
+      "Read(~/.agentcoop/admin-profiles.yaml)",
+      "Read(~/.agentcoop/.config-backups/**)",
+      "Read(~/.agentcoop/agents/.bot-password.*)"
+    ]
+  }
+}

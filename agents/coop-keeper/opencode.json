@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "build",
+  "permission": {
+    "external_directory": {
+      "~/.agentcoop/agents/*": "allow"
+    },
+    "read": {
+      "*/.agentcoop/config.yaml": "deny",
+      "*/.agentcoop/admin-profiles.yaml": "deny",
+      "*/.agentcoop/.config-backups/*": "deny",
+      "*/.agentcoop/agents/.bot-password.*": "deny"
+    },
+    "edit": {
+      "*/.agentcoop/config.yaml": "deny",
+      "*/.agentcoop/admin-profiles.yaml": "deny",
+      "*/.agentcoop/.config-backups/*": "deny",
+      "*/.agentcoop/agents/.bot-password.*": "deny"
+    }
+  }
+}

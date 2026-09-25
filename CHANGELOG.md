@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **coop-keeper**, the built-in admin agent (`agents/coop-keeper/`, installed
+  to `~/.agentcoop/agents/builtin/coop-keeper/`). Run it from that directory
+  with your own `opencode` or `claude` CLI to create, change and remove bots in
+  a conversation: it bootstraps `admin-profiles.yaml` without seeing a
+  credential, creates the account with a generated password it passes by file,
+  writes the persona under `~/.agentcoop/agents/user/<agent>/`, saves the
+  connector, agent and rule in one configuration write, and maintains the
+  shared agent-chain list. Every change is shown as a plan and confirmed once;
+  writes are `--dry-run`-planned and `--if-digest`-guarded; nothing is rolled
+  back. Ships `.claude/settings.json` and `opencode.json` that allow the paths
+  it operates on and deny the credential files — a guardrail, not a sandbox.
+  `docs/design/coop-keeper-design.md`; user guide "Managing Bots with
+  coop-keeper".
+- `coop upgrade` refreshes the keeper directory by **manifest**
+  (`agents/coop-keeper/manifest.yaml`): paths listed `in-use` are overwritten,
+  paths listed `obsolete` are removed, anything unlisted is left alone.
+
+### Removed
+- **The `coop onboard` wizard** (`gateway/onboard.py`, `make setup`,
+  `install.sh --no-onboard`) and `docs/install-agent.md` — replaced by
+  coop-keeper. No alias is left; `coop onboard` is an unknown command.
+- **The `.env` migration**: `coop config migrate-env`, the automatic migration
+  on `coop start` and before the config TUI opens, and the `.env` symlink in
+  the Docker entrypoint. The v0 → v1 upgrade is a reinstall, so no installed
+  configuration still carries a `.env`. `${VAR}` references in `config.yaml`
+  were never expanded by the gateway and remain plain strings.
+- `install.sh` no longer runs anything after installing files; it prints the
+  command that starts coop-keeper.
+
 ### Changed
 - **The OpenCode role-enforcement plugin is handed to the sidecar by the
   gateway, not copied to disk by the wizard** (#157). Until now the plugin was

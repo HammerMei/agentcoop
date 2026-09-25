@@ -28,7 +28,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 import yaml
 
@@ -767,10 +766,13 @@ def connector_fragment(
 
 
 def _canonical_origin(url: object) -> str:
-    """Scheme and host lower-cased, trailing slash dropped — the reading of
-    "the same server" §3.4 gives (the connector parsers `rstrip("/")`)."""
-    parts = urlsplit(str(url))
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+    """The runtime's reading of "the same server" (§3.4): `canonical_origin`
+    from `gateway/core/bot_identity.py` — default port dropped, host
+    lower-cased, path kept — so `add connector --credentials-from` and the
+    daemon's duplicate-identity check agree on what one installation is."""
+    from .core.bot_identity import canonical_origin
+
+    return canonical_origin(str(url))
 
 
 def _credentials_of(
