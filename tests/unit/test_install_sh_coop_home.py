@@ -16,14 +16,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.helpers import run_install_sh_function, subprocess_env
+from tests.helpers import COOP_HOME_SPELLINGS, run_install_sh_function, subprocess_env
 
 
 def _run(call: str, *, home: Path, coop_home: str | None, shell: str = "/bin/bash"):
     env = subprocess_env(home=home, coop_home=coop_home)
     env["SHELL"] = shell  # persist_coop_home checks the ACTIVE shell's rc file
     return run_install_sh_function(
-        ("coop_home_dir", "persist_coop_home"), call, env=env, capture_output=True, text=True,
+        ("coop_home_dir", "rc_exports_coop_home", "persist_coop_home"), call,
+        env=env, capture_output=True, text=True,
     )
 
 
@@ -55,28 +56,19 @@ class TestCoopHomeDir(unittest.TestCase):
         r = _run("coop_home_dir", home=self.home, coop_home="")
         self.assertEqual(r.stdout.strip(), f"{self.home}/.agentcoop")
 
-    def test_an_absolute_path_is_used_as_given(self):
-        r = _run("coop_home_dir", home=self.home, coop_home="/srv/coop")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), "/srv/coop")
-
-    def test_a_tilde_is_expanded(self):
-        r = _run("coop_home_dir", home=self.home, coop_home="~/coop")
-        self.assertEqual(r.stdout.strip(), f"{self.home}/coop")
-
-    def test_the_filesystem_root_is_refused_by_name(self):
-        r = _run("coop_home_dir", home=self.home, coop_home="/")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(r.stdout, "")
-        self.assertIn("COOP_HOME", r.stderr)
-        self.assertIn("root", r.stderr)
-
-    def test_a_relative_path_is_refused_by_name(self):
-        r = _run("coop_home_dir", home=self.home, coop_home="coop")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(r.stdout, "")
-        self.assertIn("COOP_HOME", r.stderr)
-        self.assertIn("absolute", r.stderr)
+    def test_every_spelling_in_the_shared_table(self):
+        """The same table `gateway/paths.py` is tested against: the two
+        validators must not drift apart (they had, after one round)."""
+        for value, accepted in COOP_HOME_SPELLINGS:
+            with self.subTest(value=value):
+                r = _run("coop_home_dir", home=self.home, coop_home=value)
+                if accepted:
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual(r.stdout.strip(), value.replace("~", str(self.home), 1))
+                else:
+                    self.assertNotEqual(r.returncode, 0, value)
+                    self.assertEqual(r.stdout, "")
+                    self.assertIn("COOP_HOME must be an absolute, canonical path", r.stderr)
 
 
 class TestPersistCoopHome(unittest.TestCase):
@@ -103,18 +95,24 @@ class TestPersistCoopHome(unittest.TestCase):
         self.assertEqual(_sourced_value(self.bashrc, "bash"), "/srv/coop")
         self.assertEqual(_sourced_value(self.zshrc, "zsh"), "/srv/coop")
 
-    def test_shell_significant_characters_in_the_path_stay_literal(self):
-        # `$USER` must not expand and a quote must not end the string when the
-        # next shell sources the file (Codex, PR #186 round 1).
-        self.zshrc.write_text("")
-        for path in ("/srv/$USER/coop", "/srv/o'neil/coop", "/srv/`id`/coop"):
-            for rc in (self.bashrc, self.zshrc):
-                rc.write_text("")
-            r = _run(f"persist_coop_home '{path}'".replace("'/srv/o'neil/coop'", '"/srv/o\'neil/coop"'),
-                     home=self.home, coop_home=None)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(_sourced_value(self.bashrc, "bash"), path, path)
-            self.assertEqual(_sourced_value(self.zshrc, "zsh"), path, path)
+    def test_a_commented_out_export_is_not_an_export(self):
+        # `# export COOP_HOME='/srv/coop'` used to satisfy the fixed-string
+        # check: nothing written, no warning, and the next shell had no value.
+        self.bashrc.write_text("# export COOP_HOME='/srv/coop'\n")
+        r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(_sourced_value(self.bashrc, "bash"), "/srv/coop")
+
+    def test_a_prefix_of_the_value_is_another_value(self):
+        # `export COOP_HOME=/srv/coop-old` is not `/srv/coop`: it is the
+        # "another value" case, warned about and left alone, not a match.
+        self.bashrc.write_text("export COOP_HOME=/srv/coop-old\n")
+        r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("[WARNING]", r.stderr)
+        self.assertIn("another value", r.stderr)
+        self.assertEqual(self.bashrc.read_text(), "export COOP_HOME=/srv/coop-old\n")
 
     def test_a_fish_user_is_warned_even_when_a_dormant_bashrc_took_the_line(self):
         # Only bash/zsh rc files are written; a fish user's startup file is not,

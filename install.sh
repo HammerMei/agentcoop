@@ -39,10 +39,12 @@ error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; 
 
 # ---------------------------------------------------------------------------
 # Runtime directory — $COOP_HOME, default ~/.agentcoop (#182). The same rule as
-# gateway/paths.py: `~` expanded, a relative path refused.
+# gateway/paths.py (COOP_HOME_RULE there): `~` expanded; then absolute,
+# canonical, and spelled only with letters, digits, `.`, `_`, `-` and `/` —
+# the value is embedded verbatim by every writer that follows.
 # ---------------------------------------------------------------------------
 coop_home_dir() {
-  # Echo the runtime directory. Exit 1 (message on stderr) for a relative COOP_HOME.
+  # Echo the runtime directory. Exit 1 (message on stderr) for a COOP_HOME that breaks the rule.
   local raw="${COOP_HOME:-}"
   if [ -z "$raw" ]; then
     printf '%s\n' "$HOME/.agentcoop"
@@ -53,10 +55,19 @@ coop_home_dir() {
     "~/"*) raw="$HOME/${raw#\~/}" ;;
   esac
   case "$raw" in
-    /)  printf 'COOP_HOME must not be the filesystem root (got %s)\n' "$raw" >&2; return 1 ;;
-    /*) printf '%s\n' "$raw" ;;
-    *)  printf 'COOP_HOME must be an absolute path (got %s)\n' "$raw" >&2; return 1 ;;
+    *[!A-Za-z0-9._/-]*|/|//*|*/|*//*|*/./*|*/.|*/../*|*/..|[!/]*)
+      printf "COOP_HOME must be an absolute, canonical path (no '.', '..' or empty components, no trailing '/', not '/') using only letters, digits, '.', '_', '-' and '/' (got %s)\n" "$raw" >&2
+      return 1 ;;
   esac
+  printf '%s\n' "$raw"
+}
+rc_exports_coop_home() {
+  # $1 = rc file, $2 = dir. 0 when an ACTIVE (uncommented) `export COOP_HOME=`
+  # line in the file assigns exactly $2 — quoted either way or bare. A
+  # commented-out line is not an export, and `/srv/coop-old` is not `/srv/coop`.
+  grep -E '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$1" 2>/dev/null \
+    | sed -E "s/^[[:space:]]*export[[:space:]]+COOP_HOME=//; s/[[:space:]]*$//; s/^'(.*)'$/\1/; s/^\"(.*)\"$/\1/" \
+    | { while IFS= read -r val; do [ "$val" = "$2" ] && exit 0; done; exit 1; }
 }
 persist_coop_home() {
   # $1 = runtime dir. A non-default location is exported from the shell rc files
@@ -76,9 +87,7 @@ persist_coop_home() {
   esac
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     [ -f "$rc" ] || continue
-    if grep -qF "export COOP_HOME=$quoted" "$rc" 2>/dev/null \
-       || grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null \
-       || grep -qF "export COOP_HOME=$dir" "$rc" 2>/dev/null; then
+    if rc_exports_coop_home "$rc" "$dir"; then
       [ "$rc" = "$active_rc" ] && active_ok=true
       continue
     fi

@@ -535,3 +535,41 @@ Notes:
   round has no promise-contradicting finding") one confirming round then stop.
 
 **Status: open.** Settles with the confirming round.
+
+## 2026-09-25 — PR #186 round 2
+
+**Chain detector:** 3 findings on `f601622`; `install.sh` 2 and `gateway/upgrade.py` 1 on
+our own last fix, **streak 1 each** — once is noise by the rule, but all three land on
+round 1's fixes and the "same kind" test fires (below).
+**Control finding:** none. Agreement **uncorroborated**. The tree was not touched until
+the second rater had reported (the round-1 slip, not repeated).
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `COOP_HOME=/tmp/..` passes the root refusal; basename `..` in the keeper globs (P2) | true; `cheap`: refuse non-canonical components, not normalise (bash has no normpath in reach) | same; traced live — and **the two validators already disagreed** (`paths.py` refused `//`/`/.`, `coop_home_dir` did not); Codex's normaliser is ~12 lines of bash | **FIX** via the class rule |
+| **F2** `"` or `\` in COOP_HOME corrupts the generated permission JSON; `\b` parses as another path (P2) | true, silent; `cheap`: reject at the validators; JSON serialisation is a new concept and misses `install_meta.json`'s heredoc | same; per-writer escaping is O(writers) ≥ 5; owning layer is the loader, finding points at a writer | **FIX** via the class rule |
+| **F3** a commented-out exact export counts as active; `/srv/coop-old` matches `/srv/coop` as a prefix (P2) | true; `cheap`: compare each active export's value for equality, ~8 lines | same; ranks **first** — a prefix match silently leaves a live install unmentioned; not an anchored regex (escaping the path is the same bug class) | **FIX** — `rc_exports_coop_home` extracts each uncommented export's value and compares it whole |
+
+**The pattern.** Round 1: `$`, quotes, backticks, `/`. Round 2: `/tmp/..`, `"`, `\`,
+`//`. Both raters: one class — *a COOP_HOME spelling some writer downstream did not
+anticipate* — and one rule closes it. Rater 2 proposed a denylist (`"`, `\`, control
+characters) plus canonical form and handed the glob metacharacters up; rater 1 a
+whitelist. **Taken: the whitelist** — absolute, canonical, letters/digits/`.`/`_`/`-`/`/`
+only — because it subsumes the denylist, settles the glob question, and is one sentence
+in the guide. Enforced identically by `gateway/paths.py` (`COOP_HOME_RULE`) and
+`install.sh` (`coop_home_dir`); `tests/helpers.py` `COOP_HOME_SPELLINGS` is the
+enumerated surface both suites run. Cost ~4 lines each side plus the table; tax one
+invariant. In the increment: "the base is a constant the loader owns" includes what a
+valid base is, and the owner's framing (a rare, conflict-only setting) makes a strict
+spelling acceptable.
+
+Notes:
+- Adoption: 3 of 3, all `cheap`, none scored. Rater 2's built rates for the log:
+  F1 0.0003–0.04/yr, F2 ≤ 0.004/yr, F3 0.003–0.2/yr (operators 5–20 × P(sets COOP_HOME)
+  0.05–0.2 × P(spelling)); `hours_per_hit` 0.5–3; discount 1.0 (no clause covers install).
+- Severity re-ranked by both: F3 > F2 > F1. Codex: three P2.
+- No promise-contradicting finding. Next: one confirming round. **If round 3 lands on
+  `install.sh` or `upgrade.py` again, that is streak 2 — stop patching and re-read the
+  increment with the owner.**
+
+**Status: open.** Settles with the confirming round.

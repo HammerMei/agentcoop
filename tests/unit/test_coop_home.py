@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.helpers import subprocess_env
+from tests.helpers import COOP_HOME_SPELLINGS, subprocess_env
 
 REPO = Path(__file__).resolve().parents[2]
 PROBE = "from gateway.paths import RUNTIME_DIR, ATTACHMENTS_DIR_DEFAULT; print(RUNTIME_DIR); print(ATTACHMENTS_DIR_DEFAULT)"
@@ -55,18 +55,16 @@ class TestCoopHome(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.splitlines()[0], str(self.tmp / "elsewhere"))
 
-    def test_the_filesystem_root_is_refused_by_name(self):
-        """`/` is absolute, but its name is empty — coop-keeper's opencode globs
-        are rewritten by directory name — and nothing belongs at the root."""
-        r = _import_paths("/")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("COOP_HOME", r.stderr)
-        self.assertIn("root", r.stderr)
-
-    def test_a_relative_path_is_refused_by_name(self):
-        """A relative base would depend on the CWD of whichever process imported
-        first — the very ambiguity #182 removes. Refused, naming the variable."""
-        r = _import_paths("coop-home")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("COOP_HOME", r.stderr)
-        self.assertIn("absolute", r.stderr)
+    def test_every_spelling_in_the_shared_table(self):
+        """One rule, enforced here and in install.sh — `COOP_HOME_SPELLINGS`
+        is the surface, so a new spelling is one line, run through both."""
+        for value, accepted in COOP_HOME_SPELLINGS:
+            with self.subTest(value=value):
+                r = _import_paths(value, home=str(self.tmp))
+                if accepted:
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    expected = value.replace("~", str(self.tmp), 1)
+                    self.assertEqual(r.stdout.splitlines()[0], expected)
+                else:
+                    self.assertNotEqual(r.returncode, 0, value)
+                    self.assertIn("COOP_HOME must be an absolute, canonical path", r.stderr)

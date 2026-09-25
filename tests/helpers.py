@@ -265,6 +265,38 @@ def isolate_runtime_dir(testcase):
     return tmp, runtime
 
 
+# Every spelling of COOP_HOME the two validators — `gateway/paths.py` and
+# install.sh's `coop_home_dir` — must agree on: (value, accepted). `~` is
+# expanded before the rule applies, so `~/coop` stands for `<HOME>/coop`. The
+# rule is one rule so that every writer downstream (the rc line, the keeper's
+# JSON permission files and their globs, install_meta.json, the skills' prose)
+# can embed the value verbatim; two review rounds each found a writer that
+# could not. Adding a spelling here runs it through both suites.
+COOP_HOME_SPELLINGS = (
+    ("/srv/coop", True),
+    ("/srv/coop-2.0_x/home", True),
+    ("~/coop", True),
+    ("coop", False),                 # relative
+    ("./coop", False),
+    ("/", False),                    # the root: no name for the keeper's globs
+    ("//srv/coop", False),           # POSIX keeps a leading `//`
+    ("/srv/coop/", False),           # trailing `/`
+    ("/srv//coop", False),           # empty component
+    ("/srv/./coop", False),
+    ("/tmp/..", False),              # resolves to `/` past the root check
+    ("/srv/../coop", False),
+    ("/srv/a b", False),             # space
+    ('/srv/a"b', False),             # JSON
+    ("/srv/a\\b", False),            # JSON escape, and `\b` reads as a different path
+    ("/srv/$USER/coop", False),      # shell expansion in the rc line
+    ("/srv/o'neil", False),
+    ("/srv/`id`/coop", False),
+    ("/srv/a*b", False),             # glob-matched by both permission files
+    ("/srv/a?b", False),
+    ("/srv/a\tb", False),            # control character
+)
+
+
 def subprocess_env(*, home=None, coop_home=None) -> dict:
     """The environment for a subprocess that must see `COOP_HOME` as the test
     says — unset unless given — and, optionally, a substitute `HOME`. The
