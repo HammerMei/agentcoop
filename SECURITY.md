@@ -50,7 +50,7 @@ The following are **out of scope**:
 - Issues requiring physical access to the server
 - Attacks by other accounts on the same host: AgentCoop is installed and run by one
   operator on a host they control; multi-tenant hosts are not a supported deployment
-  (`docs/requirements.md` §14.5). The installer refuses a runtime directory that is a
-  symlink, not the operator's, or world-writable, as a guard against accidents, not
-  as a defence against a hostile local user
+  (`docs/requirements.md` §14.5). The installer refuses a runtime directory that is
+  not the operator's or is world-writable (a symlink is followed and its target
+  judged), as a guard against accidents, not as a defence against a hostile local user
 - Social engineering attacks

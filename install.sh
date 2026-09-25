@@ -77,27 +77,27 @@ coop_home_hint() {
   esac
 }
 runtime_dir_is_ours() {
-  # $1 = runtime dir. 0 when it does not exist yet, or is a real directory owned
-  # by the invoking user that other users cannot write to. Everything the
+  # $1 = runtime dir. 0 when it does not exist yet, or is a directory owned by
+  # the invoking user that other users cannot write to. A symlink is followed
+  # and its TARGET judged — symlinks are supported everywhere else, and a
+  # `~/.agentcoop -> /Volumes/big/agentcoop` is a normal setup. Everything the
   # installer puts under it — the repo clone that `~/.local/bin/coop` runs from
   # above all — trusts the directory. This guards the accidental case: a
-  # COOP_HOME typed under a shared parent such as /tmp, a stray symlink, a
-  # world-writable mode. It is not a defence against another account on the
-  # same host — multi-tenant hosts are outside what AgentCoop promises
-  # (SECURITY.md, requirements §14.5), so group-writable directories, parent
-  # directories and the like are deliberately not examined.
+  # COOP_HOME typed under a shared parent such as /tmp, a world-writable mode.
+  # It is not a defence against another account on the same host — multi-tenant
+  # hosts are outside what AgentCoop promises (SECURITY.md, requirements
+  # §14.5), so group-writable directories, parent directories and the like are
+  # deliberately not examined. Runs on the default directory too, so the
+  # messages name the directory, never a variable the operator may not have set.
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  if [ -L "$1" ]; then
-    printf '[ERROR] %s is a symbolic link; COOP_HOME must be a real directory.\n' "$1" >&2; return 1
-  fi
   if [ ! -d "$1" ]; then
-    printf '[ERROR] %s exists and is not a directory.\n' "$1" >&2; return 1
+    printf '[ERROR] %s exists and is not a directory (or is a link to something that is not).\n' "$1" >&2; return 1
   fi
   if [ ! -O "$1" ]; then
-    printf '[ERROR] %s is not owned by %s; COOP_HOME must be your own directory.\n' "$1" "$(id -un)" >&2; return 1
+    printf '[ERROR] the runtime directory %s is not owned by %s.\n' "$1" "$(id -un)" >&2; return 1
   fi
-  if [ -n "$(find "$1" -maxdepth 0 -perm -o+w 2>/dev/null)" ]; then
-    printf '[ERROR] %s is writable by other users; COOP_HOME must be a directory only you can write to.\n' "$1" >&2; return 1
+  if [ -n "$(find -L "$1" -maxdepth 0 -perm -o+w 2>/dev/null)" ]; then
+    printf '[ERROR] the runtime directory %s is writable by other users; it must be one only you can write to.\n' "$1" >&2; return 1
   fi
   return 0
 }

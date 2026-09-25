@@ -59,11 +59,11 @@ class TestCoopHomeDir(unittest.TestCase):
 
 class TestRuntimeDirIsOurs(unittest.TestCase):
     """The installer clones the repo that `~/.local/bin/coop` runs from under
-    the runtime dir, so a directory another local user pre-created, links, or
-    can write into would let them replace `coop` (Codex security review, PR
-    #186 round 3). Absent, or a real directory of ours that others cannot
-    write to, is fine. "Owned by someone else" cannot be made without root and
-    is not tested."""
+    the runtime dir, so a directory another local user pre-created or can
+    write into would let them replace `coop` (Codex security review, PR #186
+    round 3). Absent, or a directory of ours that others cannot write to, is
+    fine; a symlink is followed and its target judged. "Owned by someone else"
+    cannot be made without root and is not tested."""
 
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
@@ -86,15 +86,35 @@ class TestRuntimeDirIsOurs(unittest.TestCase):
         r = self._check(d)
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_a_symlink_is_refused(self):
+    def test_a_symlink_to_our_own_private_directory_is_fine(self):
+        # Symlinks are followed everywhere in AgentCoop, and the check runs on
+        # the DEFAULT directory too: `~/.agentcoop -> /Volumes/big/agentcoop`
+        # must keep installing. The target is what is judged.
+        real = self.home / "real"
+        real.mkdir(mode=0o755)
+        link = self.home / "coop"
+        link.symlink_to(real)
+        r = self._check(link)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+
+    def test_a_symlink_to_a_directory_others_can_write_to_is_refused(self):
+        import os
         real = self.home / "real"
         real.mkdir()
+        os.chmod(real, 0o777)
         link = self.home / "coop"
         link.symlink_to(real)
         r = self._check(link)
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("[ERROR]", r.stderr)
-        self.assertIn("symbolic link", r.stderr)
+        self.assertIn("writable by other users", r.stderr)
+
+    def test_the_messages_never_name_the_variable(self):
+        # On the default path the operator never set COOP_HOME.
+        f = self.home / "coop"
+        f.write_text("")
+        r = self._check(f)
+        self.assertNotIn("COOP_HOME", r.stderr)
 
     def test_a_file_is_refused(self):
         f = self.home / "coop"
