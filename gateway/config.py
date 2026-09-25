@@ -653,12 +653,22 @@ def config_base_dir() -> Path:
     return RUNTIME_DIR
 
 
+def _expand_user(p: str, label: str) -> str:
+    """`Path.expanduser()`, with `~nosuchuser` reported as a config problem:
+    it raises `RuntimeError`, which `collect_config` does not catch (it catches
+    `ValueError`), so `coop config validate` would traceback on one bad entry."""
+    try:
+        return str(Path(p).expanduser())
+    except RuntimeError as exc:
+        raise ValueError(f"{label}: cannot expand {p!r} ({exc})") from exc
+
+
 def resolve_working_directory(raw: str, base_dir: Path) -> str:
     """`working_directory` as the loader stores it: `~` expanded first, then a
     still-relative path resolved against `base_dir` (`config_base_dir()`). The
     config TUI's inline hint calls this too, so it can never disagree with the
     loader."""
-    working_directory = str(Path(raw).expanduser())
+    working_directory = _expand_user(raw, "working_directory")
     if not Path(working_directory).is_absolute():
         working_directory = str((base_dir / working_directory).resolve())
     return working_directory
@@ -695,7 +705,7 @@ def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_f
             continue
         # `~` is the user's home, as written (ruling A on #182) — it is not
         # absolute, so without this it became `<base>/~/...`.
-        p = str(Path(p).expanduser())
+        p = _expand_user(p, label)
         if not Path(p).is_absolute():
             resolved.append(str((base_dir / p).resolve()))
         else:

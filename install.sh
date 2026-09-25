@@ -63,19 +63,27 @@ persist_coop_home() {
   # keeper's CLI calls resolve the same directory in later shells. An rc file
   # that already exports a DIFFERENT value is left alone and named, never
   # stacked: which line wins would depend on file order.
-  local dir="$1" rc
+  local dir="$1" rc exported=false
   [ "$dir" = "$HOME/.agentcoop" ] && return 0
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     [ -f "$rc" ] || continue
-    if grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null; then
+    if grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null \
+       || grep -qF "export COOP_HOME=$dir" "$rc" 2>/dev/null; then
+      exported=true
       continue
     fi
     if grep -Eq '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$rc" 2>/dev/null; then
-      printf '%s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
+      printf '[WARNING] %s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
       continue
     fi
     printf '\n# Added by AgentCoop installer\nexport COOP_HOME="%s"\n' "$dir" >> "$rc"
+    exported=true
   done
+  if [ "$exported" = false ]; then
+    # No bash/zsh rc file took it (fish, or a bare account): without the export
+    # the next shell's `coop` silently uses ~/.agentcoop.
+    printf '[WARNING] COOP_HOME was not added to any shell rc file; export COOP_HOME="%s" in your shell yourself.\n' "$dir" >&2
+  fi
 }
 RUNTIME_DIR=$(coop_home_dir) || exit 1
 export COOP_HOME="$RUNTIME_DIR"

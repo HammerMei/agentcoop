@@ -720,11 +720,13 @@ Always use explicit domain patterns to prevent SSRF attacks. Avoid `params: ".*"
 ### Paths
 
 Everything AgentCoop keeps lives under one **runtime directory**: `config.yaml`,
-`admin-profiles.yaml`, state, logs, the control socket, the attachment cache, the
-coop-keeper and the agents it creates. That directory is `$COOP_HOME` when the variable
-is set, otherwise `~/.agentcoop`. Wherever this guide writes `~/.agentcoop/…`, read
-`$COOP_HOME/…` if you set one — the installer exports it from your shell rc file
-when you install somewhere else (`COOP_HOME=/srv/coop bash install.sh`).
+`admin-profiles.yaml`, state, logs, the control socket, the attachment cache,
+coop-keeper and the agents it creates, and the `repo/` clone a `curl | bash` install
+makes. That directory is `$COOP_HOME` when the variable is set, otherwise
+`~/.agentcoop`. Wherever this guide writes `~/.agentcoop/…`, read `$COOP_HOME/…` if
+you set one — the installer adds the export to `~/.bashrc` and `~/.zshrc` when you
+install somewhere else (`COOP_HOME=/srv/coop bash install.sh`), and tells you to do
+it yourself when neither file exists.
 
 A **relative path** in `config.yaml` — `working_directory`, `context_inject_files`,
 `attachments.cache_dir_global` — is resolved against that directory, **not** against

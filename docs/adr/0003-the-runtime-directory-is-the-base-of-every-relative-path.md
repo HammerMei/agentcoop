@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-25
-- **Issue:** #182 (from PR #181 round 9, `docs/agents/finding-triage-log.md`)
+- **Issue:** #182
 
 ## Context
 
@@ -17,7 +17,7 @@ The file is read in more than one way, and the base moved with each:
 - the daemon reads `~/.agentcoop/config.yaml` unresolved, because a repointed
   symlink must be followed on `config reload`;
 - the config tool validates a temp copy **beside the resolved target** before
-  writing (PR #181), so through the Docker mode-1 symlink
+  writing, so through the Docker mode-1 symlink
   (`~/.agentcoop/config.yaml → ~/.agentcoop/config/config.yaml`) a relative
   `working_directory` resolved against `config/` at save time and against
   `~/.agentcoop/` at run time — a valid config was refused as "introduces a new
@@ -54,7 +54,8 @@ what the operator typed, not a synonym for the base.
   mattering; `config_edit.validate_document` no longer needs to place its temp file
   beside the config. `EditableConfig.save()` still writes beside the target, for
   `os.replace` atomicity, not for path resolution.
-- A released-semantics change with no compatibility layer (owner's standing ruling):
+- A released-semantics change with no compatibility layer (the project's policy for
+  released semantics):
   a config kept outside the runtime directory that relied on relative paths must
   make them absolute. Recorded in the changelog and the user guide.
 - Shipped examples write `working_directory: work` rather than
@@ -68,5 +69,5 @@ what the operator typed, not a synonym for the base.
   not relocate an installation: `install_meta.json`, the keeper's files and any
   absolute path in `config.yaml` name the directory they were written under.
 - `~` is expanded in `context_inject_files` too, so the three path fields agree.
-- Docker keeps `/root/.agentcoop` throughout (owner's ruling: internal testing only);
+- Docker keeps `/root/.agentcoop` throughout — the image is for internal testing;
   the entrypoint does not read `COOP_HOME`.

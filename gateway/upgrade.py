@@ -169,25 +169,47 @@ def _remove_path(target: Path) -> bool:
     return False
 
 
-def keeper_text_for(text: str, runtime_dir: Path) -> str:
-    """A shipped coop-keeper text file as it is written under `runtime_dir`.
+def keeper_text_for(text: str, runtime_dir: Path, rel: str) -> str:
+    """A shipped coop-keeper text file (`rel`, its path inside the keeper
+    directory) as it is written under `runtime_dir`.
 
     The shipped files spell the default runtime directory: `~/.agentcoop/...`
     in the Claude permission rules and the skills' prose, `*/.agentcoop/...` in
-    opencode's permission globs. Under a non-default `COOP_HOME` those would
+    opencode's read/edit globs. Under a non-default `COOP_HOME` those would
     miss every path the keeper touches — each edit prompts — and, worse, miss
     the credential files the deny rules guard, silently. So for a non-default
-    directory both spellings become that directory (#182). The default
-    directory keeps the shipped bytes: `~` and `*/` there are deliberate, and
-    an installation that never set `COOP_HOME` should not depend on this.
+    directory each spelling becomes that directory (#182), in the form the
+    file's reader understands:
+
+    - `.claude/settings.json`: `//<dir>/...` — in a Claude Code permission
+      rule a single leading `/` is relative to the settings source, and only
+      `//` is an absolute path.
+    - `opencode.json`: `external_directory` takes the absolute directory; the
+      read/edit globs keep their `*/` prefix and only the directory NAME
+      changes (`*/.agentcoop/config.yaml` → `*/coop/config.yaml`), so whatever
+      the shipped glob matches against, the rewritten one matches the same
+      way. Matching under a non-default directory has not been checked live.
+    - everything else (AGENTS.md, the skills): the absolute directory.
+
+    The default directory keeps the shipped bytes: `~` and `*/` there are
+    deliberate, and an installation that never set `COOP_HOME` should not
+    depend on this.
     """
     if runtime_dir == DEFAULT_RUNTIME_DIR:
         return text
     base = str(runtime_dir)
-    return text.replace(f"~/{RUNTIME_DIR_NAME}", base).replace(f"*/{RUNTIME_DIR_NAME}", base)
+    tilde = f"~/{RUNTIME_DIR_NAME}"
+    if rel == ".claude/settings.json":
+        return text.replace(tilde, "/" + base)
+    if rel == "opencode.json":
+        text = text.replace(tilde, base)
+        if runtime_dir.name:
+            text = text.replace(f"*/{RUNTIME_DIR_NAME}", f"*/{runtime_dir.name}")
+        return text
+    return text.replace(tilde, base)
 
 
-def _copy_keeper_file(source: Path, target: Path, runtime_dir: Path) -> None:
+def _copy_keeper_file(source: Path, target: Path, runtime_dir: Path, rel: str) -> None:
     """`shutil.copy2`, with `keeper_text_for` applied to a text file."""
     import shutil
 
@@ -197,7 +219,7 @@ def _copy_keeper_file(source: Path, target: Path, runtime_dir: Path) -> None:
     except UnicodeDecodeError:
         shutil.copy2(source, target)
         return
-    target.write_bytes(keeper_text_for(text, runtime_dir).encode("utf-8"))
+    target.write_bytes(keeper_text_for(text, runtime_dir, rel).encode("utf-8"))
     shutil.copystat(source, target)
 
 
@@ -256,12 +278,13 @@ def sync_keeper_dir(repo_path: Path, runtime_dir: Path) -> None:
             _remove_path(target)
             shutil.copytree(
                 source, target,
-                copy_function=lambda s, t: _copy_keeper_file(Path(s), Path(t), runtime_dir),
+                copy_function=lambda s, t: _copy_keeper_file(
+                    Path(s), Path(t), runtime_dir, Path(s).relative_to(src).as_posix()),
             )
         else:
             if target.is_dir():
                 _remove_path(target)
-            _copy_keeper_file(source, target, runtime_dir)
+            _copy_keeper_file(source, target, runtime_dir, rel)
     console.print(f"  coop-keeper up to date at {dst}")
 
 

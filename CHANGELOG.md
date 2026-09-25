@@ -55,9 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`COOP_HOME` sets the runtime directory** (default `~/.agentcoop`): every
   runtime path — `config.yaml`'s default location, `admin-profiles.yaml`,
   state, logs, the control socket, the attachment cache default, coop-keeper
-  and the `repo/` clone — follows it. `install.sh` installs there when the
-  variable is set (`COOP_HOME=/srv/coop bash install.sh`) and exports it from
-  `~/.bashrc`/`~/.zshrc`; install and `coop upgrade` write coop-keeper's
+  and, for a `curl | bash` install, the `repo/` clone — follows it. `install.sh`
+  installs there when the variable is set (`COOP_HOME=/srv/coop bash install.sh`)
+  and adds the export to `~/.bashrc`/`~/.zshrc` (or says so when neither
+  exists); install and `coop upgrade` write coop-keeper's
   permission files and skills for that directory. Must be absolute; read once
   at process start. `COOP_CONFIG` still overrides the config file on its own.
   This is for the case where `~/.agentcoop` is taken or unusable, set before

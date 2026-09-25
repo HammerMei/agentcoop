@@ -40,7 +40,7 @@ class TestInstallKeeperDir(unittest.TestCase):
         r = _install(REPO, runtime)
         self.assertEqual(r.returncode, 0, r.stderr)
         assert_tree_copied(self, KEEPER_SRC, runtime / "agents" / "builtin" / "coop-keeper",
-                           transform=lambda text: keeper_text_for(text, runtime))
+                           transform=lambda text, rel: keeper_text_for(text, runtime, rel))
         self.assertTrue((runtime / "agents" / "user").is_dir())
 
     def test_a_second_run_leaves_the_operators_files_alone(self):

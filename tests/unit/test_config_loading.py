@@ -525,6 +525,19 @@ class TestRelativePathsResolveAgainstTheBase(unittest.TestCase):
         self.assertEqual(config.agents["default"].context_inject_files, [str(home / "a.md")])
         self.assertEqual(config.watcher_rules[0].context_inject_files, [str(home / "w.md")])
 
+    def test_an_unknown_user_in_a_tilde_path_is_one_issue_not_a_traceback(self):
+        # `Path.expanduser()` raises RuntimeError for `~nosuchuser`; collect_config
+        # catches ValueError only, so `coop config validate` would traceback.
+        self.path.write_text(textwrap.dedent(self.CFG).replace("[a.md]", "[~nosuchuser-xyz/a.md]"))
+        config, issues = collect_config(self.path)  # a traceback here is the failure
+        self.assertTrue(any("context_inject_files" in i.message and "~nosuchuser-xyz" in i.message
+                            for i in issues), issues)
+        self.path.write_text(textwrap.dedent(self.CFG).replace("working_directory: work",
+                                                              "working_directory: ~nosuchuser-xyz/w"))
+        config, issues = collect_config(self.path)
+        self.assertTrue(any("working_directory" in i.message and "~nosuchuser-xyz" in i.message
+                            for i in issues), issues)
+
     def test_tilde_and_absolute_paths_are_not_relative(self):
         from gateway.config import resolve_working_directory
         self.assertEqual(resolve_working_directory("~/proj", self.base), str(Path.home() / "proj"))

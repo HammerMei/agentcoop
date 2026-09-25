@@ -91,6 +91,23 @@ class TestPersistCoopHome(unittest.TestCase):
         self.assertEqual(r.stderr, "")
         self.assertIn('export COOP_HOME="/srv/coop"', self.bashrc.read_text())
 
+    def test_no_rc_file_present_is_reported_not_silent(self):
+        # fish, or an account with neither file: the next shell's `coop` would
+        # silently use ~/.agentcoop, so the installer says the export is on you.
+        self.bashrc.unlink()
+        r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("[WARNING]", r.stderr)
+        self.assertIn('export COOP_HOME="/srv/coop"', r.stderr)
+        self.assertFalse(self.bashrc.exists(), "no rc file is created")
+
+    def test_an_unquoted_export_of_the_same_value_counts(self):
+        self.bashrc.write_text("export COOP_HOME=/srv/coop\n")
+        r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(self.bashrc.read_text(), "export COOP_HOME=/srv/coop\n")
+
     def test_a_different_existing_export_is_left_alone_and_reported(self):
         # A reinstall to a new location must not silently stack two exports; the
         # operator is told which line to change.
@@ -98,5 +115,6 @@ class TestPersistCoopHome(unittest.TestCase):
         r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.bashrc.read_text(), 'export COOP_HOME="/old/coop"\n')
+        self.assertIn("[WARNING]", r.stderr)
         self.assertIn(".bashrc", r.stderr)
         self.assertIn("/srv/coop", r.stderr)

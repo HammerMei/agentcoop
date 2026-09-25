@@ -769,15 +769,15 @@ def run_install_sh_function(names, call, **run_kw):
 
 def assert_tree_copied(testcase, src, dst, *, transform=None):
     """Every regular file under `src` exists under `dst` with identical bytes —
-    or, with `transform`, with the bytes `transform(text)` gives for a text
-    file (a binary one is still compared as is)."""
+    or, with `transform`, with the bytes `transform(text, rel)` gives for a
+    text file at posix path `rel` (a binary one is still compared as is)."""
     for f in Path(src).rglob("*"):
         if f.is_file():
             rel = f.relative_to(src)
             expected = f.read_bytes()
             if transform is not None:
                 try:
-                    expected = transform(expected.decode("utf-8")).encode("utf-8")
+                    expected = transform(expected.decode("utf-8"), rel.as_posix()).encode("utf-8")
                 except UnicodeDecodeError:
                     pass
             testcase.assertEqual((Path(dst) / rel).read_bytes(), expected, rel)

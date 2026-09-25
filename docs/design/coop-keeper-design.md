@@ -220,7 +220,10 @@ and `.config-backups/**` (Claude Code applies a `Read` deny to its `Edit`,
 `cat`, `head`, `tail`, `sed`, redirections — when they name the file); the
 shipped `opencode.json` denies the same three paths to OpenCode's `read` and
 `edit` tools (as `*/.agentcoop/config.yaml` — those rules see a path relative
-to the working directory); and the keeper reads configuration only through
+to the working directory); under a non-default runtime directory (`COOP_HOME`,
+#182) install and upgrade write both files for that directory —
+`keeper_text_for` in `gateway/upgrade.py`, which keeps each rule in the form
+its reader takes; and the keeper reads configuration only through
 `coop config show --json` and `--raw --json`, whose output is secret-masked
 (§3.10). The residuals are known and documented rather than engineered away:
 a shell command may reach the file. On Claude Code the Read tool, `cat`,
