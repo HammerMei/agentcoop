@@ -8,6 +8,11 @@
 # agent directory. Configuration is done afterwards by running coop-keeper
 # with your own coding CLI — the script ends by printing the command.
 #
+# Everything goes under $COOP_HOME, default ~/.agentcoop — the repo clone,
+# config.yaml, state, logs, the keeper. To install elsewhere:
+#   COOP_HOME=/srv/coop bash install.sh
+# A non-default location is exported from ~/.bashrc / ~/.zshrc so `coop` finds it.
+#
 # Flags:
 #   --force        Replace a `coop` command already on PATH that is not AgentCoop's
 set -euo pipefail
@@ -29,6 +34,49 @@ info()    { printf '\033[0;36m[AgentCoop]\033[0m %s\n' "$*"; }
 success() { printf '\033[0;32m[AgentCoop]\033[0m %s\n' "$*"; }
 warn()    { printf '\033[0;33m[AgentCoop]\033[0m %s\n' "$*" >&2; }
 error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Runtime directory — $COOP_HOME, default ~/.agentcoop (#182). The same rule as
+# gateway/paths.py: `~` expanded, a relative path refused.
+# ---------------------------------------------------------------------------
+coop_home_dir() {
+  # Echo the runtime directory. Exit 1 (message on stderr) for a relative COOP_HOME.
+  local raw="${COOP_HOME:-}"
+  if [ -z "$raw" ]; then
+    printf '%s\n' "$HOME/.agentcoop"
+    return 0
+  fi
+  case "$raw" in
+    "~")   raw="$HOME" ;;
+    "~/"*) raw="$HOME/${raw#\~/}" ;;
+  esac
+  case "$raw" in
+    /*) printf '%s\n' "$raw" ;;
+    *)  printf 'COOP_HOME must be an absolute path (got %s)\n' "$raw" >&2; return 1 ;;
+  esac
+}
+persist_coop_home() {
+  # $1 = runtime dir. A non-default location is exported from the shell rc files
+  # (the PATH block below does the same), so `coop`, `coop upgrade` and the
+  # keeper's CLI calls resolve the same directory in later shells. An rc file
+  # that already exports a DIFFERENT value is left alone and named, never
+  # stacked: which line wins would depend on file order.
+  local dir="$1" rc
+  [ "$dir" = "$HOME/.agentcoop" ] && return 0
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [ -f "$rc" ] || continue
+    if grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null; then
+      continue
+    fi
+    if grep -q 'COOP_HOME=' "$rc" 2>/dev/null; then
+      printf '%s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
+      continue
+    fi
+    printf '\n# Added by AgentCoop installer\nexport COOP_HOME="%s"\n' "$dir" >> "$rc"
+  done
+}
+RUNTIME_DIR=$(coop_home_dir) || exit 1
+export COOP_HOME="$RUNTIME_DIR"
 
 # ---------------------------------------------------------------------------
 # OS / architecture detection
@@ -92,8 +140,8 @@ if [ -z "$SCRIPT_SOURCE" ] || [ "$SCRIPT_SOURCE" = "/dev/stdin" ] || [ "$SCRIPT_
 fi
 
 if [ "$CURL_PIPE" = true ]; then
-  REPO_DIR="$HOME/.agentcoop/repo"
-  mkdir -p "$HOME/.agentcoop"
+  REPO_DIR="$RUNTIME_DIR/repo"
+  mkdir -p "$RUNTIME_DIR"
   info "Running via curl|bash — will clone to $REPO_DIR"
   if [ -d "$REPO_DIR/.git" ]; then
     info "Repo already exists at $REPO_DIR — pulling latest..."
@@ -338,8 +386,11 @@ esac
 # ---------------------------------------------------------------------------
 # Ensure runtime dir exists (needed by both context copy and install_meta.json)
 # ---------------------------------------------------------------------------
-RUNTIME_DIR="$HOME/.agentcoop"
 mkdir -p "$RUNTIME_DIR"
+if [ "$RUNTIME_DIR" != "$HOME/.agentcoop" ]; then
+  info "Runtime directory: $RUNTIME_DIR (COOP_HOME)"
+  persist_coop_home "$RUNTIME_DIR"
+fi
 
 # ---------------------------------------------------------------------------
 # Copy user-facing example context files to runtime dir.
@@ -403,7 +454,7 @@ esac
 printf '\n'
 success "Installation complete!"
 printf '\n'
-printf '  Repository cloned to:    ~/.agentcoop/repo\n'
+printf '  Repository cloned to:    %s\n' "$REPO_DIR"
 printf '  Executable installed at: ~/.local/bin/coop\n'
 if [ "$PROVISION_LINKED" = true ]; then
   printf '  Provisioning CLI:        ~/.local/bin/coop-provision\n'
@@ -418,8 +469,8 @@ printf '    source %s\n' "$SHELL_RC"
 printf '  Or restart your terminal.\n'
 printf '\n'
 printf '  Set up your first bot with coop-keeper, using either CLI:\n'
-printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && opencode\n'
-printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && claude\n'
+printf '    cd %s/agents/builtin/coop-keeper && opencode\n' "$RUNTIME_DIR"
+printf '    cd %s/agents/builtin/coop-keeper && claude\n' "$RUNTIME_DIR"
 printf '\n'
-printf '  Then:  coop status          tail -f ~/.agentcoop/gateway.log\n'
+printf '  Then:  coop status          tail -f %s/gateway.log\n' "$RUNTIME_DIR"
 printf '\n'

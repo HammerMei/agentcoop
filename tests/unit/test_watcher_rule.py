@@ -37,7 +37,7 @@ def parse(entry, *, index=0, templates=None, seen=None) -> WatcherRule:
         connectors=CONNECTORS,
         connector_names=CONNECTOR_NAMES,
         agents=AGENTS,
-        config_dir=Path("/tmp"),
+        base_dir=Path("/tmp"),
         templates=templates or {},
         seen_rule_names=seen if seen is not None else set(),
     )

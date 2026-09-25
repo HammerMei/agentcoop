@@ -66,9 +66,11 @@ class TestInstallKeeperDir(unittest.TestCase):
             self.assertNotIn(gone, text)
 
     def test_the_installer_ends_with_both_cli_start_lines(self):
+        # Printed with the runtime directory the install actually used
+        # ($COOP_HOME, default ~/.agentcoop — #182), not a spelled-out default.
         text = INSTALL_SH.read_text()
-        self.assertIn("cd ~/.agentcoop/agents/builtin/coop-keeper && opencode", text)
-        self.assertIn("cd ~/.agentcoop/agents/builtin/coop-keeper && claude", text)
+        self.assertIn("cd %s/agents/builtin/coop-keeper && opencode\\n' \"$RUNTIME_DIR\"", text)
+        self.assertIn("cd %s/agents/builtin/coop-keeper && claude\\n' \"$RUNTIME_DIR\"", text)
 
 
 if __name__ == "__main__":

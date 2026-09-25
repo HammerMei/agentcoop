@@ -508,7 +508,10 @@ class TestLoadProfileIsLazy(unittest.TestCase):
             load_profile(self.path, "rc")
 
     def test_default_path_is_beside_config_yaml(self):
-        self.assertEqual(DEFAULT_CONFIG_PATH, Path.home() / ".agentcoop" / "admin-profiles.yaml")
+        # In the runtime directory (`$COOP_HOME`, default `~/.agentcoop`), where
+        # config.yaml lives by default — not the current directory.
+        from gateway.paths import RUNTIME_DIR
+        self.assertEqual(DEFAULT_CONFIG_PATH, RUNTIME_DIR / "admin-profiles.yaml")
 
 
 class TestMaskedProfiles(unittest.TestCase):

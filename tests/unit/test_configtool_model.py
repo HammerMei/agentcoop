@@ -549,6 +549,32 @@ class TestEditableConfigSave(_EditableConfigTestBase):
         self.assertFalse((Path(self.tmp) / ".config-backups").exists())
         self.assertEqual(real.stat().st_mode & 0o777, 0o600)
 
+    def test_a_relative_working_directory_saves_through_a_symlink_into_another_directory(self):
+        """#182's motivating defect (PR #181 round 9): save() validates a temp
+        file beside the symlink's TARGET, the loader used to resolve relative
+        paths against the file's directory, so a relative `working_directory`
+        that was fine through the link (`~/.agentcoop/config.yaml`) resolved
+        against `config/` at save time and the save was refused as
+        "introduces a new problem". With the base a constant, where the temp
+        file sits no longer matters."""
+        from unittest.mock import patch
+        base = Path(self.tmp) / "base"
+        (base / "work").mkdir(parents=True)
+        real_dir = Path(self.tmp) / "config"
+        real_dir.mkdir()
+        real = real_dir / "config.yaml"
+        real.write_text(textwrap.dedent(self._valid_cfg_text()).replace(
+            f"working_directory: {self.agent_dir}", "working_directory: work"))
+        link = Path(self.tmp) / "config.yaml"
+        link.symlink_to(real)
+        with patch("gateway.config.RUNTIME_DIR", base):
+            cfg = EditableConfig.load(link)
+            cfg.document["agents"]["default"]["timeout"] = 9
+            cfg.mark_dirty()
+            cfg.save()  # must not raise
+        self.assertEqual(yaml.safe_load(real.read_text())["agents"]["default"]["timeout"], 9)
+        self.assertEqual(yaml.safe_load(real.read_text())["agents"]["default"]["working_directory"], "work")
+
     def test_a_stale_temp_file_from_an_interrupted_save_does_not_block_the_next(self):
         path = self._write(self._valid_cfg_text())
         path.with_name("config.yaml.tmp").write_text("left behind")

@@ -106,7 +106,7 @@ connectors:
     attachments:
       max_file_size_mb: 10           # files larger than this are skipped (0 = no limit)
       download_timeout: 30           # seconds per file download
-      # cache_dir_global: ~/.agentcoop/attachments  # optional: override download cache location
+      # cache_dir_global: attachments  # optional: override the download cache (default: <runtime dir>/attachments)
     reply_in_thread: false           # true = start a new thread for every top-level reply
     permission_reply_in_thread: true # false = post permission notifications at room level
 
@@ -172,12 +172,13 @@ agents:
   my-agent:
     type: claude
     command: claude
-    working_directory: ~/.agentcoop/work  # required: directory where the agent runs and creates files
+    working_directory: work          # required: where the agent runs and creates files; a relative path is
+                                     # under the runtime directory ($COOP_HOME, default ~/.agentcoop)
     new_session_args: []             # extra flags passed only on session creation
                                      # e.g. ["--agent", "my-agent-name"] to load a custom agent
     session_prefix: agent-chat       # prefix added to Claude session titles
     lazy_instruction_loading: true   # true = inject short tool index; false = inject full scheduling/history docs
-    context_inject_files: []         # agent-level context files (layer 2); list, resolved relative to config dir
+    context_inject_files: []         # agent-level context files (layer 2); list; relative = under the runtime dir
 
     # ── Tool allow lists ───────────────────────────────────────────────────
     # Each entry is either:
@@ -381,7 +382,7 @@ watcher_rules:
 #   standard:
 #     type: claude
 #     command: claude
-#     working_directory: ~/.agentcoop/work
+#     working_directory: work
 #     owner_allowed_tools: [readonly-builtins]
 #     permissions: {enabled: true, timeout: 300}
 #

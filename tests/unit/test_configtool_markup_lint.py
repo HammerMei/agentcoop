@@ -101,7 +101,7 @@ _NOT_OPERATOR_DATA = frozenset(
         # Assembled from already-escaped parts inside the named method.
         "self._field_annotation(spec, entry, provenance)",
         "self._delete_confirm_message()",
-        "_working_directory_warning(self.cfg.path, event.input.value)",
+        "_working_directory_warning(event.input.value)",
         # Deliberate markup from a closed set of literals.
         'status_badge(status.status_for("connector", name))',
         'status_badge(status.status_for("agent", name))',
@@ -138,7 +138,7 @@ _ESCAPED_AT_THE_BUILDER = frozenset(
         # is escaped where `lines` is built, a few statements above.
         r'"This changes the EFFECTIVE value for —\n" + "\n".join(lines) + "\n\nContinue?"',
         # The working-directory heads-up, which escapes the path it names.
-        r'_working_directory_warning(self.cfg.path, str(self._initial_values.get(spec.key) or ""))',
+        r'_working_directory_warning(str(self._initial_values.get(spec.key) or ""))',
     }
 )
 

@@ -45,7 +45,9 @@ Quick summary:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
 # The installer clones to ~/.agentcoop/repo, links `coop` and `coop-provision`
-# into ~/.local/bin and installs coop-keeper. Then set up your first bot:
+# into ~/.local/bin and installs coop-keeper. (To install under another
+# directory: COOP_HOME=/srv/coop bash install.sh — see "Paths".) Then set up
+# your first bot:
 cd ~/.agentcoop/agents/builtin/coop-keeper && opencode     # or: claude
 # See "Managing Bots with coop-keeper" below.
 coop start
@@ -76,7 +78,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agentcoop/work
+    working_directory: work           # under the runtime directory — see Paths
     timeout: 360
     permissions:
       enabled: true
@@ -143,7 +145,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agentcoop/work
+    working_directory: work           # under the runtime directory — see Paths
     timeout: 360
     permissions:
       enabled: true
@@ -161,7 +163,7 @@ agents:
   opencode:
     type: opencode
     command: opencode
-    working_directory: ~/.agentcoop/opencode-work
+    working_directory: opencode-work
     timeout: 360
     permissions:
       enabled: true
@@ -333,9 +335,9 @@ coop start
 
 **Notes:**
 
-- `context_inject_files` paths are resolved relative to `config.yaml`'s directory, so
-  a relative path written from a project shell will not resolve — use an absolute
-  path, or write the handoff next to `config.yaml`.
+- A relative `context_inject_files` path means `~/.agentcoop/<path>` (`$COOP_HOME`
+  if set), not a path from the shell you wrote it in — use an absolute path, or
+  write the handoff under `~/.agentcoop/`.
 - Context files are re-read on every watcher start, so rewriting `HANDOFF.md` takes
   effect the next time the watcher starts. Run `coop reset <watcher>`
   as well if you want the updated context to open a *fresh* conversation instead of
@@ -405,7 +407,7 @@ connectors:
     attachments:
       max_file_size_mb: 50           # 0 = no limit
       download_timeout: 30            # Seconds
-      cache_dir_global: ~/.agentcoop/attachments  # connector-global cache directory
+      cache_dir_global: attachments  # connector-global cache directory (the default)
     reply_in_thread: false            # Start new thread for replies
     permission_reply_in_thread: true  # Post permission requests in thread
     context_inject_files: []          # Files sent to agent on session start
@@ -426,7 +428,7 @@ connectors:
     attachments:
       max_file_size_mb: 50
       download_timeout: 30
-      cache_dir_global: ~/.agentcoop/attachments
+      cache_dir_global: attachments
     reply_in_thread: false
     permission_reply_in_thread: true
     context_inject_files: []
@@ -450,7 +452,7 @@ connectors:
 | `allowed_users.guests` | list | No | Usernames with restricted tool access |
 | `attachments.max_file_size_mb` | integer | No | Maximum file size; 0 = unlimited |
 | `attachments.download_timeout` | integer | No | Seconds to wait per file download |
-| `attachments.cache_dir_global` | string | No | Download cache directory (default: `~/.agentcoop/attachments`; only needed to override the default) |
+| `attachments.cache_dir_global` | string | No | Download cache directory (default: `attachments` under the runtime directory — `~/.agentcoop/attachments` unless `COOP_HOME` is set; only needed to override) |
 | `reply_in_thread` | boolean | No | Reply in thread for every message |
 | `permission_reply_in_thread` | boolean | No | Post permission requests in threads |
 | `context_inject_files` | list | No | Context files for all sessions on this connector |
@@ -464,7 +466,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agentcoop/work
+    working_directory: work           # under the runtime directory — see Paths
     new_session_args: []
     session_prefix: "agent-chat"
     lazy_instruction_loading: true
@@ -494,7 +496,7 @@ agents:
 |-------|------|----------|-------------|
 | `type` | string | Yes | Backend type: `claude` or `opencode` |
 | `command` | string | Yes | CLI command to invoke (e.g., `claude`, `opencode`) |
-| `working_directory` | string | Yes | Working directory for the agent subprocess |
+| `working_directory` | string | Yes | Working directory for the agent subprocess; must exist. A relative path is under the runtime directory — see [Paths](#paths) |
 | `new_session_args` | list | No | Extra CLI args for new sessions |
 | `session_prefix` | string | No | Prefix for session titles |
 | `lazy_instruction_loading` | boolean | No | If `true` (default), injects a short tool index and lets agents load bundled scheduling/history docs on demand with `coop instructions ...`; if `false`, injects the full bundled tool docs at session start. |
@@ -714,6 +716,26 @@ Always use explicit domain patterns to prevent SSRF attacks. Avoid `params: ".*"
 - tool: "WebFetch"
   params: "https?://(www\\.)?github\\.com/.*"
 ```
+
+### Paths
+
+Everything AgentCoop keeps lives under one **runtime directory**: `config.yaml`,
+`admin-profiles.yaml`, state, logs, the control socket, the attachment cache, the
+keeper and the agents it creates. That directory is `$COOP_HOME` when the variable
+is set, otherwise `~/.agentcoop`. Wherever this guide writes `~/.agentcoop/…`, read
+`$COOP_HOME/…` if you set one — the installer exports it from your shell rc file
+when you install somewhere else (`COOP_HOME=/srv/coop bash install.sh`).
+
+A **relative path** in `config.yaml` — `working_directory`, `context_inject_files`,
+`attachments.cache_dir_global` — is resolved against that directory, **not** against
+the directory the file is read from. `working_directory: work` means
+`~/.agentcoop/work` whether the file is read through `~/.agentcoop/config.yaml`, a
+symlink to it, a temp copy the config tool validates, or `--config /elsewhere/x.yaml`.
+An absolute path, or one starting with `~`, is used as written.
+
+`COOP_HOME` must be absolute and is read once, when the process starts: set it in
+the environment `coop` is launched from. `COOP_CONFIG` still overrides the config
+*file* on its own; it does not move the base.
 
 ### Secrets and Environment Variables
 
@@ -1541,7 +1563,7 @@ connectors:
     attachments:
       max_file_size_mb: 50          # Skip files larger than this
       download_timeout: 30           # Seconds to wait per download
-      cache_dir_global: ~/.agentcoop/attachments  # preferred: connector-global cache
+      cache_dir_global: attachments  # preferred: connector-global cache (the default)
 ```
 
 ### What Happens
@@ -1716,7 +1738,7 @@ agents:
   claude:
     type: claude
     command: claude
-    working_directory: ~/.agentcoop/work
+    working_directory: work           # under the runtime directory — see Paths
     timeout: 360
     permissions:
       enabled: true
@@ -1725,7 +1747,7 @@ agents:
   opencode:
     type: opencode
     command: opencode
-    working_directory: ~/.agentcoop/opencode-work
+    working_directory: opencode-work
     timeout: 360
     permissions:
       enabled: true
@@ -1859,7 +1881,7 @@ Each agent's `working_directory` is where the agent subprocess runs. This isolat
 ```yaml
 agents:
   claude:
-    working_directory: ~/.agentcoop/claude-work
+    working_directory: claude-work
   opencode:
     working_directory: /data/agent-sessions/opencode
 ```

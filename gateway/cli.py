@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 
 CONTROL_SOCK = RUNTIME_DIR / "control.sock"
 
-# Default config: the COOP_CONFIG env var first, then ~/.agentcoop/config.yaml.
+# Default config: the COOP_CONFIG env var first, then config.yaml in the runtime
+# directory ($COOP_HOME, default ~/.agentcoop).
 DEFAULT_CONFIG = os.environ.get("COOP_CONFIG", str(RUNTIME_DIR / "config.yaml"))
 
 
@@ -34,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
     start_p = sub.add_parser("start", help="Start the gateway service")
     start_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
 
     # stop
@@ -44,7 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
     restart_p = sub.add_parser("restart", help="Restart the gateway service")
     restart_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
 
     # status
@@ -205,7 +206,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # was fixed for --config only, missed here, then caught in review.)
     config_p.add_argument(
         "--config", dest="config_path_for_tui", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
     config_p.add_argument(
         "--lint", dest="lint_for_tui", action="store_true",
@@ -220,7 +221,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     config_validate_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
     config_validate_p.add_argument(
         "--lint", action="store_true",
@@ -239,7 +240,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     config_reload_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
     config_reload_p.add_argument(
         "--dry-run", action="store_true",
@@ -258,7 +259,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     config_show_p.add_argument(
         "--config", default=DEFAULT_CONFIG,
-        help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+        help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
     )
     config_show_p.add_argument(
         "--json", action="store_true",
@@ -275,7 +276,7 @@ def _build_parser() -> argparse.ArgumentParser:
         """Shared by add/remove/patch (coop-keeper design §3.10)."""
         parser.add_argument(
             "--config", default=DEFAULT_CONFIG,
-            help="Path to config.yaml (default: $COOP_CONFIG or ~/.agentcoop/config.yaml)",
+            help="Path to config.yaml (default: $COOP_CONFIG, else config.yaml under $COOP_HOME or ~/.agentcoop)",
         )
         parser.add_argument("--json", action="store_true", help="Emit the result as JSON")
         parser.add_argument(

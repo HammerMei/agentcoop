@@ -66,6 +66,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Input, Static
 
+from ...config import resolve_working_directory
 from ..formatting import format_value, markup_safe, provenance_label
 from ..modals import ConfirmModal, InheritsPickerModal, MessageModal, TextPromptModal
 from ..model import EditableConfig
@@ -161,19 +162,7 @@ _ENTITY_FORM_FIELDS: list[FieldSpec] = [f for f in _FORM_FIELDS if f.key != "typ
 _AGENT_REQUIRED_FIELD_KEYS = frozenset({"working_directory"})
 
 
-def _resolve_working_directory(config_path: Path, raw_value: str) -> Path:
-    """Mirror gateway/config.py's own working_directory resolution EXACTLY
-    (expanduser, then resolve relative to the config file's directory if
-    still not absolute) — used only to compute the inline warning below, so
-    it must resolve the same path the real loader would, or the warning
-    fires on paths that are actually fine (e.g. `~/...` or a relative path)."""
-    expanded = Path(raw_value).expanduser()
-    if expanded.is_absolute():
-        return expanded
-    return (config_path.resolve().parent / expanded).resolve()
-
-
-def _working_directory_warning(config_path: Path, raw_value: str) -> str:
+def _working_directory_warning(raw_value: str) -> str:
     """Early, non-blocking heads-up only — NOT a substitute for save()'s own
     validate_config() call, which still hard-fails if the directory is
     missing at save time (GatewayConfig.from_file requires it to exist;
@@ -182,7 +171,10 @@ def _working_directory_warning(config_path: Path, raw_value: str) -> str:
     text = raw_value.strip()
     if not text:
         return ""
-    resolved = _resolve_working_directory(config_path, text)
+    # The loader's own resolution (`~`, then the base — #182), not a mirror of
+    # it: the mirror this replaced already differed from the loader in one
+    # detail (it `resolve()`d the config path first), the drift a copy invites.
+    resolved = Path(resolve_working_directory(text))
     if not resolved.is_dir():
         # The resolved PATH comes from the operator's own working_directory,
         # and this string is rendered as markup — found by the static markup
@@ -517,7 +509,7 @@ class AgentDetailScreen(ToolListEditorMixin, FormScreen):
                 if spec.key == "working_directory":
                     yield Static(
                         _working_directory_warning(
-                            self.cfg.path, str(self._initial_values.get(spec.key) or "")
+                            str(self._initial_values.get(spec.key) or "")
                         ),
                         id="wd-warning",
                     )
@@ -532,7 +524,7 @@ class AgentDetailScreen(ToolListEditorMixin, FormScreen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "field-working_directory":
             self.query_one("#wd-warning", Static).update(
-                _working_directory_warning(self.cfg.path, event.input.value)
+                _working_directory_warning(event.input.value)
             )
         super().on_input_changed(event)
 
