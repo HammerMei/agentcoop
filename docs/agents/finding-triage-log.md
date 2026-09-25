@@ -486,3 +486,21 @@ Notes:
 - Adoption: 4 of 5. One concession by rater 1 (F3), on cited code. Severity: F1 P1 stands; F5 should outrank F2/F4 (silent, a promise); F3 was not a finding.
 - **Not corner cases only**: F1 and F5 contradict stated promises, F2 contradicts INSTALL.md's own text. By the stop-loss agreed with the owner ("stop when a round has no promise-contradicting finding") this round does not end the review on its own; the chain detector's "do not patch again" on `coop-add-bot` is a carry-over streak with no add-bot finding this round.
 - Five rounds: 29 findings, 20 fixed, 8 dropped, 1 declined as #34's.
+
+## 2026-09-25 — PR #184 round 6 (final)
+
+Codex review on `b09c72d`: 👍, "Didn't find any major issues"; security review clean; no
+inline findings. Reviewed commit = the merged head (squash-merged as `a4cbc4a`).
+The stop-loss agreed with the owner ("stop when a round has no promise-contradicting
+finding") is met.
+
+**Totals over six rounds:** 29 findings — 20 fixed, 8 dropped with written reasons, 1
+declined as #34's (guest `fetch-history --watcher` on the honor system). One chain (three
+symlink guards in rounds 1–3) was deleted on the owner's ruling that symlinks are followed.
+An internal consistency sweep between rounds 4 and 5 found 7 more of the class the last
+rounds kept producing; round 5 then found one of that class, caused by round 4's own
+wording.
+
+**Status: settled for this PR.** Open decision carried to the owner: whether the keeper's
+`connector_templates.default.filter_sender` should default to `true` (design §3.5 says
+`false`; round 4 F5 widens the #34 exposure under `false`).
