@@ -456,7 +456,7 @@ followed, not guarded), and no symlink finding returned. Security review: one fi
 | **R4-F2** a plan running past its 10-minute lease can be taken over mid-execution; last round's fix only stops the first keeper deleting the replacement (P2) | DROP: follow-on edge of the round-3 fix; the design sells the expiry as the dead-keeper remedy | DROP, scored: 0–0.4 hits/yr (both factors guessed) × ~1 h × 0.56 → ≤ 0.2 h/yr against a new invariant in three skills; not a chain link by blame; the takeover is visible in the first keeper's report since round 3 | **DROP** — §3.8 best effort; a 30-minute lease would triple the dead-keeper stall the expiry exists to bound |
 | **R4-F3** `Bash(coop *)` auto-approves `coop send --attach ~/.agentcoop/config.yaml` — credentials to a chat room past the `Read` deny (P1) | true (`coop send --attach` exists; room names come from `coop list --all`); `cheap`: name the subcommands the skills run; the both-directions test enforces it | true and traced (`cli.py:150`, `control.py:741–749` pass the path unrestricted); falsifies §3.3's "none is known to"; `cheap`, first; OpenCode stays inside its documented residual (`head` already reads the file), no bash rules there | **FIX** — allow list is `coop config *`, `status`, `start`, `stop`, `reset *`; §3.3/§3.9 say why never `coop *`. `coop list --all` (AGENTS.md only) now prompts once |
 | **R4-F4** "none" to the rooms question still writes `include: ["*"]`, which serves the default rooms both servers auto-join a new account to, while the plan says DM-only (P1) | true; `rooms: {include: [], direct: true}` validates (checked); `cheap` | true on both platforms (MM `create_user` joins the team; RC `users.create` defaults `joinDefaultChannels`); contradicts §3.5's promise; `cheap` | **FIX** — add-bot and §3.5 |
-| **R4-F5** (security) `filter_sender: false` admits any server user as a guest; the built-in guest rule auto-approves `coop fetch-history --watcher <any>`, which the control handler serves on the honor system → another room's history (P2) | true mechanism; gateway's, tracked as #34 (token auth); the keeper default is §3.5's; not this change's | chain verified (`role_of` → guest rule `core/config.py:113–116` → global watcher lookup `control.py:371–379`, honor-system by its own docstring); RC only; security under ADR 0001 but a gateway defect the keeper widens the population for; FILE against #34 | **Not this PR** — replied with the chain and #34; the keeper-side lever (`filter_sender: true` by default) contradicts §3.5 and is the owner's call. No new issue: #34 already tracks the fix |
+| **R4-F5** (security) `filter_sender: false` admits any server user as a guest; the built-in guest rule auto-approves `coop fetch-history --watcher <any>`, which the control handler serves on the honor system → another room's history (P2) | true mechanism; gateway's, tracked as #34 (token auth); the keeper default is §3.5's; not this change's | chain verified (`role_of` → guest rule `core/config.py:113–116` → global watcher lookup `control.py:371–379`, honor-system by its own docstring); RC only; security under ADR 0001 but a gateway defect the keeper widens the population for; FILE against #34 | **Not this PR** — replied with the chain and #34. *Correction 2026-09-25:* not RC only — Mattermost implements history too (`supports_history()` → True). It is a security issue, **deferred**: AgentCoop targets chat servers whose members are mostly trustworthy, and known gaps of this kind wait until security is taken on as a whole. Owner's rulings: no per-command guest fix (a guest can as well ask for what others told the agent or what it saved to memory — ADR 0001's point); `filter_sender: false` stays |
 
 Notes:
 - Adoption: 3 of 5. Both raters: F3 and F4 contradict a stated promise and are cheap; F1 is a consistency slip; F2 and F5 are the tail. **Not corner cases only** — but by the owner's instruction this was the last round.
@@ -486,3 +486,22 @@ Notes:
 - Adoption: 4 of 5. One concession by rater 1 (F3), on cited code. Severity: F1 P1 stands; F5 should outrank F2/F4 (silent, a promise); F3 was not a finding.
 - **Not corner cases only**: F1 and F5 contradict stated promises, F2 contradicts INSTALL.md's own text. By the stop-loss agreed with the owner ("stop when a round has no promise-contradicting finding") this round does not end the review on its own; the chain detector's "do not patch again" on `coop-add-bot` is a carry-over streak with no add-bot finding this round.
 - Five rounds: 29 findings, 20 fixed, 8 dropped, 1 declined as #34's.
+
+## 2026-09-25 — PR #184 round 6 (final)
+
+Codex review on `b09c72d`: 👍, "Didn't find any major issues"; security review clean; no
+inline findings. Reviewed commit = the merged head (squash-merged as `a4cbc4a`).
+The stop-loss agreed with the owner ("stop when a round has no promise-contradicting
+finding") is met.
+
+**Totals over six rounds:** 29 findings — 20 fixed, 8 dropped with written reasons, 1
+declined as #34's (guest `fetch-history --watcher` on the honor system). One chain (three
+symlink guards in rounds 1–3) was deleted on the owner's ruling that symlinks are followed.
+An internal consistency sweep between rounds 4 and 5 found 7 more of the class the last
+rounds kept producing; round 5 then found one of that class, caused by round 4's own
+wording.
+
+**Status: settled for this PR.** The `filter_sender` question raised from round 4 F5 is
+closed by the owner: the default stays `false`. The finding is a real security issue,
+deferred under the deployment assumption of mostly-trustworthy chat members, and it will be
+solved with the rest of security rather than by a per-command guest restriction.
