@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~` paths are unchanged. ADR 0003.
 - **`COOP_HOME` sets the runtime directory** (default `~/.agentcoop`): every
   runtime path — `config.yaml`'s default location, `admin-profiles.yaml`,
-  state, logs, the control socket, the attachment cache default, the keeper
+  state, logs, the control socket, the attachment cache default, coop-keeper
   and the `repo/` clone — follows it. `install.sh` installs there when the
   variable is set (`COOP_HOME=/srv/coop bash install.sh`) and exports it from
   `~/.bashrc`/`~/.zshrc`. Must be absolute; read once at process start.

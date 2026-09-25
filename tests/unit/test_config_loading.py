@@ -515,9 +515,9 @@ class TestRelativePathsResolveAgainstTheBase(unittest.TestCase):
 
     def test_tilde_and_absolute_paths_are_not_relative(self):
         from gateway.config import resolve_working_directory
-        self.assertEqual(resolve_working_directory("~/proj"), str(Path.home() / "proj"))
-        self.assertEqual(resolve_working_directory("/srv/proj"), "/srv/proj")
-        self.assertEqual(resolve_working_directory("proj"), str((self.base / "proj").resolve()))
+        self.assertEqual(resolve_working_directory("~/proj", self.base), str(Path.home() / "proj"))
+        self.assertEqual(resolve_working_directory("/srv/proj", self.base), "/srv/proj")
+        self.assertEqual(resolve_working_directory("proj", self.base), str((self.base / "proj").resolve()))
 
 
 class TestCacheDirGlobalResolution(unittest.TestCase):

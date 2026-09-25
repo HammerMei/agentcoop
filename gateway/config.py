@@ -653,13 +653,14 @@ def config_base_dir() -> Path:
     return RUNTIME_DIR
 
 
-def resolve_working_directory(raw: str) -> str:
+def resolve_working_directory(raw: str, base_dir: Path) -> str:
     """`working_directory` as the loader stores it: `~` expanded first, then a
-    still-relative path resolved against `config_base_dir()`. The config TUI's
-    inline hint calls this too, so it can never disagree with the loader."""
+    still-relative path resolved against `base_dir` (`config_base_dir()`). The
+    config TUI's inline hint calls this too, so it can never disagree with the
+    loader."""
     working_directory = str(Path(raw).expanduser())
     if not Path(working_directory).is_absolute():
-        working_directory = str((config_base_dir() / working_directory).resolve())
+        working_directory = str((base_dir / working_directory).resolve())
     return working_directory
 
 
@@ -859,7 +860,7 @@ def _parse_one_agent(
 
     working_directory = agent_raw.get("working_directory", "")
     if working_directory:
-        working_directory = resolve_working_directory(working_directory)
+        working_directory = resolve_working_directory(working_directory, base_dir)
 
     # Validate: working_directory is required and must exist
     if not working_directory:

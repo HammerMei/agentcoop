@@ -35,7 +35,7 @@ reader agree is one that does not depend on the path at all.
 Every relative path in `config.yaml` resolves against the **runtime directory**:
 `$COOP_HOME` when set, otherwise `~/.agentcoop`. The same directory is the base of
 every runtime path — state, logs, the control socket, `config.yaml`'s own default
-location, `admin-profiles.yaml`, the attachment cache default, the keeper, the
+location, `admin-profiles.yaml`, the attachment cache default, coop-keeper, the
 `repo/` clone. `gateway/paths.py` is its one definition; `gateway/config.py`
 exposes it as `config_base_dir()` and `resolve_working_directory()`, and the config
 tool's inline hint calls the loader rather than mirroring it.
@@ -59,5 +59,5 @@ what the operator typed, not a synonym for the base.
   make them absolute. Recorded in the changelog and the user guide.
 - Shipped examples write `working_directory: work` rather than
   `~/.agentcoop/work`, so they follow a non-default `COOP_HOME`.
-- Docker keeps `/root/.agentcoop`; the entrypoint honours `COOP_HOME` for
-  consistency but nothing sets it there.
+- Docker keeps `/root/.agentcoop` throughout (owner's ruling: internal testing only);
+  the entrypoint does not read `COOP_HOME`.

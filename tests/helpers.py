@@ -243,10 +243,14 @@ def isolate_runtime_dir(testcase):
     """Give a test its own `RUNTIME_DIR` under a temp dir; returns `(tmp, runtime)`.
 
     Cleaned up with the test. For tests that build a real `GatewayService` or
-    touch `state.*.json` files on disk."""
+    touch `state.*.json` files on disk. Both bindings of the directory move
+    together — the state module's and the config loader's base for relative
+    paths (#182) — so a relative `working_directory` lands in the same
+    `runtime` the state files do."""
     import tempfile
     from pathlib import Path
 
+    import gateway.config as config_mod
     import gateway.core.state as state_mod
 
     holder = tempfile.TemporaryDirectory()
@@ -254,10 +258,26 @@ def isolate_runtime_dir(testcase):
     tmp = Path(holder.name)
     runtime = tmp / "runtime"
     runtime.mkdir()
-    patcher = patch.object(state_mod, "RUNTIME_DIR", runtime)
-    patcher.start()
-    testcase.addCleanup(patcher.stop)
+    for mod in (state_mod, config_mod):
+        patcher = patch.object(mod, "RUNTIME_DIR", runtime)
+        patcher.start()
+        testcase.addCleanup(patcher.stop)
     return tmp, runtime
+
+
+def subprocess_env(*, home=None, coop_home=None) -> dict:
+    """The environment for a subprocess that must see `COOP_HOME` as the test
+    says — unset unless given — and, optionally, a substitute `HOME`. The
+    developer's own shell may export `COOP_HOME`; a subprocess that inherits it
+    would test the developer's machine, not the rule."""
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k != "COOP_HOME"}
+    if coop_home is not None:
+        env["COOP_HOME"] = coop_home
+    if home is not None:
+        env["HOME"] = str(home)
+    return env
 
 
 def gateway_config_text(

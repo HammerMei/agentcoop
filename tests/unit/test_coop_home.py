@@ -9,25 +9,22 @@ controlled environment rather than patching `os.environ` in-process.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from tests.helpers import subprocess_env
+
 REPO = Path(__file__).resolve().parents[2]
 PROBE = "from gateway.paths import RUNTIME_DIR, ATTACHMENTS_DIR_DEFAULT; print(RUNTIME_DIR); print(ATTACHMENTS_DIR_DEFAULT)"
 
 
-def _import_paths(env_home: str | None, *, home: str | None = None) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if k != "COOP_HOME"}
-    if env_home is not None:
-        env["COOP_HOME"] = env_home
-    if home is not None:
-        env["HOME"] = home
+def _import_paths(coop_home: str | None, *, home: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-c", PROBE], cwd=REPO, env=env, capture_output=True, text=True,
+        [sys.executable, "-c", PROBE], cwd=REPO, capture_output=True, text=True,
+        env=subprocess_env(home=home, coop_home=coop_home),
     )
 
 

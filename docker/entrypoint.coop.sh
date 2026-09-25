@@ -51,8 +51,7 @@
 # =============================================================================
 set -euo pipefail
 
-# $COOP_HOME when set (the gateway reads the same variable), else ~/.agentcoop.
-RUNTIME_DIR="${COOP_HOME:-$HOME/.agentcoop}"
+RUNTIME_DIR="$HOME/.agentcoop"
 
 info()    { printf '\033[0;36m[AgentCoop]\033[0m %s\n' "$*"; }
 success() { printf '\033[0;32m[AgentCoop]\033[0m %s\n' "$*"; }

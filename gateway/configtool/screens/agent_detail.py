@@ -66,7 +66,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Input, Static
 
-from ...config import resolve_working_directory
+from ...config import config_base_dir, resolve_working_directory
 from ..formatting import format_value, markup_safe, provenance_label
 from ..modals import ConfirmModal, InheritsPickerModal, MessageModal, TextPromptModal
 from ..model import EditableConfig
@@ -174,7 +174,7 @@ def _working_directory_warning(raw_value: str) -> str:
     # The loader's own resolution (`~`, then the base — #182), not a mirror of
     # it: the mirror this replaced already differed from the loader in one
     # detail (it `resolve()`d the config path first), the drift a copy invites.
-    resolved = Path(resolve_working_directory(text))
+    resolved = Path(resolve_working_directory(text, config_base_dir()))
     if not resolved.is_dir():
         # The resolved PATH comes from the operator's own working_directory,
         # and this string is rendered as markup — found by the static markup

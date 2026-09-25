@@ -12,21 +12,17 @@ running the installer.
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests.helpers import run_install_sh_function
+from tests.helpers import run_install_sh_function, subprocess_env
 
 
 def _run(call: str, *, home: Path, coop_home: str | None):
-    env = {k: v for k, v in os.environ.items() if k != "COOP_HOME"}
-    env["HOME"] = str(home)
-    if coop_home is not None:
-        env["COOP_HOME"] = coop_home
     return run_install_sh_function(
-        ("coop_home_dir", "persist_coop_home"), call, env=env, capture_output=True, text=True,
+        ("coop_home_dir", "persist_coop_home"), call,
+        env=subprocess_env(home=home, coop_home=coop_home), capture_output=True, text=True,
     )
 
 
