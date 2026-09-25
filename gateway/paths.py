@@ -18,12 +18,13 @@ import os
 from pathlib import Path
 
 RUNTIME_DIR_NAME = ".agentcoop"
+DEFAULT_RUNTIME_DIR = Path.home() / RUNTIME_DIR_NAME
 
 
 def _runtime_dir_from_env() -> Path:
     raw = os.environ.get("COOP_HOME", "")
     if not raw:
-        return Path.home() / RUNTIME_DIR_NAME
+        return DEFAULT_RUNTIME_DIR
     path = Path(raw).expanduser()
     if not path.is_absolute():
         # A relative base would mean whatever the importing process's CWD was —

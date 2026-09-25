@@ -513,6 +513,18 @@ class TestRelativePathsResolveAgainstTheBase(unittest.TestCase):
         link.symlink_to(self.path)
         self._assert_under_base(GatewayConfig.from_file(str(link)))
 
+    def test_a_tilde_context_file_is_the_users_home_on_every_layer(self):
+        """`~/x.md` used to become `<base>/~/x.md`: `_resolve_paths` never
+        expanded it and `~/x.md` is not absolute. Ruling A says a `~` path is
+        the user's home, as written, for every path field."""
+        self.path.write_text(textwrap.dedent(self.CFG).replace("[c.md]", "[~/c.md]")
+                             .replace("[a.md]", "[~/a.md]").replace("[w.md]", "[~/w.md]"))
+        config = GatewayConfig.from_file(str(self.path))
+        home = Path.home()
+        self.assertEqual(config.connectors[0].context_inject_files, [str(home / "c.md")])
+        self.assertEqual(config.agents["default"].context_inject_files, [str(home / "a.md")])
+        self.assertEqual(config.watcher_rules[0].context_inject_files, [str(home / "w.md")])
+
     def test_tilde_and_absolute_paths_are_not_relative(self):
         from gateway.config import resolve_working_directory
         self.assertEqual(resolve_working_directory("~/proj", self.base), str(Path.home() / "proj"))

@@ -19,10 +19,13 @@
 curl -fsSL https://raw.githubusercontent.com/HammerMei/agentcoop/main/install.sh | bash
 ```
 
-> Everything below goes under `~/.agentcoop`, the runtime directory. To use another
-> directory, set `COOP_HOME` — `COOP_HOME=/srv/coop bash install.sh` — and read
-> `$COOP_HOME` wherever this page says `~/.agentcoop`. The installer exports the
-> variable from `~/.bashrc`/`~/.zshrc`; a manual install must do that itself.
+> Everything below goes under `~/.agentcoop`, the runtime directory. If that
+> directory is taken or unusable, set `COOP_HOME` **before the first install** —
+> `COOP_HOME=/srv/coop bash install.sh` — and read `$COOP_HOME` wherever this page
+> says `~/.agentcoop`. The installer exports the variable from `~/.bashrc`/`~/.zshrc`;
+> a manual install must do that itself. `COOP_HOME` is for that conflict case only:
+> changing it later does not move an existing installation (see the user guide,
+> "Paths").
 
 This will:
 1. Clone the repo to `~/.agentcoop/repo`

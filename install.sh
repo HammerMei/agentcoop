@@ -9,9 +9,11 @@
 # with your own coding CLI — the script ends by printing the command.
 #
 # Everything goes under $COOP_HOME, default ~/.agentcoop — the repo clone,
-# config.yaml, state, logs, coop-keeper. To install elsewhere:
+# config.yaml, state, logs, coop-keeper. If that directory is taken or unusable,
+# set the variable before the FIRST install:
 #   COOP_HOME=/srv/coop bash install.sh
 # A non-default location is exported from ~/.bashrc / ~/.zshrc so `coop` finds it.
+# Changing it later does not move an existing installation.
 #
 # Flags:
 #   --force        Replace a `coop` command already on PATH that is not AgentCoop's

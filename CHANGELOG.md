@@ -57,8 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state, logs, the control socket, the attachment cache default, coop-keeper
   and the `repo/` clone — follows it. `install.sh` installs there when the
   variable is set (`COOP_HOME=/srv/coop bash install.sh`) and exports it from
-  `~/.bashrc`/`~/.zshrc`. Must be absolute; read once at process start.
-  `COOP_CONFIG` still overrides the config file on its own.
+  `~/.bashrc`/`~/.zshrc`; install and `coop upgrade` write coop-keeper's
+  permission files and skills for that directory. Must be absolute; read once
+  at process start. `COOP_CONFIG` still overrides the config file on its own.
+  This is for the case where `~/.agentcoop` is taken or unusable, set before
+  the first install — not a way to relocate an existing installation.
+- **A `~` path in `context_inject_files` is the user's home**, as it already
+  was for `working_directory` and `cache_dir_global`; until now it was read as
+  a relative path and became `<config dir>/~/…`.
 - **The OpenCode role-enforcement plugin is handed to the sidecar by the
   gateway, not copied to disk by the wizard** (#157). Until now the plugin was
   copied once, by the setup wizard, to `~/.opencode/plugins/` and registered in

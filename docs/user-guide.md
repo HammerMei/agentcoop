@@ -737,6 +737,14 @@ An absolute path, or one starting with `~`, is used as written.
 the environment `coop` is launched from. `COOP_CONFIG` still overrides the config
 *file* on its own; it does not move the base.
 
+**`COOP_HOME` is for the rare case where `~/.agentcoop` is taken or unusable** — a
+directory conflict. Set it once, before the first install, and leave it. It is not
+a way to relocate an installation: `install_meta.json`, coop-keeper's permission
+files and skills (written for the directory at install and upgrade time) and any
+absolute path in `config.yaml` name the directory they were created under, and
+none of them follow a later change of the variable. Moving an installation is a
+manual job and is not described here.
+
 ### Secrets and Environment Variables
 
 Store credentials directly in `config.yaml` — no separate file needed:

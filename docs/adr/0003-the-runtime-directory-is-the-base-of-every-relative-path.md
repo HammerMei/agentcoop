@@ -59,5 +59,14 @@ what the operator typed, not a synonym for the base.
   make them absolute. Recorded in the changelog and the user guide.
 - Shipped examples write `working_directory: work` rather than
   `~/.agentcoop/work`, so they follow a non-default `COOP_HOME`.
+- coop-keeper's shipped files spell the default directory (`~/.agentcoop/…` in
+  Claude permission rules and prose, `*/.agentcoop/…` in opencode globs); install
+  and upgrade write them for the actual directory (`keeper_text_for`), or the
+  deny rules on the credential files would be silently off under a non-default
+  base.
+- `COOP_HOME` is for a directory conflict, set before the first install. It does
+  not relocate an installation: `install_meta.json`, the keeper's files and any
+  absolute path in `config.yaml` name the directory they were written under.
+- `~` is expanded in `context_inject_files` too, so the three path fields agree.
 - Docker keeps `/root/.agentcoop` throughout (owner's ruling: internal testing only);
   the entrypoint does not read `COOP_HOME`.

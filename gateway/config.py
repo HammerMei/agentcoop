@@ -691,9 +691,14 @@ def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_f
             raise ValueError(
                 f"{label} entries must be strings (got {type(p).__name__})."
             )
-        if p and not Path(p).is_absolute():
+        if not p:
+            continue
+        # `~` is the user's home, as written (ruling A on #182) — it is not
+        # absolute, so without this it became `<base>/~/...`.
+        p = str(Path(p).expanduser())
+        if not Path(p).is_absolute():
             resolved.append(str((base_dir / p).resolve()))
-        elif p:
+        else:
             resolved.append(p)
     return resolved
 
