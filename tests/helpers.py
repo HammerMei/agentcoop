@@ -243,10 +243,14 @@ def isolate_runtime_dir(testcase):
     """Give a test its own `RUNTIME_DIR` under a temp dir; returns `(tmp, runtime)`.
 
     Cleaned up with the test. For tests that build a real `GatewayService` or
-    touch `state.*.json` files on disk."""
+    touch `state.*.json` files on disk. Both bindings of the directory move
+    together — the state module's and the config loader's base for relative
+    paths (#182) — so a relative `working_directory` lands in the same
+    `runtime` the state files do."""
     import tempfile
     from pathlib import Path
 
+    import gateway.config as config_mod
     import gateway.core.state as state_mod
 
     holder = tempfile.TemporaryDirectory()
@@ -254,10 +258,58 @@ def isolate_runtime_dir(testcase):
     tmp = Path(holder.name)
     runtime = tmp / "runtime"
     runtime.mkdir()
-    patcher = patch.object(state_mod, "RUNTIME_DIR", runtime)
-    patcher.start()
-    testcase.addCleanup(patcher.stop)
+    for mod in (state_mod, config_mod):
+        patcher = patch.object(mod, "RUNTIME_DIR", runtime)
+        patcher.start()
+        testcase.addCleanup(patcher.stop)
     return tmp, runtime
+
+
+# Every spelling of COOP_HOME the two validators — `gateway/paths.py` and
+# install.sh's `coop_home_dir` — must agree on: (value, accepted). `~` is
+# expanded before the rule applies, so `~/coop` stands for `<HOME>/coop`. The
+# rule is one rule so that every writer downstream (the rc line, the keeper's
+# JSON permission files and their globs, install_meta.json, the skills' prose)
+# can embed the value verbatim; two review rounds each found a writer that
+# could not. Adding a spelling here runs it through both suites.
+COOP_HOME_SPELLINGS = (
+    ("/srv/coop", True),
+    ("/srv/coop-2.0_x/home", True),
+    ("~/coop", True),
+    ("coop", False),                 # relative
+    ("./coop", False),
+    ("/", False),                    # the root: no name for the keeper's globs
+    ("//srv/coop", False),           # POSIX keeps a leading `//`
+    ("/srv/coop/", False),           # trailing `/`
+    ("/srv//coop", False),           # empty component
+    ("/srv/./coop", False),
+    ("/tmp/..", False),              # resolves to `/` past the root check
+    ("/srv/../coop", False),
+    ("/srv/a b", False),             # space
+    ('/srv/a"b', False),             # JSON
+    ("/srv/a\\b", False),            # JSON escape, and `\b` reads as a different path
+    ("/srv/$USER/coop", False),      # shell expansion in the rc line
+    ("/srv/o'neil", False),
+    ("/srv/`id`/coop", False),
+    ("/srv/a*b", False),             # glob-matched by both permission files
+    ("/srv/a?b", False),
+    ("/srv/a\tb", False),            # control character
+)
+
+
+def subprocess_env(*, home=None, coop_home=None) -> dict:
+    """The environment for a subprocess that must see `COOP_HOME` as the test
+    says — unset unless given — and, optionally, a substitute `HOME`. The
+    developer's own shell may export `COOP_HOME`; a subprocess that inherits it
+    would test the developer's machine, not the rule."""
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k != "COOP_HOME"}
+    if coop_home is not None:
+        env["COOP_HOME"] = coop_home
+    if home is not None:
+        env["HOME"] = str(home)
+    return env
 
 
 def gateway_config_text(
@@ -747,9 +799,17 @@ def run_install_sh_function(names, call, **run_kw):
     return subprocess.run(["bash", "-c", script], **run_kw)
 
 
-def assert_tree_copied(testcase, src, dst):
-    """Every regular file under `src` exists under `dst` with identical bytes."""
+def assert_tree_copied(testcase, src, dst, *, transform=None):
+    """Every regular file under `src` exists under `dst` with identical bytes —
+    or, with `transform`, with the bytes `transform(text, rel)` gives for a
+    text file at posix path `rel` (a binary one is still compared as is)."""
     for f in Path(src).rglob("*"):
         if f.is_file():
             rel = f.relative_to(src)
-            testcase.assertEqual((Path(dst) / rel).read_bytes(), f.read_bytes(), rel)
+            expected = f.read_bytes()
+            if transform is not None:
+                try:
+                    expected = transform(expected.decode("utf-8"), rel.as_posix()).encode("utf-8")
+                except UnicodeDecodeError:
+                    pass
+            testcase.assertEqual((Path(dst) / rel).read_bytes(), expected, rel)

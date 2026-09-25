@@ -29,7 +29,12 @@ def _isolated_runtime_dir(tmp_path_factory, monkeypatch):
     Patched on the module attribute rather than on the environment, because that is
     what `_state_file()` reads. `gateway.state` re-exports the name but every reader
     goes through `gateway.core.state`, so one patch covers both.
+
+    `gateway.config.RUNTIME_DIR` is the base every relative path in a config.yaml
+    resolves against (#182); patched to the same directory so a test's relative
+    `working_directory` lands in its own runtime dir, not the developer's.
     """
     runtime = tmp_path_factory.mktemp("runtime")
     monkeypatch.setattr("gateway.core.state.RUNTIME_DIR", runtime)
+    monkeypatch.setattr("gateway.config.RUNTIME_DIR", runtime)
     return runtime

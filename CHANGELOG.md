@@ -40,6 +40,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command that starts coop-keeper.
 
 ### Changed
+- **Relative paths in `config.yaml` resolve against the runtime directory,
+  not the config file's directory** (#182). `working_directory`,
+  `context_inject_files` and `attachments.cache_dir_global` written as a
+  relative path now mean `<runtime dir>/<path>` — `~/.agentcoop/<path>`, or
+  `$COOP_HOME/<path>` — wherever the file is read from: through a symlink
+  (Docker mode 1), as the config tool's validation copy, or with
+  `--config /elsewhere/x.yaml`. Until now the same file resolved three
+  different ways, and a valid relative `working_directory` could be refused
+  at save time with a message naming the wrong directory. No compatibility
+  layer: a config kept outside `~/.agentcoop` that relies on relative paths
+  needs them absolute (or moved under the runtime directory). Absolute and
+  `~` paths are unchanged. ADR 0003.
+- **`COOP_HOME` sets the runtime directory** (default `~/.agentcoop`): every
+  runtime path — `config.yaml`'s default location, `admin-profiles.yaml`,
+  state, logs, the control socket, the attachment cache default, coop-keeper
+  and, for a `curl | bash` install, the `repo/` clone — follows it. `install.sh`
+  installs there when the variable is set (`COOP_HOME=/srv/coop bash install.sh`)
+  and ends by printing the line to add to your shell startup file — it does
+  not write the file; install and `coop upgrade` write coop-keeper's
+  permission files and skills for that directory. Must be an absolute,
+  canonical path spelled only with letters, digits, `.`, `_`, `-` and `/`;
+  an existing directory must be a real one the installing user owns and
+  others cannot write to; read once at process start. `COOP_CONFIG` still overrides the config file on its own.
+  This is for the case where `~/.agentcoop` is taken or unusable, set before
+  the first install — not a way to relocate an existing installation.
+- **A `~` path in `context_inject_files` is the user's home**, as it already
+  was for `working_directory` and `cache_dir_global`; until now it was read as
+  a relative path and became `<config dir>/~/…`.
 - **The OpenCode role-enforcement plugin is handed to the sidecar by the
   gateway, not copied to disk by the wizard** (#157). Until now the plugin was
   copied once, by the setup wizard, to `~/.opencode/plugins/` and registered in

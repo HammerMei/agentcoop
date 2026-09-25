@@ -56,7 +56,7 @@ def parse(entry, *, connectors, index=0):
         connectors=connectors,
         connector_names={c.name for c in connectors},
         agents=AGENTS,
-        config_dir=Path("/tmp"),
+        base_dir=Path("/tmp"),
         templates={},
         seen_rule_names=set(),
     )
@@ -299,7 +299,7 @@ class TestWhatMustKeepWorking(unittest.TestCase):
                 connectors=connectors,
                 connector_names={"voice"},
                 agents=AGENTS,
-                config_dir=Path("/tmp"),
+                base_dir=Path("/tmp"),
                 templates={},
                 seen_rule_names=seen,
             )

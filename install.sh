@@ -8,6 +8,14 @@
 # agent directory. Configuration is done afterwards by running coop-keeper
 # with your own coding CLI — the script ends by printing the command.
 #
+# Everything goes under $COOP_HOME, default ~/.agentcoop — the repo clone,
+# config.yaml, state, logs, coop-keeper. If that directory is taken or unusable,
+# set the variable before the FIRST install:
+#   COOP_HOME=/srv/coop bash install.sh
+# The script then ends by printing the line to add to your shell startup file
+# so later shells find it. Changing it later does not move an existing
+# installation.
+#
 # Flags:
 #   --force        Replace a `coop` command already on PATH that is not AgentCoop's
 set -euo pipefail
@@ -29,6 +37,78 @@ info()    { printf '\033[0;36m[AgentCoop]\033[0m %s\n' "$*"; }
 success() { printf '\033[0;32m[AgentCoop]\033[0m %s\n' "$*"; }
 warn()    { printf '\033[0;33m[AgentCoop]\033[0m %s\n' "$*" >&2; }
 error()   { printf '\033[0;31m[AgentCoop] Error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Runtime directory — $COOP_HOME, default ~/.agentcoop (#182). The same rule as
+# gateway/paths.py (COOP_HOME_RULE there): `~` expanded; then absolute,
+# canonical, and spelled only with letters, digits, `.`, `_`, `-` and `/` —
+# the value is embedded verbatim by every writer that follows.
+# ---------------------------------------------------------------------------
+coop_home_dir() {
+  # Echo the runtime directory. Exit 1 (message on stderr) for a COOP_HOME that breaks the rule.
+  local raw="${COOP_HOME:-}"
+  if [ -z "$raw" ]; then
+    printf '%s\n' "$HOME/.agentcoop"
+    return 0
+  fi
+  case "$raw" in
+    "~")   raw="$HOME" ;;
+    "~/"*) raw="$HOME/${raw#\~/}" ;;
+  esac
+  case "$raw" in
+    *[!A-Za-z0-9._/-]*|/|//*|*/|*//*|*/./*|*/.|*/../*|*/..|[!/]*)
+      printf "COOP_HOME must be an absolute, canonical path (no '.', '..' or empty components, no trailing '/', not '/') using only letters, digits, '.', '_', '-' and '/' (got %s)\n" "$raw" >&2
+      return 1 ;;
+  esac
+  printf '%s\n' "$raw"
+}
+coop_home_hint() {
+  # $1 = runtime dir. The line that makes later shells find a non-default
+  # COOP_HOME, in the login shell's own syntax ($SHELL). Printed for the
+  # operator to add; the installer writes no shell startup file for it — a
+  # value-carrying line in someone else's rc file has more edge cases (an
+  # existing export, a commented one, quoting, a read-only file, fish/csh)
+  # than the rare case is worth, and rc files never covered cron or a
+  # service manager anyway.
+  case "${SHELL:-}" in
+    */fish)        printf "set -gx COOP_HOME '%s'\n" "$1" ;;
+    */csh|*/tcsh)  printf "setenv COOP_HOME '%s'\n" "$1" ;;
+    *)             printf "export COOP_HOME='%s'\n" "$1" ;;
+  esac
+}
+runtime_dir_is_ours() {
+  # $1 = runtime dir. 0 when it does not exist yet, or is a directory owned by
+  # the invoking user that other users cannot write to. A symlink is followed
+  # and its TARGET judged — symlinks are supported everywhere else, and a
+  # `~/.agentcoop -> /Volumes/big/agentcoop` is a normal setup. Everything the
+  # installer puts under it — the repo clone that `~/.local/bin/coop` runs from
+  # above all — trusts the directory. This guards the accidental case: a
+  # COOP_HOME typed under a shared parent such as /tmp, a world-writable mode.
+  # It is not a defence against another account on the same host — multi-tenant
+  # hosts are outside what AgentCoop promises (SECURITY.md, requirements
+  # §14.5), so group-writable directories, parent directories and the like are
+  # deliberately not examined. Runs on the default directory too, so the
+  # messages name the directory, never a variable the operator may not have set.
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  if [ ! -d "$1" ]; then
+    printf '[ERROR] %s exists and is not a directory (or is a link to something that is not).\n' "$1" >&2; return 1
+  fi
+  if [ ! -O "$1" ]; then
+    printf '[ERROR] the runtime directory %s is not owned by %s.\n' "$1" "$(id -un)" >&2; return 1
+  fi
+  if [ -n "$(find -L "$1" -maxdepth 0 -perm -o+w 2>/dev/null)" ]; then
+    printf '[ERROR] the runtime directory %s is writable by other users; it must be one only you can write to.\n' "$1" >&2; return 1
+  fi
+  return 0
+}
+RUNTIME_DIR=$(coop_home_dir) || exit 1
+runtime_dir_is_ours "$RUNTIME_DIR" || exit 1
+# Only a COOP_HOME the operator set is exported (expanded) to the Python steps
+# below: the default is not validated as an explicit value by gateway/paths.py,
+# and a $HOME the explicit-value rule would refuse must keep installing.
+if [ -n "${COOP_HOME:-}" ]; then
+  export COOP_HOME="$RUNTIME_DIR"
+fi
 
 # ---------------------------------------------------------------------------
 # OS / architecture detection
@@ -92,8 +172,8 @@ if [ -z "$SCRIPT_SOURCE" ] || [ "$SCRIPT_SOURCE" = "/dev/stdin" ] || [ "$SCRIPT_
 fi
 
 if [ "$CURL_PIPE" = true ]; then
-  REPO_DIR="$HOME/.agentcoop/repo"
-  mkdir -p "$HOME/.agentcoop"
+  REPO_DIR="$RUNTIME_DIR/repo"
+  mkdir -p "$RUNTIME_DIR"
   info "Running via curl|bash — will clone to $REPO_DIR"
   if [ -d "$REPO_DIR/.git" ]; then
     info "Repo already exists at $REPO_DIR — pulling latest..."
@@ -338,8 +418,10 @@ esac
 # ---------------------------------------------------------------------------
 # Ensure runtime dir exists (needed by both context copy and install_meta.json)
 # ---------------------------------------------------------------------------
-RUNTIME_DIR="$HOME/.agentcoop"
 mkdir -p "$RUNTIME_DIR"
+if [ "$RUNTIME_DIR" != "$HOME/.agentcoop" ]; then
+  info "Runtime directory: $RUNTIME_DIR (COOP_HOME)"
+fi
 
 # ---------------------------------------------------------------------------
 # Copy user-facing example context files to runtime dir.
@@ -403,7 +485,7 @@ esac
 printf '\n'
 success "Installation complete!"
 printf '\n'
-printf '  Repository cloned to:    ~/.agentcoop/repo\n'
+printf '  Repository cloned to:    %s\n' "$REPO_DIR"
 printf '  Executable installed at: ~/.local/bin/coop\n'
 if [ "$PROVISION_LINKED" = true ]; then
   printf '  Provisioning CLI:        ~/.local/bin/coop-provision\n'
@@ -416,10 +498,16 @@ printf '\n'
 printf '  To use AgentCoop in your current shell, run:\n'
 printf '    source %s\n' "$SHELL_RC"
 printf '  Or restart your terminal.\n'
+if [ "$RUNTIME_DIR" != "$HOME/.agentcoop" ]; then
+  printf '\n'
+  printf '  This install lives in %s. Add this line to %s so every\n' "$RUNTIME_DIR" "$SHELL_RC"
+  printf '  later shell (and anything that starts coop) finds it:\n'
+  printf '    %s\n' "$(coop_home_hint "$RUNTIME_DIR")"
+fi
 printf '\n'
 printf '  Set up your first bot with coop-keeper, using either CLI:\n'
-printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && opencode\n'
-printf '    cd ~/.agentcoop/agents/builtin/coop-keeper && claude\n'
+printf '    cd %s/agents/builtin/coop-keeper && opencode\n' "$RUNTIME_DIR"
+printf '    cd %s/agents/builtin/coop-keeper && claude\n' "$RUNTIME_DIR"
 printf '\n'
-printf '  Then:  coop status          tail -f ~/.agentcoop/gateway.log\n'
+printf '  Then:  coop status          tail -f %s/gateway.log\n' "$RUNTIME_DIR"
 printf '\n'

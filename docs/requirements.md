@@ -249,7 +249,7 @@ The gateway SHALL validate that:
 
 The gateway SHALL:
 1. Require that path-based configuration values (e.g., working directories) exist at validation time
-2. Resolve relative paths relative to the configuration file location
+2. Resolve relative paths against the runtime directory (`$COOP_HOME`, default `~/.agentcoop`) — never against the directory the configuration file is read from
 3. Store secrets directly in the configuration file, restricting its permissions (`chmod 0600`) whenever the gateway or its config tool writes it
 4. NOT expand `$VARIABLE`/`${VARIABLE}` references in configuration values — a value that happens to look like such a reference is used as a plain literal string, never resolved
 

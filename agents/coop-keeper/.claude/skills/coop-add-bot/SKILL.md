@@ -224,13 +224,13 @@ it is released after step 6):
          url: https://mm.example
          team: lab
          username: bob
-         password: {from_file: /Users/alice/.agentcoop/agents/.bot-password.XXXXXX}
+         password: {from_file: ~/.agentcoop/agents/.bot-password.XXXXXX}   # written out absolute
        allowed_users: {owners: [alice], guests: []}
    agents:
      bob:
        type: claude
        command: claude
-       working_directory: /Users/alice/.agentcoop/agents/user/bob
+       working_directory: ~/.agentcoop/agents/user/bob   # written out absolute
        inherits: default
        description: managed by coop-keeper — <intent>
    watcher_rules:

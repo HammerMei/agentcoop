@@ -505,3 +505,170 @@ wording.
 closed by the owner: the default stays `false`. The finding is a real security issue,
 deferred under the deployment assumption of mostly-trustworthy chat members, and it will be
 solved with the rest of security rather than by a per-command guest restriction.
+
+## 2026-09-25 — PR #186 round 1 (#182: relative paths resolve against COOP_HOME)
+
+**Chain detector:** 3 findings on `ad5c0a3`, first round, `--`, no chain.
+**Control finding:** none — the log still has no settled *finding* (the PR #184 entry
+is settled as a PR status, not as an observed outcome of one verdict). Agreement
+**uncorroborated**.
+**Protocol slip, recorded as such:** the fixes were implemented in parallel with the
+blind rating, and the second rater saw the working tree change under it — the shape of
+the F3 fix and part of the F1/F2 warning text — before writing its report. Its F3
+conclusion predates that; F1/F3 agreement still cannot be logged as independent
+(Step 4: one rater had an input the other lacked). Rule for next time: **do not touch
+the tree until the second rater has reported.**
+
+Increment: "Relative paths in config.yaml resolve against RUNTIME_DIR (`$COOP_HOME` or
+`~/.agentcoop`); the base is a constant the loader owns" + rulings A–D on #182.
+
+| | rater 1 (author) | rater 2 (blind, see slip) | outcome |
+|---|---|---|---|
+| **F1** `persist_coop_home` interpolates the directory inside double quotes, so `/srv/$USER/coop` expands in the next shell (P2) | true; `cheap`: single-quote with `'\''` escaping, grep the same form for idempotence, ~6 lines; silent-ish (next `coop` looks in another directory); reachability near zero | true; `cheap` (~3 lines with `%q`); semi-loud — `coop start`'s preflight names a directory the operator never typed; same layer; this increment's | **FIX** — single-quoted line; a test sources the rc file in real bash and zsh with `$USER`, a quote and a backtick in the path |
+| **F2** a fish user with a dormant `.bashrc` gets the export in an unrelated file and no warning; the banner names `config.fish`, never written (P2) | true; `cheap`: decide by `$SHELL` whether the *active* rc file took the line, warn otherwise, ~8 lines; silent for keeper-written files | true; ranks **first** — the only finding with a population; `cheap` (~4 lines); FIX the warning, **FILE full fish support** (PATH block has the same gap) with a 6-month decay | **FIX** the warning (active-shell check); fish support not filed yet — the owner decides whether to open it (`feedback_confirm_before_filing_issues`) |
+| **F3** `COOP_HOME=/` leaves opencode's read/edit denies unrewritten (P2) | true but the proposed fix is the wrong layer; `cheap`: refuse `/` in `paths.py` and `coop_home_dir`, 2+1 lines; expressible, so not `cannot-occur` | same; traced live that `/` also yields junk for Claude rules and `external_directory`, so "covering deny patterns" is wrong regardless; owning layer `paths.py`, finding points at `upgrade.py` | **FIX** at the loader and installer — `/` refused by name in both; the `runtime_dir.name` guard in `upgrade.py` removed as unreachable by construction |
+
+Notes:
+- Adoption: 3 of 3, all `cheap`, none scored. Severity re-ranked F2 > F3 > F1 by both
+  raters; Codex's flat P2 flattened a real-population finding and two near-zero ones.
+- No promise-contradicting finding; by the stop-loss agreed on PR #184 ("stop when a
+  round has no promise-contradicting finding") one confirming round then stop.
+
+**Status: open.** Settles with the confirming round.
+
+## 2026-09-25 — PR #186 round 2
+
+**Chain detector:** 3 findings on `f601622`; `install.sh` 2 and `gateway/upgrade.py` 1 on
+our own last fix, **streak 1 each** — once is noise by the rule, but all three land on
+round 1's fixes and the "same kind" test fires (below).
+**Control finding:** none. Agreement **uncorroborated**. The tree was not touched until
+the second rater had reported (the round-1 slip, not repeated).
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** `COOP_HOME=/tmp/..` passes the root refusal; basename `..` in the keeper globs (P2) | true; `cheap`: refuse non-canonical components, not normalise (bash has no normpath in reach) | same; traced live — and **the two validators already disagreed** (`paths.py` refused `//`/`/.`, `coop_home_dir` did not); Codex's normaliser is ~12 lines of bash | **FIX** via the class rule |
+| **F2** `"` or `\` in COOP_HOME corrupts the generated permission JSON; `\b` parses as another path (P2) | true, silent; `cheap`: reject at the validators; JSON serialisation is a new concept and misses `install_meta.json`'s heredoc | same; per-writer escaping is O(writers) ≥ 5; owning layer is the loader, finding points at a writer | **FIX** via the class rule |
+| **F3** a commented-out exact export counts as active; `/srv/coop-old` matches `/srv/coop` as a prefix (P2) | true; `cheap`: compare each active export's value for equality, ~8 lines | same; ranks **first** — a prefix match silently leaves a live install unmentioned; not an anchored regex (escaping the path is the same bug class) | **FIX** — `rc_exports_coop_home` extracts each uncommented export's value and compares it whole |
+
+**The pattern.** Round 1: `$`, quotes, backticks, `/`. Round 2: `/tmp/..`, `"`, `\`,
+`//`. Both raters: one class — *a COOP_HOME spelling some writer downstream did not
+anticipate* — and one rule closes it. Rater 2 proposed a denylist (`"`, `\`, control
+characters) plus canonical form and handed the glob metacharacters up; rater 1 a
+whitelist. **Taken: the whitelist** — absolute, canonical, letters/digits/`.`/`_`/`-`/`/`
+only — because it subsumes the denylist, settles the glob question, and is one sentence
+in the guide. Enforced identically by `gateway/paths.py` (`COOP_HOME_RULE`) and
+`install.sh` (`coop_home_dir`); `tests/helpers.py` `COOP_HOME_SPELLINGS` is the
+enumerated surface both suites run. Cost ~4 lines each side plus the table; tax one
+invariant. In the increment: "the base is a constant the loader owns" includes what a
+valid base is, and the owner's framing (a rare, conflict-only setting) makes a strict
+spelling acceptable.
+
+Notes:
+- Adoption: 3 of 3, all `cheap`, none scored. Rater 2's built rates for the log:
+  F1 0.0003–0.04/yr, F2 ≤ 0.004/yr, F3 0.003–0.2/yr (operators 5–20 × P(sets COOP_HOME)
+  0.05–0.2 × P(spelling)); `hours_per_hit` 0.5–3; discount 1.0 (no clause covers install).
+- Severity re-ranked by both: F3 > F2 > F1. Codex: three P2.
+- No promise-contradicting finding. Next: one confirming round. **If round 3 lands on
+  `install.sh` or `upgrade.py` again, that is streak 2 — stop patching and re-read the
+  increment with the owner.**
+
+**Status: open.** Settles with the confirming round.
+
+## 2026-09-25 — PR #186 round 3
+
+**Chain detector:** code review on `74b0920` clean; one **security-review** finding, on
+`install.sh:174` — a line from the PR's first commit, not from either round's fix; `--`,
+streak reset. (Round 2's note "if round 3 lands on `install.sh` again, streak 2" was
+overbroad: the rule is *on our own last fix*, and rater 2 said so.)
+**Control finding:** none. Agreement **uncorroborated**. Tree untouched until rater 2
+reported.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** a non-default COOP_HOME another local user pre-created, links or can write into lets them replace `repo/.venv/bin/coop`, which `~/.local/bin/coop` runs (security review) | true, silent; not promise-contradicting (SECURITY.md lists local co-tenants in neither column); split: owner/symlink/others-writable refusal is `cheap` (~8 lines, installer only); the parent walk is not | same split, three ways: (i-a) owner + symlink refusal `cheap`, **FIX**; (i-b) others-writable + 0700 **DROP** — `stat` is not portable, secrets are already 0600, 0700 would change the default dir's mode; (ii) parent walk **FILE** 6 months; scored (ii): hits 1e-5–0.12/yr, hours_per_hit 20–40, tax 0.5 → net ≤ 0 at the midpoint | **FIX** (i-a) and the others-writable half of (i-b): `runtime_dir_is_ours` refuses a non-directory, a directory not owned by the invoker, or one writable by others — `find -L -maxdepth 0 -perm -o+w`, which BSD and GNU find both take; a symlink is followed and its target judged (the first cut refused symlinks outright, which would have refused a `~/.agentcoop -> elsewhere` on the default path against the PR #184 symlink ruling — caught by the closing advisor pass, not by a review round), so the portability objection does not hold (concession on checkable evidence, in rater 2's direction on 0700 and rater 1's on the mode check). 0700-on-create **DROP** per rater 2. Parent walk: **DROP** — owner's ruling (2026-09-25): a shared parent without a sticky bit is the host's flaw, and a directory the operator chose under one is the operator's; nothing special is done there. Recorded as the boundary in SECURITY.md (see round 4) |
+
+Notes:
+- Adoption: 1 of 1 fixed in part; one part dropped with the reason, one part a FILE
+  candidate awaiting the owner. Verdicts agree on every part; the one disagreement
+  (others-writable) resolved on a cited, checkable fact.
+- The reachable input is a COOP_HOME under a sticky world-writable parent
+  (`/tmp/coop`): stock `/srv` and `/opt` are root 0755, and the default `~/.agentcoop`
+  sits under `$HOME`. The exposure is new with this PR. Both raters: hardening, not a
+  stated promise — rate applies; escalation condition recorded: if the owner brings a
+  hostile local shell user in scope, reachability is shown and the parent walk is forced.
+- Both raters: one confirming round after the fix (CLAUDE.md: commits in response to a
+  review most need a pass; CI does not exercise `-O`).
+
+**Status: open.** Settles with the confirming round.
+
+## 2026-09-25 — PR #186 round 3, code review (arrived after the security review)
+
+Codex's code review of `74b0920` (`5321952266`) landed after its security review of
+the same commit and after round 3 above was triaged and fixed. Four findings.
+**Chain detector:** `--` by its rule (the code since the previous round was `7710a3b`,
+not what these land on). By inspection F1 is on round 2's `rc_exports_coop_home` and
+F2 on round 1's append — the second and third findings in a row on the rc-file
+persistence in `install.sh`. Rater 2 corrected the author's "three consecutive rounds"
+framing: by metadata the streak is 1, so Step 0 does not fire; what follows is an
+**economic re-score of the feature**, the DROP anchor's logic.
+**Control finding:** none. Agreement **uncorroborated**. Tree untouched until rater 2
+reported.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** several active exports: the first equal one satisfies the check, the shell uses the last (P2) | true, silent; `cheap` (compare the last); moot if persistence goes | same; 0.003–0.2/yr | **moot** — persistence deleted (below) |
+| **F2** an unwritable rc file aborts the installer under `set -e` after the symlink, before install_meta.json (P2) | true, loud; `cheap`; the PATH block's `>>` has the same gap, pre-existing | same; ≤ 0.02/yr; PATH copy out of scope | **moot** — persistence deleted |
+| **F3** `coop-add-bot/SKILL.md:227,233` keep `/Users/alice/.agentcoop/…`, which the rewrite does not touch (P2) | true; the author had left it as illustrative in the internal review — Codex is right that the keeper copies examples; `cheap`: spell the example `~/.agentcoop/…` | same; owning layer is the skill text, not `upgrade.py` | **FIX** — the example uses the replaceable spelling, marked "written out absolute" |
+| **F4** `export COOP_HOME="$RUNTIME_DIR"` exports the DEFAULT too; a `$HOME` the explicit-value rule refuses (a space, a non-ASCII name) aborts the keeper install (P2) | true, loud, this PR's; `cheap`: export only when set | same; ranks **first** — the one finding with a population (0.05–0.5/yr) | **FIX** — exported only when the operator set it |
+
+**The rc-persistence chain, re-scored whole.** Ruling B's words — "install.sh sets
+COOP_HOME to that location", "set once before the first install" — read as *uses*;
+writing the operator's shell startup file was a reading of it, and that reading drew
+every `install.sh` finding: `0a967cb`, round 1 (2), round 2 (1), this review (2) — six
+findings on ~45 lines that embed an operator-supplied value in a file the installer does
+not own, plus 12 of the suite's 19 tests. Harm prevented: the operator ignores the
+printed line — `coop start` then fails loudly (no config); rc files never covered cron
+or a service manager. Rater 2: 0.05–6 h/yr, midpoint ~0.5; tax already paid ≈ 6 findings
+× 1–2 h, ongoing 0.5–2 h/yr — **net ≤ 0 at the midpoint.** The PATH block does not change
+the answer: it writes a constant line, which has none of the value-comparison surface.
+Owner's ruling (2026-09-25), after asking what the concern was and whether the shell file
+could be determined (bash/zsh only were written; fish and csh got a warning): **delete
+it — "ask the user, it is not a common use case anyway."** `persist_coop_home` and
+`rc_exports_coop_home` are gone; `coop_home_hint` prints the line in the login shell's
+syntax (`export` / `set -gx` / `setenv`) next to the existing `source` hint.
+
+Notes:
+- Adoption: 2 of 4 fixed, 2 moot by deletion. Severity re-ranked by both: F4 > F3 > F1 > F2.
+- Increment-definition check, as Step 0 asks: rc persistence was not in it. The
+  deletion is a reduction of ~45 lines and 12 tests.
+
+## 2026-09-25 — PR #186 round 4 (confirming round on `7710a3b`)
+
+**Chain detector:** `install.sh` 1 finding on our own last fix (round 3's
+`runtime_dir_is_ours`), streak 1. By inspection this is the directory-safety check's
+second link (owner/symlink/world-writable → group-writable → setgid/ACL/parents next).
+**Control finding:** none. Agreement **uncorroborated**. Tree untouched until rater 2
+reported.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** a 0770/0775 COOP_HOME whose group holds a lower-privileged user passes (`-o+w` only); refuse `g+w` and lock created modes (P2) | same class as the parent walk: the host's and the operator's layer | a `g+w` refusal is **incorrect**: Debian/Ubuntu/Fedora private user groups (umask 002) make every operator-made directory 0775 with group == user, so the refusal lands on COOP_HOME's own use case; MAKE IT LOUD with a "group == `id -gn`" suppression, ~5 lines, one heuristic; 0700-on-create DROP as in round 3 | **DROP, with the boundary written** — owner's ruling: weak host permissions are the host's flaw, nothing special is done. Rater 2's warning was a defensible alternative; the owner is the tie-break. SECURITY.md out-of-scope now names other accounts on the same host (§14.5); `runtime_dir_is_ours`'s comment says it guards the accidental case |
+| **F2** a container launched with `COOP_HOME` set: the entrypoint writes `/root/.agentcoop`, `coop` reads `$COOP_HOME` — `coop start` fails (P2) | true; `cheap`: `unset COOP_HOME` in the entrypoint, one line; this PR made the variable mean something | true but **loud** (`[ERROR] …config.yaml: FileNotFoundError`); trigger is `docker run -e COOP_HOME` only; the file is outside the PR; Docker fixed by ruling → DROP here, ride along with the next Docker change | **DROP for this PR, recorded on #183** — owner's direction: the image is for e2e runs only, will use defaults throughout and may lose its volume bindings, so the split disappears by construction |
+
+Notes:
+- Adoption: 0 of 2; both dropped with written reasons and one boundary written where a
+  third finding of the class would otherwise land.
+- Where the directory check stops (both raters): a documented boundary, not another
+  bit — `install.sh` cannot own "safe against whom"; SECURITY.md does now.
+- **Stop-loss met**: round 4 was round 3's confirming round and neither finding
+  contradicts a promise. No further Codex round; the closing commit (deletion of the rc
+  persistence, F3, F4, the boundary) ships on green CI by the owner's standing rule for
+  a last round.
+
+**Totals over four rounds:** 13 findings — 7 fixed, 2 moot by deleting the feature they
+were on, 4 dropped with reasons (one of them a FILE candidate the owner declined). One
+chain (rc-file persistence, six findings across three rounds) deleted on the owner's
+ruling; one class (directory safety against a local co-tenant) closed by writing the
+boundary. Two blind rounds contaminated by a protocol slip in round 1, none after.
+
+**Status: settled for this PR.**

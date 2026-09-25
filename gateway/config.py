@@ -41,7 +41,7 @@ from .core.room_pattern import (
 from .core.watcher_rule import RoomMatcher, WatcherRule
 
 # Re-export core config types — canonical definitions in gateway.core.config
-from .paths import ATTACHMENTS_DIR_DEFAULT
+from .paths import ATTACHMENTS_DIR_DEFAULT, RUNTIME_DIR
 
 # v0.2's global `*_defaults:` blocks (removed in v0.3 — see docs/migration-0.3.md) merged
 # flatly and unconditionally into EVERY entry of a kind, regardless of type: setting
@@ -283,7 +283,7 @@ class GatewayConfig:
         # No $VAR/${VAR} expansion here — see module docstring. Any such
         # string in a loaded config is treated as a plain literal.
 
-        config_dir = Path(path).parent
+        base_dir = config_base_dir()
 
         # ── Connectors ────────────────────────────────────────────────────────
 
@@ -307,7 +307,7 @@ class GatewayConfig:
         seen_connector_names: set[str] = set()
         for i, cc_raw in enumerate(connectors_raw):
             connectors.append(
-                _parse_one_connector(cc_raw, i, connector_templates, config_dir, seen_connector_names)
+                _parse_one_connector(cc_raw, i, connector_templates, base_dir, seen_connector_names)
             )
 
         # ── Agents ────────────────────────────────────────────────────────────
@@ -329,7 +329,7 @@ class GatewayConfig:
         agents: dict[str, AgentConfig] = {}
         for agent_name, agent_raw_entry in agents_raw.items():
             agents[agent_name] = _parse_one_agent(
-                agent_name, agent_raw_entry, agent_templates, tool_presets, config_dir
+                agent_name, agent_raw_entry, agent_templates, tool_presets, base_dir
             )
 
         # ── Watchers ──────────────────────────────────────────────────────────
@@ -380,7 +380,7 @@ class GatewayConfig:
                     connectors=connectors,
                     connector_names=connector_names,
                     agents=agents,
-                    config_dir=config_dir,
+                    base_dir=base_dir,
                     templates=watcher_templates,
                     seen_rule_names=seen_rule_names,
                 )
@@ -638,6 +638,42 @@ def _resolve_tool_entries(
     return rules
 
 
+def config_base_dir() -> Path:
+    """The directory a relative path in config.yaml is resolved against: the
+    runtime directory (`$COOP_HOME`, default `~/.agentcoop`), never the
+    directory the file happens to be read from (#182).
+
+    The file's location used to be the base, so one file meant three things:
+    read through `~/.agentcoop/config.yaml`, validated as a temp copy beside
+    its symlink target (Docker mode 1), or checked with `--config <elsewhere>`.
+    A constant base makes symlinks, `--config` locations and temp-file
+    placement stop mattering. Bound as this module's `RUNTIME_DIR` so tests
+    patch `gateway.config.RUNTIME_DIR`, as they do every other module's copy.
+    """
+    return RUNTIME_DIR
+
+
+def _expand_user(p: str, label: str) -> str:
+    """`Path.expanduser()`, with `~nosuchuser` reported as a config problem:
+    it raises `RuntimeError`, which `collect_config` does not catch (it catches
+    `ValueError`), so `coop config validate` would traceback on one bad entry."""
+    try:
+        return str(Path(p).expanduser())
+    except RuntimeError as exc:
+        raise ValueError(f"{label}: cannot expand {p!r} ({exc})") from exc
+
+
+def resolve_working_directory(raw: str, base_dir: Path) -> str:
+    """`working_directory` as the loader stores it: `~` expanded first, then a
+    still-relative path resolved against `base_dir` (`config_base_dir()`). The
+    config TUI's inline hint calls this too, so it can never disagree with the
+    loader."""
+    working_directory = _expand_user(raw, "working_directory")
+    if not Path(working_directory).is_absolute():
+        working_directory = str((base_dir / working_directory).resolve())
+    return working_directory
+
+
 def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_files") -> list[str]:
     """Resolve a list of path strings relative to base_dir.
 
@@ -665,9 +701,14 @@ def _resolve_paths(paths: object, base_dir: Path, label: str = "context_inject_f
             raise ValueError(
                 f"{label} entries must be strings (got {type(p).__name__})."
             )
-        if p and not Path(p).is_absolute():
+        if not p:
+            continue
+        # `~` is the user's home, as written (ruling A on #182) — it is not
+        # absolute, so without this it became `<base>/~/...`.
+        p = _expand_user(p, label)
+        if not Path(p).is_absolute():
             resolved.append(str((base_dir / p).resolve()))
-        elif p:
+        else:
             resolved.append(p)
     return resolved
 
@@ -692,7 +733,7 @@ def _parse_one_connector(
     cc_raw: object,
     index: int,
     connector_templates: dict[str, dict],
-    config_dir: Path,
+    base_dir: Path,
     seen_connector_names: set[str],
 ) -> ConnectorConfig:
     if not isinstance(cc_raw, Mapping):
@@ -769,10 +810,11 @@ def _parse_one_connector(
 
     # Resolve connector-level context_inject_files
     raw_ctx = cc.get("context_inject_files", [])
-    ctx_files = _resolve_paths(raw_ctx, config_dir, f"Connector '{name}': 'context_inject_files'")
+    ctx_files = _resolve_paths(raw_ctx, base_dir, f"Connector '{name}': 'context_inject_files'")
 
-    # Resolve attachments.cache_dir_global relative to config dir
-    # (consistent with working_directory resolution below)
+    # Resolve attachments.cache_dir_global against the base (consistent with
+    # working_directory resolution below); a `~` path is left for expanduser()
+    # at connector init.
     attach_raw = cc.get("attachments", {})
     if isinstance(attach_raw, dict):
         cache_dir_global = attach_raw.get("cache_dir_global", "")
@@ -782,7 +824,7 @@ def _parse_one_connector(
             and not Path(cache_dir_global).is_absolute()
         ):
             attach_raw["cache_dir_global"] = str(
-                (config_dir / cache_dir_global).resolve()
+                (base_dir / cache_dir_global).resolve()
             )
         # Write the resolved value back into the raw config
         cc["attachments"] = attach_raw
@@ -810,7 +852,7 @@ def _parse_one_agent(
     agent_raw_entry: object,
     agent_templates: dict[str, dict],
     tool_presets: dict[str, list["ToolRule"]],
-    config_dir: Path,
+    base_dir: Path,
 ) -> AgentConfig:
     if not isinstance(agent_raw_entry, Mapping):
         raise ValueError(
@@ -827,18 +869,13 @@ def _parse_one_agent(
             f"(got {type(perm_raw).__name__})."
         )
 
-    # Resolve context_inject_files (list) relative to the config file's directory
+    # Resolve context_inject_files (list) against the base
     raw_ctx = agent_raw.get("context_inject_files", [])
-    ctx_files = _resolve_paths(raw_ctx, config_dir, f"Agent '{agent_name}': 'context_inject_files'")
+    ctx_files = _resolve_paths(raw_ctx, base_dir, f"Agent '{agent_name}': 'context_inject_files'")
 
-    # Resolve working_directory: expand a leading ~ first (matching
-    # the cache_dir_global handling above), then resolve relative to
-    # the config file's directory if still not absolute.
     working_directory = agent_raw.get("working_directory", "")
     if working_directory:
-        working_directory = str(Path(working_directory).expanduser())
-        if not Path(working_directory).is_absolute():
-            working_directory = str((config_dir / working_directory).resolve())
+        working_directory = resolve_working_directory(working_directory, base_dir)
 
     # Validate: working_directory is required and must exist
     if not working_directory:
@@ -1335,7 +1372,7 @@ def _parse_one_watcher_rule(
     connectors: list[ConnectorConfig],
     connector_names: set[str],
     agents: dict,
-    config_dir: Path,
+    base_dir: Path,
     templates: dict,
     seen_rule_names: set[str],
 ) -> WatcherRule:
@@ -1501,7 +1538,7 @@ def _parse_one_watcher_rule(
         # beside a static-shaped one.
         context_inject_files=_resolve_paths(
             wc.get("context_inject_files", []),
-            config_dir,
+            base_dir,
             f"{where}: 'context_inject_files'",
         ),
         history_handoff=history_handoff,
@@ -1773,7 +1810,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
                 )
             ]
 
-    config_dir = path.parent
+    base_dir = config_base_dir()
     issues: list[ConfigIssue] = []
 
     # Same check as from_file(), reported rather than raised: `coop config validate`
@@ -1823,7 +1860,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
             name_hint = None
         try:
             connectors.append(
-                _parse_one_connector(cc_raw, i, connector_templates, config_dir, seen_connector_names)
+                _parse_one_connector(cc_raw, i, connector_templates, base_dir, seen_connector_names)
             )
         except ValueError as exc:
             issues.append(ConfigIssue("connector", name_hint or f"(index {i})", str(exc)))
@@ -1873,7 +1910,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
     for agent_name, agent_raw_entry in agents_raw.items():
         try:
             agents[agent_name] = _parse_one_agent(
-                agent_name, agent_raw_entry, agent_templates, tool_presets, config_dir
+                agent_name, agent_raw_entry, agent_templates, tool_presets, base_dir
             )
         except ValueError as exc:
             issues.append(ConfigIssue("agent", agent_name, str(exc)))
@@ -1996,7 +2033,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
                     connectors=connectors,
                     connector_names=connector_names,
                     agents=agents,
-                    config_dir=config_dir,
+                    base_dir=base_dir,
                     templates=watcher_templates,
                     seen_rule_names=seen_rule_names,
                 )

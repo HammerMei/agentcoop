@@ -32,11 +32,15 @@ class TestInstallKeeperDir(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
 
     def test_copies_the_whole_shipped_tree_including_dotfiles(self):
+        # A temp runtime dir is a non-default one, so every text file arrives
+        # with the runtime directory written in (`keeper_text_for`, #182).
+        from gateway.upgrade import keeper_text_for
         runtime = self.tmp / "runtime"
         runtime.mkdir()
         r = _install(REPO, runtime)
         self.assertEqual(r.returncode, 0, r.stderr)
-        assert_tree_copied(self, KEEPER_SRC, runtime / "agents" / "builtin" / "coop-keeper")
+        assert_tree_copied(self, KEEPER_SRC, runtime / "agents" / "builtin" / "coop-keeper",
+                           transform=lambda text, rel: keeper_text_for(text, runtime, rel))
         self.assertTrue((runtime / "agents" / "user").is_dir())
 
     def test_a_second_run_leaves_the_operators_files_alone(self):
@@ -66,9 +70,11 @@ class TestInstallKeeperDir(unittest.TestCase):
             self.assertNotIn(gone, text)
 
     def test_the_installer_ends_with_both_cli_start_lines(self):
+        # Printed with the runtime directory the install actually used
+        # ($COOP_HOME, default ~/.agentcoop — #182), not a spelled-out default.
         text = INSTALL_SH.read_text()
-        self.assertIn("cd ~/.agentcoop/agents/builtin/coop-keeper && opencode", text)
-        self.assertIn("cd ~/.agentcoop/agents/builtin/coop-keeper && claude", text)
+        self.assertIn("cd %s/agents/builtin/coop-keeper && opencode\\n' \"$RUNTIME_DIR\"", text)
+        self.assertIn("cd %s/agents/builtin/coop-keeper && claude\\n' \"$RUNTIME_DIR\"", text)
 
 
 if __name__ == "__main__":

@@ -12,11 +12,13 @@ from unittest.mock import patch
 import pytest
 
 from gateway.upgrade import (
+    DEFAULT_RUNTIME_DIR,
     KEEPER_DST_REL,
     KEEPER_IN_USE,
     KEEPER_OBSOLETE,
     KEEPER_SRC_REL,
     _read_keeper_manifest,
+    keeper_text_for,
     run_post_upgrade,
     sync_keeper_dir,
 )
@@ -211,7 +213,71 @@ class TestRunPostUpgradeSyncsTheKeeper:
 
     def test_the_shipped_tree_round_trips_through_the_sync(self, tmp_path: Path):
         """The real agents/coop-keeper/ syncs into an empty runtime dir and
-        every shipped file arrives."""
+        every shipped file arrives — byte for byte when the runtime dir is the
+        default one, which is what `DEFAULT_RUNTIME_DIR` patched to `runtime`
+        makes it here."""
         runtime = tmp_path / "runtime"
-        sync_keeper_dir(REPO, runtime)
+        with patch("gateway.upgrade.DEFAULT_RUNTIME_DIR", runtime):
+            sync_keeper_dir(REPO, runtime)
         assert_tree_copied(_Asserter(), REPO / KEEPER_SRC_REL, runtime / KEEPER_DST_REL)
+
+
+class TestKeeperFilesNameTheRuntimeDir:
+    """The shipped keeper files spell the default runtime directory —
+    `~/.agentcoop/...` in Claude permission rules and the skills' prose,
+    `*/.agentcoop/...` in opencode's globs. Under a non-default `COOP_HOME` the
+    allow globs would miss every path the keeper touches (each edit prompts)
+    and the deny globs would miss the credential files (the guardrail is
+    silently off). The sync rewrites them to the installation's directory
+    (#182, gap C); the default installation keeps the shipped bytes."""
+
+    def test_a_non_default_runtime_dir_is_written_into_the_permission_files(self, tmp_path: Path):
+        runtime = tmp_path / "coop"
+        sync_keeper_dir(REPO, runtime)
+        dst = runtime / KEEPER_DST_REL
+        settings = (dst / ".claude" / "settings.json").read_text()
+        # `//` — a single leading `/` would be relative to the settings source.
+        assert f"Edit(/{runtime}/agents/**)" in settings
+        assert f"Read(/{runtime}/config.yaml)" in settings
+        assert "~/.agentcoop" not in settings
+        opencode = (dst / "opencode.json").read_text()
+        assert f'"{runtime}/agents/*": "allow"' in opencode
+        # The read/edit globs keep their `*/` shape; only the directory name moves.
+        assert '"*/coop/config.yaml": "deny"' in opencode
+        assert '"*/coop/agents/.bot-password.*": "deny"' in opencode
+        assert ".agentcoop" not in opencode
+
+    def test_the_skills_prose_names_the_same_directory(self, tmp_path: Path):
+        runtime = tmp_path / "coop"
+        sync_keeper_dir(REPO, runtime)
+        dst = runtime / KEEPER_DST_REL
+        for rel in ("AGENTS.md", ".claude/skills/coop-add-bot/SKILL.md",
+                    ".claude/skills/coop-apply-config/SKILL.md"):
+            text = (dst / rel).read_text()
+            assert "~/.agentcoop" not in text, rel
+            assert f"{runtime}/agents" in text, rel
+
+    def test_the_default_runtime_dir_keeps_the_shipped_bytes(self, tmp_path: Path):
+        for rel in (".claude/settings.json", "opencode.json", "AGENTS.md"):
+            assert keeper_text_for("~/.agentcoop/x */.agentcoop/y", DEFAULT_RUNTIME_DIR, rel) == \
+                "~/.agentcoop/x */.agentcoop/y"
+
+    def test_keeper_text_for_writes_the_form_each_reader_understands(self, tmp_path: Path):
+        base = tmp_path / "coop"
+        assert keeper_text_for("Read(~/.agentcoop/x)", base, ".claude/settings.json") == f"Read(/{base}/x)"
+        assert keeper_text_for('"~/.agentcoop/agents/*" "*/.agentcoop/y"', base, "opencode.json") == \
+            f'"{base}/agents/*" "*/coop/y"'
+        assert keeper_text_for("see ~/.agentcoop/agents", base, ".claude/skills/coop-add-bot/SKILL.md") == \
+            f"see {base}/agents"
+
+    def test_a_manifest_directory_is_rewritten_file_by_file(self, tmp_path: Path):
+        repo = _make_repo(tmp_path, {
+            "AGENTS.md": "see ~/.agentcoop/agents/user/\n",
+            ".claude/settings.json": "{}\n",
+            ".claude/skills/coop-add-bot/SKILL.md": "mkdir -p ~/.agentcoop/agents/user/x\n",
+        }, MANIFEST)
+        runtime = tmp_path / "coop"
+        sync_keeper_dir(repo, runtime)
+        dst = runtime / KEEPER_DST_REL
+        assert (dst / "AGENTS.md").read_text() == f"see {runtime}/agents/user/\n"
+        assert (dst / ".claude/skills/coop-add-bot/SKILL.md").read_text() == f"mkdir -p {runtime}/agents/user/x\n"

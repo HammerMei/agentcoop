@@ -225,8 +225,9 @@ per-row status lookups.
    dataclass instantiation is the backstop.
 5. **Save flow: validate-before-write via a same-directory temp file.
    Shipped** as `EditableConfig.save()`. Serializes to `config.yaml.tmp`
-   **beside** the real file (not `/tmp` — `working_directory`/
-   `context_inject_files` resolve relative to `config_dir`), runs the
+   **beside** the real file (so the final `os.replace()` is a rename on one
+   filesystem; relative paths resolve against the runtime directory, #182,
+   so where the temp file sits does not affect validation), runs the
    unchanged `validate_config(tmp)`, blocks save on errors (raises
    `ValueError`, temp file deleted, real file untouched); on success:
    timestamped backup under `<config_dir>/.config-backups/`
@@ -300,8 +301,8 @@ Max stack depth 3 (Overview → detail → modal).
   decision 5's rationale for never special-casing it), so a missing
   directory still hard-blocks Save. What's actually built: an early, live,
   non-blocking inline hint next to the field (updates as you type, resolved
-  the same way the loader resolves it — `expanduser()` then relative to
-  `config_dir`) so the user finds out before hitting Save, not just from a
+  by the loader's own `resolve_working_directory` — `expanduser()` then
+  against the runtime directory, #182) so the user finds out before hitting Save, not just from a
   generic validator error after.
 - **New watcher:** connector Select + agent Select + room(s) free text
   (single or comma-list — mirrors the `room`/`rooms` duality already in the

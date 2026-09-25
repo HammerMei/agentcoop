@@ -8,6 +8,7 @@ does not spell the directory name again. This walks every module under
 gateway/ and fails on a second spelling — of the new name or the old one.
 """
 
+import os
 import re
 import unittest
 from pathlib import Path
@@ -28,9 +29,15 @@ SPELLINGS = re.compile(
 
 class TestRuntimeDirHasOneDefinition(unittest.TestCase):
     def test_the_one_definition_is_the_new_name(self):
+        """`$COOP_HOME` when set, else `~/.agentcoop` (#182) — the process
+        running this suite may have the variable exported, so the expected
+        value is computed the same way rather than assumed unset. The
+        `COOP_HOME` semantics themselves are pinned in `test_coop_home.py`."""
         self.assertEqual(RUNTIME_DIR_NAME, ".agentcoop")
-        self.assertEqual(RUNTIME_DIR, Path.home() / ".agentcoop")
-        self.assertEqual(ATTACHMENTS_DIR_DEFAULT, "~/.agentcoop/attachments")
+        coop_home = os.environ.get("COOP_HOME")
+        expected = Path(coop_home).expanduser() if coop_home else Path.home() / ".agentcoop"
+        self.assertEqual(RUNTIME_DIR, expected)
+        self.assertEqual(ATTACHMENTS_DIR_DEFAULT, str(RUNTIME_DIR / "attachments"))
 
     def test_no_other_module_spells_the_runtime_directory(self):
         offenders = []

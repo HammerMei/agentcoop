@@ -18,6 +18,10 @@ _Avoid_: acg, coop-ai
 The AgentCoop daemon process — the thing `coop start` starts, that holds watcher records and talks to connectors. A component of AgentCoop, not a synonym for it. Also the Python package name.
 _Avoid_: the server, the service (in prose), "the coop" (for the process)
 
+**runtime directory**:
+The one directory AgentCoop keeps everything in — `config.yaml`, `admin-profiles.yaml`, state, logs, the control socket, the attachment cache, coop-keeper and the agents it creates, the `repo/` clone — and the base every relative path in `config.yaml` resolves against (ADR 0003). `$COOP_HOME` when set, else `~/.agentcoop`; `gateway/paths.py` `RUNTIME_DIR` in code.
+_Avoid_: config directory, install directory, home directory (that is the user's `~`), the config file's directory (as a base for anything)
+
 **Coop Session Identity**:
 The header block injected at the top of every agent session that tells the agent it is running under Coop and names its watcher and room. The name is deliberate: it lets an agent tell this environment apart from any other session or context it may hold.
 _Avoid_: ACG Session Identity, Session Identity

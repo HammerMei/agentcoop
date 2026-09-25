@@ -109,23 +109,22 @@ class TestWorkingDirectoryValidation(unittest.TestCase):
                 str(subdir),
             )
 
-    def test_relative_directory_resolved_to_config_dir(self):
-        """A relative working_directory is resolved relative to the config file's directory."""
-        import shutil
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subdir = Path(tmpdir) / "workdir"
-            subdir.mkdir()
+    def test_relative_directory_resolved_to_the_base(self):
+        """A relative working_directory is `<RUNTIME_DIR>/<path>` (#182) — the
+        existence check runs on that, so a `workdir` beside the config file
+        does not satisfy it and one under the base does."""
+        with tempfile.TemporaryDirectory() as base:
             path = self._write_config(
                 "default:\n  type: claude\n  working_directory: workdir"
             )
-            config_path = Path(tmpdir) / "config.yaml"
-            shutil.move(path, config_path)
-
-            config = GatewayConfig.from_file(str(config_path))
+            with patch("gateway.config.RUNTIME_DIR", Path(base)):
+                with self.assertRaisesRegex(ValueError, "workdir"):
+                    GatewayConfig.from_file(path)
+                (Path(base) / "workdir").mkdir()
+                config = GatewayConfig.from_file(path)
             self.assertEqual(
                 config.agents["default"].working_directory,
-                str(subdir.resolve()),
+                str((Path(base) / "workdir").resolve()),
             )
 
 
@@ -443,8 +442,112 @@ class TestConfigValidationHardening(unittest.TestCase):
                     GatewayConfig.from_file(path)
 
 
+class TestRelativePathsResolveAgainstTheBase(unittest.TestCase):
+    """#182: a relative path in config.yaml means `<RUNTIME_DIR>/<path>` —
+    `$COOP_HOME`, default `~/.agentcoop` — never `<directory of the file>/<path>`.
+
+    The file's location used to be the base, so the same file meant three
+    things: read through `~/.agentcoop/config.yaml`, validated as a temp copy
+    beside its symlink target (Docker mode 1), or checked with
+    `--config <elsewhere>`. With a constant base, none of those matter. The
+    config here is written in one directory and the base is another, so a
+    resolution against the wrong one fails the assertion rather than passing
+    by coincidence.
+    """
+
+    CFG = """\
+        connectors:
+          - name: rc
+            type: rocketchat
+            server: {url: http://localhost:3000, username: bot, password: pw}
+            context_inject_files: [c.md]
+        agents:
+          default:
+            type: claude
+            working_directory: work
+            context_inject_files: [a.md]
+        watcher_rules:
+          - name: w1
+            connector: rc
+            agent: default
+            rooms:
+              include: [general]
+            context_inject_files: [w.md]
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.file_dir = self.tmp / "elsewhere"
+        self.file_dir.mkdir()
+        self.path = self.file_dir / "config.yaml"
+        self.path.write_text(textwrap.dedent(self.CFG))
+        self.base = self.tmp / "base"
+        (self.base / "work").mkdir(parents=True)
+        # The file's own directory has NO `work`, so resolving there fails loudly.
+        patcher = patch("gateway.config.RUNTIME_DIR", self.base)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _assert_under_base(self, config):
+        base = self.base.resolve()
+        self.assertEqual(config.agents["default"].working_directory, str(base / "work"))
+        self.assertEqual(config.connectors[0].context_inject_files, [str(base / "c.md")])
+        self.assertEqual(config.agents["default"].context_inject_files, [str(base / "a.md")])
+        self.assertEqual(config.watcher_rules[0].context_inject_files, [str(base / "w.md")])
+
+    def test_from_file_resolves_every_layer_against_the_base(self):
+        self._assert_under_base(GatewayConfig.from_file(str(self.path)))
+
+    def test_collect_config_resolves_the_same_way(self):
+        config, issues = collect_config(self.path)
+        self.assertEqual([i.message for i in issues], [])
+        self._assert_under_base(config)
+
+    def test_the_files_own_directory_is_never_the_base(self):
+        # Same file, read through a symlink from a third directory: the answer
+        # does not change, because nothing about the path is consulted.
+        link_dir = self.tmp / "third"
+        link_dir.mkdir()
+        link = link_dir / "config.yaml"
+        link.symlink_to(self.path)
+        self._assert_under_base(GatewayConfig.from_file(str(link)))
+
+    def test_a_tilde_context_file_is_the_users_home_on_every_layer(self):
+        """`~/x.md` used to become `<base>/~/x.md`: `_resolve_paths` never
+        expanded it and `~/x.md` is not absolute. Ruling A says a `~` path is
+        the user's home, as written, for every path field."""
+        self.path.write_text(textwrap.dedent(self.CFG).replace("[c.md]", "[~/c.md]")
+                             .replace("[a.md]", "[~/a.md]").replace("[w.md]", "[~/w.md]"))
+        config = GatewayConfig.from_file(str(self.path))
+        home = Path.home()
+        self.assertEqual(config.connectors[0].context_inject_files, [str(home / "c.md")])
+        self.assertEqual(config.agents["default"].context_inject_files, [str(home / "a.md")])
+        self.assertEqual(config.watcher_rules[0].context_inject_files, [str(home / "w.md")])
+
+    def test_an_unknown_user_in_a_tilde_path_is_one_issue_not_a_traceback(self):
+        # `Path.expanduser()` raises RuntimeError for `~nosuchuser`; collect_config
+        # catches ValueError only, so `coop config validate` would traceback.
+        self.path.write_text(textwrap.dedent(self.CFG).replace("[a.md]", "[~nosuchuser-xyz/a.md]"))
+        config, issues = collect_config(self.path)  # a traceback here is the failure
+        self.assertTrue(any("context_inject_files" in i.message and "~nosuchuser-xyz" in i.message
+                            for i in issues), issues)
+        self.path.write_text(textwrap.dedent(self.CFG).replace("working_directory: work",
+                                                              "working_directory: ~nosuchuser-xyz/w"))
+        config, issues = collect_config(self.path)
+        self.assertTrue(any("working_directory" in i.message and "~nosuchuser-xyz" in i.message
+                            for i in issues), issues)
+
+    def test_tilde_and_absolute_paths_are_not_relative(self):
+        from gateway.config import resolve_working_directory
+        self.assertEqual(resolve_working_directory("~/proj", self.base), str(Path.home() / "proj"))
+        self.assertEqual(resolve_working_directory("/srv/proj", self.base), "/srv/proj")
+        self.assertEqual(resolve_working_directory("proj", self.base), str((self.base / "proj").resolve()))
+
+
 class TestCacheDirGlobalResolution(unittest.TestCase):
-    """Issue #7: relative cache_dir_global must resolve relative to config directory."""
+    """A relative cache_dir_global resolves against the base (#182), like every
+    other relative path in the file; absolute and `~` paths are left as written."""
 
     def _write_config(self, cache_dir_global: str) -> str:
         cfg = textwrap.dedent(f"""\
@@ -472,13 +575,13 @@ class TestCacheDirGlobalResolution(unittest.TestCase):
             f.write(cfg)
             return f.name
 
-    def test_relative_cache_dir_resolved_to_config_dir(self):
+    def test_relative_cache_dir_resolved_to_the_base(self):
         path = self._write_config("my-cache")
-        config = GatewayConfig.from_file(path)
-        config_dir = str(Path(path).parent.resolve())
-        expected = str(Path(config_dir) / "my-cache")
+        with tempfile.TemporaryDirectory() as base:
+            with patch("gateway.config.RUNTIME_DIR", Path(base)):
+                config = GatewayConfig.from_file(path)
         actual = config.connectors[0].raw["attachments"]["cache_dir_global"]
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, str((Path(base) / "my-cache").resolve()))
 
     def test_absolute_cache_dir_unchanged(self):
         path = self._write_config("/absolute/cache/path")

@@ -180,11 +180,11 @@ class EditableConfig:
         """Validate-before-write via a same-directory temp file
         (docs/design/config-tool.md decision 5):
 
-        1. Serialize `document` to `<path>.tmp`, BESIDE the real file (never
-           /tmp — `working_directory`/`context_inject_files` in the config
-           resolve relative to the real file's directory, and a temp file
-           elsewhere would validate paths that don't mean the same thing
-           once moved).
+        1. Serialize `document` to `<path>.tmp`, BESIDE the real file — so
+           the `os.replace` in step 3 is a rename on one filesystem, never a
+           copy across two. Not for path resolution: relative paths in the
+           config resolve against the runtime directory, wherever the file
+           or its temp copy sits (#182).
         2. Run the real `validate_config()` against that temp file. If it
            doesn't validate, compare its findings against `validate_config()`
            run on the CURRENT on-disk file — a pre-existing problem

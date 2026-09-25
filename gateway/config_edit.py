@@ -550,26 +550,14 @@ class EditOutcome:
 
 
 def validate_document(document: dict, config_path: Path) -> "ValidationResult":
-    """`validate_config()` over `document` dumped beside `config_path` — beside,
-    because `working_directory` and `context_inject_files` resolve relative to
-    the file's directory, and a temp file elsewhere would validate other paths."""
+    """`validate_config()` over `document` dumped to a temp file. Where the temp
+    file sits does not matter: relative paths in the document resolve against
+    the runtime directory, not the file's own (#182). `config_path` names the
+    temp file only, so a stray one is recognisable."""
     from .config_validate import validate_config
 
-    beside = config_path.parent
-    if not beside.is_dir():
-        # The file does not exist yet and neither does its directory (a first
-        # bootstrap), so the temp file goes in a scratch one. A relative path
-        # in the document then resolves against a directory that does not
-        # exist either way, and fails either way — the case is not handled,
-        # only kept from raising. (This is not a "dry run creates nothing"
-        # guarantee: validate_config's own state checks create the runtime
-        # directory, as `config validate` and `coop start` always have.)
-        scratch = tempfile.TemporaryDirectory()
-        beside = Path(scratch.name)
-    else:
-        scratch = None
     handle = tempfile.NamedTemporaryFile(
-        "w", dir=beside, prefix=f".{config_path.name}.", suffix=".dry-run", delete=False,
+        "w", prefix=f".{config_path.name}.", suffix=".dry-run", delete=False,
     )
     try:
         with handle:
@@ -590,8 +578,6 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
     finally:
         with contextlib.suppress(OSError):
             os.unlink(handle.name)
-        if scratch is not None:
-            scratch.cleanup()
 
 
 def _create_file(path: Path, document: dict) -> None:

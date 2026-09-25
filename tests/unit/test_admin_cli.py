@@ -104,11 +104,13 @@ class TestBuildParser(unittest.TestCase):
         self.assertEqual(args.config, "/tmp/x.yaml")
 
     def test_log_file_defaults_beside_config_yaml(self):
-        # ~/.agentcoop/, not the current directory: the keeper runs this from a
-        # directory an upgrade replaces (coop-keeper design §3.10).
+        # The runtime directory (`$COOP_HOME`, default `~/.agentcoop`), not the
+        # current directory: the keeper runs this from a directory an upgrade
+        # replaces (coop-keeper design §3.10).
+        from gateway.paths import RUNTIME_DIR
         args = _args(["mm-lab", "delete-user", "alice"])
         self.assertEqual(args.log_file, DEFAULT_LOG_FILE)
-        self.assertEqual(Path(DEFAULT_LOG_FILE), Path.home() / ".agentcoop" / "coop-provision.log")
+        self.assertEqual(Path(DEFAULT_LOG_FILE), RUNTIME_DIR / "coop-provision.log")
 
     def test_create_user_password_is_optional_with_password_file(self):
         args = _args(["mm-lab", "create-user", "alice", "a@x.com", "--password-file", "/tmp/pw"])

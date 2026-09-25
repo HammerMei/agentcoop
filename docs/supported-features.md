@@ -315,7 +315,7 @@ watcher_rules:
 - ✅ Multi-connector setup (multiple chat instances)
 - ✅ Multi-agent setup (different agents per watcher)
 - ✅ Cross-field validation (e.g., agent timeout > permission timeout)
-- ✅ Relative path resolution (relative to config file location)
+- ✅ Relative path resolution (against `$COOP_HOME`, default `~/.agentcoop` — not the config file's location)
 - ✅ `connector_templates` / `agent_templates` / `watcher_templates` — named,
   reusable field blocks; an entry opts in via its own `inherits: <name>`
   field (v0.3; see `docs/migration-0.3.md`). A leftover pre-v0.3
