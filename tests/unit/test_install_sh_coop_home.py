@@ -88,6 +88,13 @@ class TestPersistCoopHome(unittest.TestCase):
         _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
         self.assertEqual(self.bashrc.read_text().count("COOP_HOME="), 1)
 
+    def test_a_comment_mentioning_the_variable_is_not_an_export(self):
+        self.bashrc.write_text("# COOP_HOME=/srv/coop is where coop lives\n")
+        r = _run('persist_coop_home "/srv/coop"', home=self.home, coop_home=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertIn('export COOP_HOME="/srv/coop"', self.bashrc.read_text())
+
     def test_a_different_existing_export_is_left_alone_and_reported(self):
         # A reinstall to a new location must not silently stack two exports; the
         # operator is told which line to change.

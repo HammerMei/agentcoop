@@ -68,7 +68,7 @@ persist_coop_home() {
     if grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null; then
       continue
     fi
-    if grep -q 'COOP_HOME=' "$rc" 2>/dev/null; then
+    if grep -Eq '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$rc" 2>/dev/null; then
       printf '%s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
       continue
     fi
