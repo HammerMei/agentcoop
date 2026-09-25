@@ -30,6 +30,10 @@ def _runtime_dir_from_env() -> Path:
         # A relative base would mean whatever the importing process's CWD was —
         # the ambiguity a fixed base exists to remove.
         raise ValueError(f"COOP_HOME must be an absolute path (got {raw!r})")
+    if path == Path(path.anchor):
+        # `/` has no name for coop-keeper's permission globs to carry, and
+        # nothing belongs at the filesystem root anyway.
+        raise ValueError(f"COOP_HOME must not be the filesystem root (got {raw!r})")
     return path
 
 

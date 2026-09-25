@@ -59,8 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installs there when the variable is set (`COOP_HOME=/srv/coop bash install.sh`)
   and adds the export to `~/.bashrc`/`~/.zshrc` (or says so when neither
   exists); install and `coop upgrade` write coop-keeper's
-  permission files and skills for that directory. Must be absolute; read once
-  at process start. `COOP_CONFIG` still overrides the config file on its own.
+  permission files and skills for that directory. Must be absolute and not
+  `/`; read once at process start. `COOP_CONFIG` still overrides the config file on its own.
   This is for the case where `~/.agentcoop` is taken or unusable, set before
   the first install — not a way to relocate an existing installation.
 - **A `~` path in `context_inject_files` is the user's home**, as it already

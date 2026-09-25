@@ -202,10 +202,10 @@ def keeper_text_for(text: str, runtime_dir: Path, rel: str) -> str:
     if rel == ".claude/settings.json":
         return text.replace(tilde, "/" + base)
     if rel == "opencode.json":
+        # `runtime_dir.name` is never empty: gateway/paths.py and install.sh
+        # both refuse the filesystem root as COOP_HOME.
         text = text.replace(tilde, base)
-        if runtime_dir.name:
-            text = text.replace(f"*/{RUNTIME_DIR_NAME}", f"*/{runtime_dir.name}")
-        return text
+        return text.replace(f"*/{RUNTIME_DIR_NAME}", f"*/{runtime_dir.name}")
     return text.replace(tilde, base)
 
 

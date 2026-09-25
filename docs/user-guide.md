@@ -735,7 +735,7 @@ the directory the file is read from. `working_directory: work` means
 symlink to it, a temp copy the config tool validates, or `--config /elsewhere/x.yaml`.
 An absolute path, or one starting with `~`, is used as written.
 
-`COOP_HOME` must be absolute and is read once, when the process starts: set it in
+`COOP_HOME` must be absolute (and not `/`) and is read once, when the process starts: set it in
 the environment `coop` is launched from. `COOP_CONFIG` still overrides the config
 *file* on its own; it does not move the base.
 

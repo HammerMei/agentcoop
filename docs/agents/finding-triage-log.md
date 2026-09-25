@@ -505,3 +505,33 @@ wording.
 closed by the owner: the default stays `false`. The finding is a real security issue,
 deferred under the deployment assumption of mostly-trustworthy chat members, and it will be
 solved with the rest of security rather than by a per-command guest restriction.
+
+## 2026-09-25 — PR #186 round 1 (#182: relative paths resolve against COOP_HOME)
+
+**Chain detector:** 3 findings on `ad5c0a3`, first round, `--`, no chain.
+**Control finding:** none — the log still has no settled *finding* (the PR #184 entry
+is settled as a PR status, not as an observed outcome of one verdict). Agreement
+**uncorroborated**.
+**Protocol slip, recorded as such:** the fixes were implemented in parallel with the
+blind rating, and the second rater saw the working tree change under it — the shape of
+the F3 fix and part of the F1/F2 warning text — before writing its report. Its F3
+conclusion predates that; F1/F3 agreement still cannot be logged as independent
+(Step 4: one rater had an input the other lacked). Rule for next time: **do not touch
+the tree until the second rater has reported.**
+
+Increment: "Relative paths in config.yaml resolve against RUNTIME_DIR (`$COOP_HOME` or
+`~/.agentcoop`); the base is a constant the loader owns" + rulings A–D on #182.
+
+| | rater 1 (author) | rater 2 (blind, see slip) | outcome |
+|---|---|---|---|
+| **F1** `persist_coop_home` interpolates the directory inside double quotes, so `/srv/$USER/coop` expands in the next shell (P2) | true; `cheap`: single-quote with `'\''` escaping, grep the same form for idempotence, ~6 lines; silent-ish (next `coop` looks in another directory); reachability near zero | true; `cheap` (~3 lines with `%q`); semi-loud — `coop start`'s preflight names a directory the operator never typed; same layer; this increment's | **FIX** — single-quoted line; a test sources the rc file in real bash and zsh with `$USER`, a quote and a backtick in the path |
+| **F2** a fish user with a dormant `.bashrc` gets the export in an unrelated file and no warning; the banner names `config.fish`, never written (P2) | true; `cheap`: decide by `$SHELL` whether the *active* rc file took the line, warn otherwise, ~8 lines; silent for keeper-written files | true; ranks **first** — the only finding with a population; `cheap` (~4 lines); FIX the warning, **FILE full fish support** (PATH block has the same gap) with a 6-month decay | **FIX** the warning (active-shell check); fish support not filed yet — the owner decides whether to open it (`feedback_confirm_before_filing_issues`) |
+| **F3** `COOP_HOME=/` leaves opencode's read/edit denies unrewritten (P2) | true but the proposed fix is the wrong layer; `cheap`: refuse `/` in `paths.py` and `coop_home_dir`, 2+1 lines; expressible, so not `cannot-occur` | same; traced live that `/` also yields junk for Claude rules and `external_directory`, so "covering deny patterns" is wrong regardless; owning layer `paths.py`, finding points at `upgrade.py` | **FIX** at the loader and installer — `/` refused by name in both; the `runtime_dir.name` guard in `upgrade.py` removed as unreachable by construction |
+
+Notes:
+- Adoption: 3 of 3, all `cheap`, none scored. Severity re-ranked F2 > F3 > F1 by both
+  raters; Codex's flat P2 flattened a real-population finding and two near-zero ones.
+- No promise-contradicting finding; by the stop-loss agreed on PR #184 ("stop when a
+  round has no promise-contradicting finding") one confirming round then stop.
+
+**Status: open.** Settles with the confirming round.

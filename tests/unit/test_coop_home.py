@@ -55,6 +55,14 @@ class TestCoopHome(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.splitlines()[0], str(self.tmp / "elsewhere"))
 
+    def test_the_filesystem_root_is_refused_by_name(self):
+        """`/` is absolute, but its name is empty — coop-keeper's opencode globs
+        are rewritten by directory name — and nothing belongs at the root."""
+        r = _import_paths("/")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("COOP_HOME", r.stderr)
+        self.assertIn("root", r.stderr)
+
     def test_a_relative_path_is_refused_by_name(self):
         """A relative base would depend on the CWD of whichever process imported
         first — the very ambiguity #182 removes. Refused, naming the variable."""

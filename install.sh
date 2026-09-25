@@ -53,6 +53,7 @@ coop_home_dir() {
     "~/"*) raw="$HOME/${raw#\~/}" ;;
   esac
   case "$raw" in
+    /)  printf 'COOP_HOME must not be the filesystem root (got %s)\n' "$raw" >&2; return 1 ;;
     /*) printf '%s\n' "$raw" ;;
     *)  printf 'COOP_HOME must be an absolute path (got %s)\n' "$raw" >&2; return 1 ;;
   esac
@@ -63,26 +64,36 @@ persist_coop_home() {
   # keeper's CLI calls resolve the same directory in later shells. An rc file
   # that already exports a DIFFERENT value is left alone and named, never
   # stacked: which line wins would depend on file order.
-  local dir="$1" rc exported=false
+  local dir="$1" rc quoted active_rc="" active_ok=false
   [ "$dir" = "$HOME/.agentcoop" ] && return 0
+  # Single-quoted, with any single quote in the path closed, escaped and
+  # reopened: a `$`, backtick or quote in the directory is then a literal in
+  # the rc file, not something the next shell expands or runs.
+  quoted="'$(printf '%s' "$dir" | sed "s/'/'\\\\''/g")'"
+  case "$SHELL" in
+    */bash) active_rc="$HOME/.bashrc" ;;
+    */zsh)  active_rc="$HOME/.zshrc" ;;
+  esac
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     [ -f "$rc" ] || continue
-    if grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null \
+    if grep -qF "export COOP_HOME=$quoted" "$rc" 2>/dev/null \
+       || grep -qF "export COOP_HOME=\"$dir\"" "$rc" 2>/dev/null \
        || grep -qF "export COOP_HOME=$dir" "$rc" 2>/dev/null; then
-      exported=true
+      [ "$rc" = "$active_rc" ] && active_ok=true
       continue
     fi
     if grep -Eq '^[[:space:]]*export[[:space:]]+COOP_HOME=' "$rc" 2>/dev/null; then
       printf '[WARNING] %s already sets COOP_HOME to another value; change it to %s by hand.\n' "$rc" "$dir" >&2
       continue
     fi
-    printf '\n# Added by AgentCoop installer\nexport COOP_HOME="%s"\n' "$dir" >> "$rc"
-    exported=true
+    printf '\n# Added by AgentCoop installer\nexport COOP_HOME=%s\n' "$quoted" >> "$rc"
+    [ "$rc" = "$active_rc" ] && active_ok=true
   done
-  if [ "$exported" = false ]; then
-    # No bash/zsh rc file took it (fish, or a bare account): without the export
-    # the next shell's `coop` silently uses ~/.agentcoop.
-    printf '[WARNING] COOP_HOME was not added to any shell rc file; export COOP_HOME="%s" in your shell yourself.\n' "$dir" >&2
+  if [ "$active_ok" = false ]; then
+    # The shell the operator actually uses did not get it — fish or another
+    # shell (only bash/zsh rc files are written), or its rc file is missing —
+    # and without the export the next `coop` silently uses ~/.agentcoop.
+    printf '[WARNING] COOP_HOME was not added to your shell'"'"'s startup file (%s); export COOP_HOME=%s there yourself.\n' "${SHELL:-unknown shell}" "$quoted" >&2
   fi
 }
 RUNTIME_DIR=$(coop_home_dir) || exit 1
