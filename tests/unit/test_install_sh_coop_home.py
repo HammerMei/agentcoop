@@ -71,6 +71,63 @@ class TestCoopHomeDir(unittest.TestCase):
                     self.assertIn("COOP_HOME must be an absolute, canonical path", r.stderr)
 
 
+class TestRuntimeDirIsOurs(unittest.TestCase):
+    """The installer clones the repo that `~/.local/bin/coop` runs from under
+    the runtime dir, so a directory another local user pre-created, links, or
+    can write into would let them replace `coop` (Codex security review, PR
+    #186 round 3). Absent, or a real directory of ours that others cannot
+    write to, is fine. "Owned by someone else" cannot be made without root and
+    is not tested."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.home, ignore_errors=True))
+
+    def _check(self, path: Path):
+        return run_install_sh_function(
+            ("runtime_dir_is_ours",), f'runtime_dir_is_ours "{path}"',
+            env=subprocess_env(home=self.home), capture_output=True, text=True,
+        )
+
+    def test_absent_is_fine(self):
+        r = self._check(self.home / "coop")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+
+    def test_our_own_private_directory_is_fine(self):
+        d = self.home / "coop"
+        d.mkdir(mode=0o755)
+        r = self._check(d)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_symlink_is_refused(self):
+        real = self.home / "real"
+        real.mkdir()
+        link = self.home / "coop"
+        link.symlink_to(real)
+        r = self._check(link)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("[ERROR]", r.stderr)
+        self.assertIn("symbolic link", r.stderr)
+
+    def test_a_file_is_refused(self):
+        f = self.home / "coop"
+        f.write_text("")
+        r = self._check(f)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a directory", r.stderr)
+
+    def test_a_directory_others_can_write_to_is_refused(self):
+        d = self.home / "coop"
+        d.mkdir(mode=0o777)
+        import os
+        os.chmod(d, 0o777)  # past the umask
+        r = self._check(d)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("[ERROR]", r.stderr)
+        self.assertIn("writable by other users", r.stderr)
+
+
 class TestPersistCoopHome(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())

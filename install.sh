@@ -105,7 +105,31 @@ persist_coop_home() {
     printf '[WARNING] COOP_HOME was not added to your shell'"'"'s startup file (%s); export COOP_HOME=%s there yourself.\n' "${SHELL:-unknown shell}" "$quoted" >&2
   fi
 }
+runtime_dir_is_ours() {
+  # $1 = runtime dir. 0 when it does not exist yet, or is a real directory owned
+  # by the invoking user that other users cannot write to. Everything the
+  # installer puts under it — the repo clone that `~/.local/bin/coop` runs from
+  # above all — trusts the directory, so a directory another local user
+  # pre-created, links, or can write into would let them replace `coop` itself.
+  # (`~/.agentcoop` sits under $HOME and passes on any sane account; the check
+  # exists for a COOP_HOME placed under a shared parent such as /tmp.)
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  if [ -L "$1" ]; then
+    printf '[ERROR] %s is a symbolic link; COOP_HOME must be a real directory.\n' "$1" >&2; return 1
+  fi
+  if [ ! -d "$1" ]; then
+    printf '[ERROR] %s exists and is not a directory.\n' "$1" >&2; return 1
+  fi
+  if [ ! -O "$1" ]; then
+    printf '[ERROR] %s is not owned by %s; COOP_HOME must be your own directory.\n' "$1" "$(id -un)" >&2; return 1
+  fi
+  if [ -n "$(find "$1" -maxdepth 0 -perm -o+w 2>/dev/null)" ]; then
+    printf '[ERROR] %s is writable by other users; COOP_HOME must be a directory only you can write to.\n' "$1" >&2; return 1
+  fi
+  return 0
+}
 RUNTIME_DIR=$(coop_home_dir) || exit 1
+runtime_dir_is_ours "$RUNTIME_DIR" || exit 1
 export COOP_HOME="$RUNTIME_DIR"
 
 # ---------------------------------------------------------------------------

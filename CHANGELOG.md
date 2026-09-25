@@ -61,7 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists); install and `coop upgrade` write coop-keeper's
   permission files and skills for that directory. Must be an absolute,
   canonical path spelled only with letters, digits, `.`, `_`, `-` and `/`;
-  read once at process start. `COOP_CONFIG` still overrides the config file on its own.
+  an existing directory must be a real one the installing user owns and
+  others cannot write to; read once at process start. `COOP_CONFIG` still overrides the config file on its own.
   This is for the case where `~/.agentcoop` is taken or unusable, set before
   the first install — not a way to relocate an existing installation.
 - **A `~` path in `context_inject_files` is the user's home**, as it already

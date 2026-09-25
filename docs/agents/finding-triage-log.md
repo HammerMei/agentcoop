@@ -573,3 +573,30 @@ Notes:
   increment with the owner.**
 
 **Status: open.** Settles with the confirming round.
+
+## 2026-09-25 — PR #186 round 3
+
+**Chain detector:** code review on `74b0920` clean; one **security-review** finding, on
+`install.sh:174` — a line from the PR's first commit, not from either round's fix; `--`,
+streak reset. (Round 2's note "if round 3 lands on `install.sh` again, streak 2" was
+overbroad: the rule is *on our own last fix*, and rater 2 said so.)
+**Control finding:** none. Agreement **uncorroborated**. Tree untouched until rater 2
+reported.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** a non-default COOP_HOME another local user pre-created, links or can write into lets them replace `repo/.venv/bin/coop`, which `~/.local/bin/coop` runs (security review) | true, silent; not promise-contradicting (SECURITY.md lists local co-tenants in neither column); split: owner/symlink/others-writable refusal is `cheap` (~8 lines, installer only); the parent walk is not | same split, three ways: (i-a) owner + symlink refusal `cheap`, **FIX**; (i-b) others-writable + 0700 **DROP** — `stat` is not portable, secrets are already 0600, 0700 would change the default dir's mode; (ii) parent walk **FILE** 6 months; scored (ii): hits 1e-5–0.12/yr, hours_per_hit 20–40, tax 0.5 → net ≤ 0 at the midpoint | **FIX** (i-a) and the others-writable half of (i-b): `runtime_dir_is_ours` refuses a symlink, a non-directory, a directory not owned by the invoker, or one writable by others — `find -maxdepth 0 -perm -o+w`, which BSD and GNU find both take, so the portability objection does not hold (concession on checkable evidence, in rater 2's direction on 0700 and rater 1's on the mode check). 0700-on-create **DROP** per rater 2. Parent walk: **FILE candidate**, not filed — the owner decides |
+
+Notes:
+- Adoption: 1 of 1 fixed in part; one part dropped with the reason, one part a FILE
+  candidate awaiting the owner. Verdicts agree on every part; the one disagreement
+  (others-writable) resolved on a cited, checkable fact.
+- The reachable input is a COOP_HOME under a sticky world-writable parent
+  (`/tmp/coop`): stock `/srv` and `/opt` are root 0755, and the default `~/.agentcoop`
+  sits under `$HOME`. The exposure is new with this PR. Both raters: hardening, not a
+  stated promise — rate applies; escalation condition recorded: if the owner brings a
+  hostile local shell user in scope, reachability is shown and the parent walk is forced.
+- Both raters: one confirming round after the fix (CLAUDE.md: commits in response to a
+  review most need a pass; CI does not exercise `-O`).
+
+**Status: open.** Settles with the confirming round.
