@@ -85,12 +85,14 @@ def filter_rc_message(
     Applies (in order):
       1. Skip messages from the bot itself.
       2. Sender filter (allow-list or open mode, agents always pass).
-      3. For non-DM rooms: require explicit @mention of the bot
+      3. Timestamp deduplication: skip messages already processed. State
+         mutation runs after this so replayed messages never corrupt turn
+         counters.
+      4. Agent chain counter reset (humans only) — before the mention gate,
+         so any allow-listed human post in the room revives a chain (#187).
+      5. For non-DM rooms: require explicit @mention of the bot
          (skipped for agent senders and when require_mention=False).
-      4. Timestamp deduplication: skip messages already processed.
-      5. Agent chain turn budget check (agents only) / counter reset (humans).
-         State mutation runs after dedup so replayed messages never corrupt
-         turn counters.
+      6. Agent chain turn budget check (agents only).
 
     Returns a FilterResult describing the outcome.
     """
@@ -166,7 +168,32 @@ def filter_rc_message(
         return FilterResult(accepted=False, sender=sender, reason="sender not in allow-list")
     # open mode passes everyone; role resolved later in normalize
 
-    # 3. For channels/groups: require @mention (unless listen-all mode or agent sender)
+    # 3. Timestamp deduplication — run BEFORE any state mutation so replayed
+    #    or reconnect-duplicated messages never corrupt turn counters.
+    msg_ts = extract_ts(doc)
+    msg_ts_f = _ts_to_float(msg_ts)
+    last_ts_f = _ts_to_float(last_processed_ts)
+    if msg_ts_f is not None and last_ts_f is not None and msg_ts_f <= last_ts_f:
+        return FilterResult(
+            accepted=False,
+            sender=sender,
+            msg_ts=msg_ts,
+            reason=f"already processed (ts={msg_ts})",
+        )
+
+    # 4. Human message: reset all agent chain counters for this context.
+    #    This runs BEFORE the mention gate on purpose (#187): docs/agent-chain.md
+    #    promises that a human post revives a chain that hit max_turns, and a
+    #    human post in a channel is usually not addressed to this bot. The
+    #    message itself is still subject to the mention gate below; only the
+    #    side effect moves.
+    if not is_agent and turn_store is not None:
+        turn_store.reset_all(
+            room_id=doc.get("rid", ""),
+            thread_id=doc.get("tmid") or None,
+        )
+
+    # 5. For channels/groups: require @mention (unless listen-all mode or agent sender)
     if config.require_mention and not is_agent and room_type != "dm":
         mentions = doc.get("mentions", [])
         bot_mentioned = any(m.get("username") == own_username for m in mentions)
@@ -186,20 +213,7 @@ def filter_rc_message(
     # Note: agent senders bypass @mention requirement (listen-all for agents)
     # Note: listen-all mode (require_mention=False) skips this for all senders
 
-    # 4. Timestamp deduplication — run BEFORE any state mutation so replayed
-    #    or reconnect-duplicated messages never corrupt turn counters.
-    msg_ts = extract_ts(doc)
-    msg_ts_f = _ts_to_float(msg_ts)
-    last_ts_f = _ts_to_float(last_processed_ts)
-    if msg_ts_f is not None and last_ts_f is not None and msg_ts_f <= last_ts_f:
-        return FilterResult(
-            accepted=False,
-            sender=sender,
-            msg_ts=msg_ts,
-            reason=f"already processed (ts={msg_ts})",
-        )
-
-    # 5. Agent chain turn budget (only for agent senders) — state mutation only
+    # 6. Agent chain turn budget (only for agent senders) — state mutation only
     #    after dedup confirms this is a fresh, previously-unseen message.
     agent_chain_turn = 0
     agent_chain_token = 0
@@ -222,12 +236,6 @@ def filter_rc_message(
                 config.agent_chain.max_turns,
             )
             return FilterResult(accepted=False, sender=sender, reason="agent chain turn limit reached")
-    elif not is_agent and turn_store is not None:
-        # Human message: reset all agent chain counters for this context
-        turn_store.reset_all(
-            room_id=doc.get("rid", ""),
-            thread_id=doc.get("tmid") or None,
-        )
 
     return FilterResult(
         accepted=True,

@@ -320,14 +320,20 @@ class TurnStore:
         keys_to_remove = [
             k for k in self._store if k[0] == room_id and k[1] == thread_id
         ]
+        spent = sum(1 for k in keys_to_remove if self._store[k].turns > 0)
         for k in keys_to_remove:
             ctx = self._store[k]
             ctx.start_fresh_count()
             self._generations[k] = (ctx.generation, time.monotonic())
-        if keys_to_remove:
-            logger.debug(
-                "Agent chain counters reset for room=%s thread=%s (%d entries)",
-                room_id, thread_id, len(keys_to_remove),
+        if spent:
+            # INFO, not DEBUG: this is the one line that tells an operator why a
+            # room that hit max_turns came back to life (#187). Gated on a
+            # counter actually being spent — entries stay in the store at zero
+            # after a reset, so "any entry" would log on every human post in a
+            # room where an agent has ever spoken.
+            logger.info(
+                "Agent chain counters reset for room=%s thread=%s (%d of %d senders had turns)",
+                room_id, thread_id, spent, len(keys_to_remove),
             )
 
     def _gc(self) -> None:

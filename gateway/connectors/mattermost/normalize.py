@@ -161,13 +161,15 @@ def filter_mm_message(
       0. Skip system messages (type field non-empty, e.g. "added to channel").
       1. Skip messages from the bot itself (by user ID).
       2. Sender filter (allow-list or open mode, agents always pass).
-      3. For non-DM channels: require explicit @mention of the bot, checked
+      3. Timestamp deduplication: skip messages already processed.
+      4. Agent chain counter reset (humans only) — before the mention gate,
+         so any allow-listed human post in the room revives a chain (#187).
+      5. For non-DM channels: require explicit @mention of the bot, checked
          against the server-provided mentions user-id list (not a text
          regex — more robust and already trusted), plus a text-based check
          for special @channel/@all/@here keywords which never appear in the
          id-based mentions list.
-      4. Timestamp deduplication: skip messages already processed.
-      5. Agent chain turn budget check (agents only) / counter reset (humans).
+      6. Agent chain turn budget check (agents only).
 
     Args:
         sender_username: Already resolved by the caller (async, via REST)
@@ -191,7 +193,32 @@ def filter_mm_message(
             accepted=False, sender=sender_username, reason="sender not in allow-list"
         )
 
-    # 3. For channels: require @mention (unless listen-all mode or agent sender)
+    # 3. Timestamp deduplication — run BEFORE any state mutation so replayed
+    #    or reconnect-duplicated posts never touch the turn counters.
+    msg_ts = str(post.get("create_at", ""))
+    msg_ts_f = _ts_to_float(msg_ts)
+    last_ts_f = _ts_to_float(last_processed_ts)
+    if msg_ts_f is not None and last_ts_f is not None and msg_ts_f <= last_ts_f:
+        return FilterResult(
+            accepted=False,
+            sender=sender_username,
+            msg_ts=msg_ts,
+            reason=f"already processed (ts={msg_ts})",
+        )
+
+    # 4. Human message: reset all agent chain counters for this room/thread.
+    #    This runs BEFORE the mention gate on purpose (#187): docs/agent-chain.md
+    #    promises that a human post revives a chain that hit max_turns, and a
+    #    human post in a channel is usually not addressed to this bot. The post
+    #    itself is still subject to the mention gate below; only the side
+    #    effect moves.
+    if not is_agent and turn_store is not None:
+        turn_store.reset_all(
+            room_id=post.get("channel_id", ""),
+            thread_id=post.get("root_id") or None,
+        )
+
+    # 5. For channels: require @mention (unless listen-all mode or agent sender)
     if config.require_mention and not is_agent and room_type != "dm":
         bot_mentioned = bot_user_id in mentions  # trusted: server-computed ID array
         # room_wide_mentioned is a text-regex check, NOT a trusted server
@@ -206,19 +233,7 @@ def filter_mm_message(
                 accepted=False, sender=sender_username, reason="bot not mentioned"
             )
 
-    # 4. Timestamp deduplication
-    msg_ts = str(post.get("create_at", ""))
-    msg_ts_f = _ts_to_float(msg_ts)
-    last_ts_f = _ts_to_float(last_processed_ts)
-    if msg_ts_f is not None and last_ts_f is not None and msg_ts_f <= last_ts_f:
-        return FilterResult(
-            accepted=False,
-            sender=sender_username,
-            msg_ts=msg_ts,
-            reason=f"already processed (ts={msg_ts})",
-        )
-
-    # 5. Agent chain turn budget
+    # 6. Agent chain turn budget (agents only)
     agent_chain_turn = 0
     agent_chain_token = 0
     if is_agent and turn_store is not None:
@@ -237,11 +252,6 @@ def filter_mm_message(
             return FilterResult(
                 accepted=False, sender=sender_username, reason="agent chain turn limit reached"
             )
-    elif not is_agent and turn_store is not None:
-        turn_store.reset_all(
-            room_id=post.get("channel_id", ""),
-            thread_id=post.get("root_id") or None,
-        )
 
     return FilterResult(
         accepted=True,

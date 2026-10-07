@@ -365,7 +365,7 @@ value.
 **Symptom:** A bot's message is silently dropped; no response from other agents.
 
 **Solution:** This is a force-drop. The sender exceeded `max_turns`. To unlock:
-1. **Send a human message** in the room (fastest): A human message resets all counters.
+1. **Send a human message** in the room (fastest): A human message resets all counters. It does not need to @mention any bot — the reset happens before the mention gate.
 2. **Wait for TTL expiry** (default 1 hour): Stale counters are automatically cleaned up.
 
 ---

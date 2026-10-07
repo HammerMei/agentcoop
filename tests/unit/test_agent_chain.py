@@ -6,6 +6,7 @@ Covers:
   - TurnStore: reset_sender allows fresh start
   - TurnStore: reset_all resets all senders for a thread
   - TurnStore: human message (non-agent) triggers reset_all via filter
+  - TurnStore: reset_all logs at INFO only when a counter was spent (#187)
   - TurnStore: TTL GC removes expired entries
   - build_agent_chain_context: normal turn
   - build_agent_chain_context: penultimate turn has warning
@@ -13,6 +14,8 @@ Covers:
   - filter_rc_message: agent sender passes through with is_agent_chain=True
   - filter_rc_message: agent sender at turn limit → dropped + counter reset
   - filter_rc_message: require_mention=False allows non-mentioned messages
+  - filter_rc_message: unmentioned human post in a channel still resets counters (#187)
+  - filter_rc_message: replayed (deduplicated) human post does not reset counters
   - filter_rc_message: filter_sender=False allows unknown senders
 """
 
@@ -137,6 +140,23 @@ class TestTurnStore(unittest.TestCase):
         filter_rc_message(doc, config, "dm", None, turn_store=store)
 
         self.assertEqual(store.current_turns("room1", None, "agentA"), 0)
+
+    def test_reset_all_logs_at_info_only_when_a_counter_was_spent(self):
+        """#187: the reset line is the operator's clue why a room came back to
+        life, so it is INFO — but gated on a counter actually being spent, since
+        entries sit in the store at zero after a reset and a human post would
+        otherwise log on every message in a room an agent has ever spoken in."""
+        store = TurnStore()
+        store.check_and_increment("room1", None, "agentA", max_turns=5)
+
+        with self.assertLogs("coop.core.agent_chain", level="INFO") as cm:
+            store.reset_all("room1", None)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Agent chain counters reset for room=room1", cm.output[0])
+        self.assertIn("1 of 1 senders had turns", cm.output[0])
+
+        with self.assertNoLogs("coop.core.agent_chain", level="INFO"):
+            store.reset_all("room1", None)  # already at zero: nothing to report
 
     def test_ttl_gc_removes_expired_entries(self):
         store = TurnStore(ttl_seconds=1.0)
@@ -294,6 +314,53 @@ class TestFilterRcMessageAgentChain(unittest.TestCase):
         result = filter_rc_message(doc, config, "dm", None, turn_store=store)
 
         self.assertTrue(result.accepted)
+
+    def test_unmentioned_human_post_in_channel_still_resets_counters(self):
+        """#187: the reset runs before the mention gate. A human post that
+        does not @mention this bot is still rejected, but it revives a chain
+        that hit max_turns — the operator does not have to @mention anyone."""
+        config = _make_config(owners=["human1"], agent_usernames=["agentA"], max_turns=2)
+        store = TurnStore()
+        for ts in (1000, 1001):
+            filter_rc_message(
+                _make_doc(sender="agentA", rid="room1", ts=ts), config, "channel", None,
+                turn_store=store,
+            )
+        self.assertEqual(store.current_turns("room1", None, "agentA"), 2)
+
+        human = filter_rc_message(
+            _make_doc(sender="human1", rid="room1", msg="no mention here", ts=1002),
+            config, "channel", None, turn_store=store,
+        )
+        self.assertFalse(human.accepted)
+        self.assertEqual(human.reason, "bot not mentioned")
+        self.assertEqual(store.current_turns("room1", None, "agentA"), 0)
+
+        revived = filter_rc_message(
+            _make_doc(sender="agentA", rid="room1", ts=1003), config, "channel", None,
+            turn_store=store,
+        )
+        self.assertTrue(revived.accepted)
+        self.assertEqual(revived.agent_chain_turn, 1)
+
+    def test_replayed_human_post_does_not_reset_counters(self):
+        """Dedup still runs before the reset: a human message the connector
+        has already processed must not hand the agents a fresh budget."""
+        config = _make_config(owners=["human1"], agent_usernames=["agentA"])
+        store = TurnStore()
+        filter_rc_message(
+            _make_doc(sender="agentA", rid="room1", ts=2000), config, "channel", None,
+            turn_store=store,
+        )
+        self.assertEqual(store.current_turns("room1", None, "agentA"), 1)
+
+        replayed = filter_rc_message(
+            _make_doc(sender="human1", rid="room1", msg="@bot hi", ts=1000),
+            config, "channel", "2000", turn_store=store,
+        )
+        self.assertFalse(replayed.accepted)
+        self.assertIn("already processed", replayed.reason)
+        self.assertEqual(store.current_turns("room1", None, "agentA"), 1)
 
     def test_require_mention_false_allows_non_mentioned_human_messages(self):
         config = _make_config(owners=["human1"], require_mention=False)
