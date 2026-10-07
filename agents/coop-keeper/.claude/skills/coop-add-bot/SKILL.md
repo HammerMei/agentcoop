@@ -57,7 +57,7 @@ containing the single line `@AGENTS.md` beside it. Two more files pin the
 bot's CLI to its built-in agent, so an operator whose CLI defaults to a
 persona agent of their own does not have every bot answer as that persona:
 `opencode.json` containing `{"default_agent": "build"}` and
-`.claude/settings.json` containing `{"agent": ""}`. `CLAUDE.md`,
+`.claude/settings.json` containing `{"agent": "claude"}`. `CLAUDE.md`,
 `opencode.json` and `.claude/settings.json` are created once and never
 overwritten if present — the operator may edit them. On Claude Code, writing
 into a `.claude/` directory asks the operator even though the path is
