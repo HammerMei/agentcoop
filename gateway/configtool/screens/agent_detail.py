@@ -324,7 +324,7 @@ class AgentDetailScreen(ToolListEditorMixin, FormScreen):
             self._dispatch_tool_list_button(button_id)
 
     @work
-    async def _open_inherits_picker(self) -> None:
+    async def _open_inherits_picker(self) -> None:  # noqa: C901
         if self.mode == "view":
             return
         # User-reported: this used to list EVERY agent template regardless
@@ -531,7 +531,7 @@ class AgentDetailScreen(ToolListEditorMixin, FormScreen):
     # ── save ─────────────────────────────────────────────────────────────────
 
     @work
-    async def action_save(self) -> None:
+    async def action_save(self) -> None:  # noqa: C901
         if self.mode == "view":
             return
 

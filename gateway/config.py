@@ -232,7 +232,7 @@ class GatewayConfig:
         return [r for r in self.watcher_rules if r.connector == connector]
 
     @staticmethod
-    def from_file(path: str | Path) -> "GatewayConfig":
+    def from_file(path: str | Path) -> "GatewayConfig":  # noqa: C901
         """The real, production config loader — deliberately fail-fast: stops
         at the FIRST problem found (single, clear, actionable error), same
         as always. Per-entity parsing (one connector/agent/watcher rule at a
@@ -729,7 +729,7 @@ _config_logger = logging.getLogger("coop.config")
 # collection can never quietly drift apart, because they share the code.
 
 
-def _parse_one_connector(
+def _parse_one_connector(  # noqa: C901
     cc_raw: object,
     index: int,
     connector_templates: dict[str, dict],
@@ -847,7 +847,7 @@ def _parse_one_connector(
     )
 
 
-def _parse_one_agent(
+def _parse_one_agent(  # noqa: C901
     agent_name: str,
     agent_raw_entry: object,
     agent_templates: dict[str, dict],
@@ -1365,7 +1365,7 @@ WATCHER_RULE_KEYS: frozenset[str] = frozenset({
 })
 
 
-def _parse_one_watcher_rule(
+def _parse_one_watcher_rule(  # noqa: C901
     entry: object,
     index: int,
     *,
@@ -1728,7 +1728,7 @@ class ConfigIssue:
     message: str
 
 
-def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[ConfigIssue]]:
+def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[ConfigIssue]]:  # noqa: C901
     """Fault-tolerant counterpart to `GatewayConfig.from_file()`: instead of
     stopping at the FIRST bad connector/agent/watcher, collects a
     `ConfigIssue` for EVERY one that fails independently and keeps going —

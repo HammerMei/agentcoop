@@ -182,7 +182,7 @@ class ReloadPlan:
 
     # ── Human rendering ──────────────────────────────────────────────────────
 
-    def render(self) -> str:
+    def render(self) -> str:  # noqa: C901
         """The four blocks an operator reads: validation, entity changes,
         watcher actions, degraded sections — then one line saying what this
         plan is (a dry run, the next boot's plan, applied, refused)."""

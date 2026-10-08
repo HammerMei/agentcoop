@@ -269,7 +269,7 @@ class _StreamParser:
         self.result_subtype: str = ""
         self.result_text: str = ""
 
-    def feed_line(self, line: str) -> None:
+    def feed_line(self, line: str) -> None:  # noqa: C901
         """Parse a single JSON line and accumulate into internal state."""
         line = line.strip()
         if not line:
@@ -593,7 +593,7 @@ class ClaudeBackend(AgentBackend):
         logger.info("Created session: %s", session_id[:8])
         return session_id
 
-    async def send(
+    async def send(  # noqa: C901
         self,
         session_id: str,
         prompt: str,
@@ -787,7 +787,7 @@ class ClaudeBackend(AgentBackend):
 
         return parser.build_response()
 
-    async def stream(
+    async def stream(  # noqa: C901
         self,
         session_id: str,
         prompt: str,

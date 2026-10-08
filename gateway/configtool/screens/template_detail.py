@@ -387,7 +387,7 @@ class TemplateDetailScreen(ToolListEditorMixin, FormScreen):
     # ── save ─────────────────────────────────────────────────────────────────
 
     @work
-    async def action_save(self) -> None:
+    async def action_save(self) -> None:  # noqa: C901
         if self.mode == "view":
             return
 

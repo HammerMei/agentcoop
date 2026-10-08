@@ -310,7 +310,7 @@ class MattermostConnector(Connector):
         for channel_id in list(self._channels):
             await self.replay_room_since(channel_id)
 
-    async def replay_room_since(
+    async def replay_room_since(  # noqa: C901
         self, room_id: str, after_ts: str | None = None
     ) -> None:
         """Replay one tracked channel's outage window from its watermark.
@@ -1514,7 +1514,7 @@ class MattermostConnector(Connector):
         self._routing_tasks.add(task)
         task.add_done_callback(self._routing_tasks.discard)
 
-    async def _route_channel(self, channel_id: str, room: "RoomRef", decoded: dict) -> None:
+    async def _route_channel(self, channel_id: str, room: "RoomRef", decoded: dict) -> None:  # noqa: C901
         """Run one routing episode to completion, off the handler path.
 
         Owns the `_pending_routes` entry it was spawned under: popped in `finally`,
@@ -1633,7 +1633,7 @@ class MattermostConnector(Connector):
         except Exception:
             logger.debug("Could not post the starting-up notice", exc_info=True)
 
-    async def _on_posted_event(
+    async def _on_posted_event(  # noqa: C901
         self,
         decoded: dict,
         *,

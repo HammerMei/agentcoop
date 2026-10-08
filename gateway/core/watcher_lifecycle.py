@@ -495,7 +495,7 @@ class WatcherLifecycle:
             self._state_store.save(self._by_name())
             logger.info("Watcher '%s' paused", name)
 
-    async def drop_idle(self, name: str, *, now) -> bool:
+    async def drop_idle(self, name: str, *, now) -> bool:  # noqa: C901
         """The idle drop (§2.5): release the runtime, keep everything a wake needs.
 
         Deliberately **narrower than `_stop_processor`**, and not a flag on it:
@@ -619,7 +619,7 @@ class WatcherLifecycle:
             )
             return True
 
-    async def _reclaim_record_locked(
+    async def _reclaim_record_locked(  # noqa: C901
         self, name: str, state: WatcherState, *, keep_backend_session: bool = False,
     ) -> None:
         """Reclaim everything a record points at, record popped last (§2.5).
@@ -810,7 +810,7 @@ class WatcherLifecycle:
             self._install(state)
             raise
 
-    async def reclaim_room(
+    async def reclaim_room(  # noqa: C901
         self, room_id: str, *, reason: str,
         expected: "WatcherState | None" = None,
         require_dormant: bool = False,
@@ -1631,7 +1631,7 @@ class WatcherLifecycle:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    async def start_watcher_in_room(
+    async def start_watcher_in_room(  # noqa: C901
         self,
         wc: WatcherConfig,
         state: WatcherState | None,
@@ -2124,7 +2124,7 @@ class WatcherLifecycle:
             )
             return False
 
-    async def _stop_processor(self, name: str) -> None:
+    async def _stop_processor(self, name: str) -> None:  # noqa: C901
         """Stop a processor and clean up all mappings.
 
         Order is critical for correctness:

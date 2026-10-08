@@ -217,7 +217,7 @@ class JobScheduler:
                 # pre-merge review). Logged with the job, then the next one.
                 logger.exception("Catch-up for job %s failed — skipping it this start", job.id)
 
-    async def _fire_catch_up(self, job: ScheduledJob, now: datetime) -> None:
+    async def _fire_catch_up(self, job: ScheduledJob, now: datetime) -> None:  # noqa: C901
         """Fire a job that was missed during downtime.
 
         For recurring jobs, counts all missed fire times and fires once per
@@ -362,7 +362,7 @@ class JobScheduler:
 
     # ── Job execution ─────────────────────────────────────────────────────────
 
-    async def _fire_once(self, job: ScheduledJob, fire_time: datetime) -> ScheduledJob:
+    async def _fire_once(self, job: ScheduledJob, fire_time: datetime) -> ScheduledJob:  # noqa: C901
         """Fire a single job: inject message, update state, persist.
 
         Returns the updated job object (a shallow copy).  Callers that fire the

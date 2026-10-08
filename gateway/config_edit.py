@@ -209,7 +209,7 @@ def merge_patch(target: Any, patch: Any) -> Any:
     return out
 
 
-def merge_named_list(existing: Any, items: list, block: str) -> list:
+def merge_named_list(existing: Any, items: list, block: str) -> list:  # noqa: C901
     """The file's `block` list with the fragment's `items` merged in by name."""
     if existing is None:
         existing = []

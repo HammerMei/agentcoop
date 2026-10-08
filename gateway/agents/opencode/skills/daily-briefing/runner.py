@@ -112,7 +112,7 @@ def _yahoo_ticker(ticker: str) -> str:
     return ticker
 
 
-def fetch_stocks() -> list[dict[str, str]]:
+def fetch_stocks() -> list[dict[str, str]]:  # noqa: C901
     # --- Try Yahoo Finance v7 first ---
     try:
         data = _fetch_json(YAHOO_QUOTE_URL)
@@ -278,7 +278,7 @@ def fetch_hn_top10() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def fetch_github_trending_top10() -> list[dict[str, str]]:
+def fetch_github_trending_top10() -> list[dict[str, str]]:  # noqa: C901
     try:
         page = _fetch_text(GITHUB_TRENDING_WEEKLY_URL)
     except Exception:
@@ -333,7 +333,7 @@ def fetch_github_trending_top10() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def fetch_world_news_top5() -> list[dict[str, str]]:
+def fetch_world_news_top5() -> list[dict[str, str]]:  # noqa: C901
     candidates: list[tuple[dt.datetime | None, dict[str, str]]] = []
 
     for rss_url in WORLD_NEWS_RSS_URLS:

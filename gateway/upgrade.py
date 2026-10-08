@@ -348,7 +348,7 @@ def _looks_like_our_console_script(target: Path) -> bool:
             and target.parent.parent.name == ".venv")
 
 
-def _ensure_local_bin_symlinks(repo_path: Path) -> None:
+def _ensure_local_bin_symlinks(repo_path: Path) -> None:  # noqa: C901
     """Ensure ~/.local/bin has a symlink for each console script.
 
     install.sh creates these at install time, but do_git_upgrade only runs

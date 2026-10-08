@@ -31,6 +31,85 @@ Section numbers are `docs/requirements.md` § *Operational Commitments*. **Cite 
 clause.** If no clause covers the case the discount is 1.0 — the absence of a promise
 is not a discount.
 
+## Complexity limit for the `cheap` gate
+
+**McCabe complexity ≤ 10 on the touched function, after the fix, as ruff's `C901`
+computes it.** Measure with
+
+```bash
+uv run ruff check --select C901 --ignore-noqa <file>
+```
+
+which prints each over-limit function with its number (`--ignore-noqa` so a function
+that carries a ratchet marker is still reported). The number to compare is the
+function's, not the file's. A fix that pushes a function past 10, or lands in one
+already past it, is not `cheap` — score it, and charge the complexity as
+`tax_hours_per_year`.
+
+**One metric, on purpose.** `radon cc` counts boolean operators and comprehensions
+as well as branches, so it reads higher than `C901` on the same function (the two
+handlers below: radon 46/43, `C901` 32/29; a 12-term `and` passes `C901` at 10 and
+radon counts it 12). A gate measured one way and a backstop enforcing the other would
+let CI pass what the gate refuses, so the gate uses the backstop's metric. radon is a
+fine second opinion when deciding whether a branch *or a condition* is the thing to
+simplify; it is not the number the gate compares.
+
+Why this limit and not a diff size: on 2026-10-07 the two connector message handlers
+measured `_on_raw_ddp_message` 32 and `_on_posted_event` 29, and they are where the
+`cheap` fixes of PR #121 (27 rounds) and PR #181 (9 rounds) landed. Each of those
+fixes passed the gate as written then. The cheapest fix for PR #195's one finding
+would have been one more `if` in the 32.
+
+`ruff`'s `C901` (max-complexity 10) is the CI backstop, **ratcheted per function**:
+the 85 functions in `gateway/` and `tests/` already over the limit when the rule was
+enabled carry `# noqa: C901` on their def line (added with `ruff --add-noqa`), so the
+rule bites on every function that is still under it — including a new one in a file
+whose neighbours are marked. Remove a marker when its function is brought under 10;
+never add one. `scripts/` is outside CI's lint scope (`ci.yml`, `Makefile`: `gateway/
+tests/`) and is not ratcheted — probe scripts are not shipped code. What the backstop
+cannot see is growth *inside* a marked function — the hundredth `if` in the 32 — and
+that is exactly the case the gate exists for.
+
+### Failing the complexity condition is not a DROP
+
+The condition takes a fix out of the `cheap` lane; it does not decide the finding.
+A bug in a function that is already over the limit is still a bug, and the functions
+over the limit are the message handlers — the code where a dropped fix costs the most.
+When the complexity condition is the only part of `cheap` that fails:
+
+1. **Look for a fix that adds no complexity.** Extract the condition into a named
+   predicate (`is_mention()` is the house pattern), reuse a helper that already
+   exists, or make the check at the layer that owns the concern — which Step 3 asks
+   for anyway. If such a shape exists, the fix is `cheap` again. Most are.
+2. **Otherwise, the refactor is its own item.** Bringing the function under the limit
+   is scored as a separate finding — the "pattern, not findings" sweep — with its own
+   `fix_hours` and its own payback. **Its cost is never charged to the bug.** Decide
+   the refactor first; then the fix: on a refactored function it is `cheap`; on one
+   left as it is, score the fix on its own harm with the added branch as its tax.
+   "The function is already a mess" is a reason to file the refactor, not to drop
+   the fix.
+
+## Revisit window — 12 months
+
+Every DROP and FILE carries a **reversal observation** (one sentence, greppable: a log
+line, an issue keyword, a file and line) and a **revisit date twelve months out**, kept
+in the ledger at the top of `finding-triage-log.md`. At the date: observation seen →
+`settled: bit`; not seen → `settled: held`. With this project's population
+(§14.5, a handful of operators), a clean year is `hits_per_year ≤ 3/N` by the rule of
+three — for three operators, at most one a year, which is the magnitude the DROP anchor
+assumes. So `held` is a measurement, not a shrug. Entries flagged `silent` settle as
+`held (unobservable)` and are not control material.
+
+## Triage cost — recorded, not scored
+
+Each log entry records **minutes, rounds and raters**. Tokens may be noted and are not
+compared across entries: they vary with the model more than with the finding. None of
+it enters the ROI: a round whose output is a *rule* — PR #186 round 4 wrote the host
+co-tenant boundary into SECURITY.md and closed that class — is worth more than the
+findings it dropped, and a per-finding cost ratio would have called it waste. The
+record exists for the trend, and for the one question it can answer: whether a fast
+lane is needed for findings whose harm and fix are both far below the cost of deciding.
+
 ## Decision bands
 
 | `payback_years` | verdict |

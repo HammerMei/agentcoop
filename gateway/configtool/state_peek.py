@@ -25,7 +25,7 @@ from ..core.state import state_files
 from ..schedule_types import JobStatus
 
 
-def stranded_by_rule(
+def stranded_by_rule(  # noqa: C901
     rule_name: str,
     state_paths: list[Path] | None = None,
     jobs_file: Path = JOBS_FILE,

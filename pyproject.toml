@@ -100,5 +100,14 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# The `cheap` gate's limit (docs/agents/finding-triage.md): a review fix that pushes a
+# function past this is not cheap, it is scored. C901 is the CI backstop for the gate.
+# Ratchet, 2026-10-07: the functions already over 10 when C901 was enabled carry
+# `# noqa: C901` on their def line (added with `ruff --add-noqa`). Remove a marker once
+# its function is brought under 10; never add one.
+max-complexity = 10
+

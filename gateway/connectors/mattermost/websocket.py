@@ -283,7 +283,7 @@ class MattermostWebSocketClient:
         except asyncio.CancelledError:
             pass
 
-    async def _listen_loop(self) -> None:
+    async def _listen_loop(self) -> None:  # noqa: C901
         while self._running:
             try:
                 if self._ws is None:

@@ -277,7 +277,7 @@ class RocketChatREST:
             "Posted message to %s%s", channel, f" (thread {tmid})" if tmid else ""
         )
 
-    async def download_file(self, title_link: str, dest_path: str) -> None:
+    async def download_file(self, title_link: str, dest_path: str) -> None:  # noqa: C901
         """Download a file attachment from RC (authenticated) to a local path.
 
         Accumulates all chunks in memory then writes to a PID-unique temp file

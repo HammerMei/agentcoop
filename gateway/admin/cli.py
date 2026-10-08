@@ -299,7 +299,7 @@ def _password_from_args(args: argparse.Namespace) -> str:
     return given
 
 
-async def _dispatch(admin, args, password: str | None) -> None:
+async def _dispatch(admin, args, password: str | None) -> None:  # noqa: C901
     if args.command == "create-user":
         try:
             user = await admin.create_user(

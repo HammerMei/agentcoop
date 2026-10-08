@@ -292,7 +292,7 @@ class VoiceConnector(Connector):
                 pass
             writer.close()
 
-    async def _handle_http(
+    async def _handle_http(  # noqa: C901
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,

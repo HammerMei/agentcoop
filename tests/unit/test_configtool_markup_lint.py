@@ -196,7 +196,7 @@ def _is_escaped(node: ast.expr, source: str) -> bool:
     return "markup_safe(" in segment
 
 
-def _unescaped_interpolations(path: Path) -> list[tuple[int, str, str]]:
+def _unescaped_interpolations(path: Path) -> list[tuple[int, str, str]]:  # noqa: C901
     """(line, sink, expression source) for every unescaped dynamic part of an
     f-string passed to a markup sink in `path`."""
     source = path.read_text()
