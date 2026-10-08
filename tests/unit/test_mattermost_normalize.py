@@ -245,6 +245,58 @@ class TestAgentChainTurnBudget(unittest.TestCase):
         )
         self.assertEqual(store.current_turns("chan1", None, "peer"), 0)
 
+    def test_unmentioned_human_post_in_channel_still_resets_counters(self):
+        """#187: the reset runs before the mention gate. A human post that
+        does not @mention this bot is still rejected, but it revives a chain
+        that hit max_turns — the operator does not have to @mention anyone."""
+        store = TurnStore()
+        cfg = self._cfg()
+        for pid in ("p1", "p2"):
+            filter_mm_message(
+                post=_post(id=pid), mentions=[], sender_username="peer", config=cfg,
+                room_type="channel", last_processed_ts=None, bot_user_id=BOT_ID,
+                turn_store=store,
+            )
+        self.assertEqual(store.current_turns("chan1", None, "peer"), 2)
+
+        human = filter_mm_message(
+            post=_post(id="p3", user_id="human-1", message="no mention here"),
+            mentions=[], sender_username="alice", config=cfg, room_type="channel",
+            last_processed_ts=None, bot_user_id=BOT_ID, turn_store=store,
+        )
+        self.assertFalse(human.accepted)
+        self.assertEqual(human.reason, "bot not mentioned")
+        self.assertEqual(store.current_turns("chan1", None, "peer"), 0)
+
+        revived = filter_mm_message(
+            post=_post(id="p4"), mentions=[], sender_username="peer", config=cfg,
+            room_type="channel", last_processed_ts=None, bot_user_id=BOT_ID,
+            turn_store=store,
+        )
+        self.assertTrue(revived.accepted)
+        self.assertEqual(revived.agent_chain_turn, 1)
+
+    def test_replayed_human_post_does_not_reset_counters(self):
+        """Dedup still runs before the reset: a human post the connector has
+        already processed must not hand the agents a fresh budget."""
+        store = TurnStore()
+        cfg = self._cfg()
+        filter_mm_message(
+            post=_post(id="p1", create_at=2000), mentions=[], sender_username="peer",
+            config=cfg, room_type="channel", last_processed_ts=None, bot_user_id=BOT_ID,
+            turn_store=store,
+        )
+        self.assertEqual(store.current_turns("chan1", None, "peer"), 1)
+
+        replayed = filter_mm_message(
+            post=_post(id="p0", create_at=1000, user_id="human-1"), mentions=[],
+            sender_username="alice", config=cfg, room_type="channel",
+            last_processed_ts="2000", bot_user_id=BOT_ID, turn_store=store,
+        )
+        self.assertFalse(replayed.accepted)
+        self.assertIn("already processed", replayed.reason)
+        self.assertEqual(store.current_turns("chan1", None, "peer"), 1)
+
 
 # ── text_mentions_bot / room-wide mention helpers ────────────────────────────
 
