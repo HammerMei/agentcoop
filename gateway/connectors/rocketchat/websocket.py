@@ -175,7 +175,7 @@ class RCWebSocketClient:
         self._listen_task = asyncio.create_task(self._listen_loop())
         self._ping_task = asyncio.create_task(self._ping_loop())
 
-    async def stop(self) -> None:
+    async def stop(self) -> None:  # noqa: C901
         """Stop listening and close the connection."""
         self._running = False
         if self._ping_task:
@@ -568,7 +568,7 @@ class RCWebSocketClient:
             and self._subscriptions.get(room_id) == sub_id
         )
 
-    async def _subscribe_with_confirmation(
+    async def _subscribe_with_confirmation(  # noqa: C901
         self,
         room_id: str,
         callback: Callable,
@@ -878,7 +878,7 @@ class RCWebSocketClient:
                 break
         raise RuntimeError(f"Timeout waiting for result of method {method_id}")
 
-    async def _listen_loop(self) -> None:
+    async def _listen_loop(self) -> None:  # noqa: C901
         """Main receive loop. Dispatches room messages to callbacks."""
         while self._running:
             try:
@@ -1272,7 +1272,7 @@ class RCWebSocketClient:
             except Exception as e:
                 logger.error("Routing callback failed: %s", e)
 
-    async def _room_worker(self, room_id: str, queue: asyncio.Queue) -> None:
+    async def _room_worker(self, room_id: str, queue: asyncio.Queue) -> None:  # noqa: C901
         """Consume messages for one room sequentially with bounded global concurrency."""
         # Tracks the message currently dequeued but not yet dispatched.  When
         # CancelledError fires between queue.get() and the semaphore acquire,
@@ -1468,7 +1468,7 @@ class RCWebSocketClient:
         task.add_done_callback(self._callback_tasks.discard)
         return task
 
-    async def _recover(
+    async def _recover(  # noqa: C901
         self,
         reason: str,
         *,

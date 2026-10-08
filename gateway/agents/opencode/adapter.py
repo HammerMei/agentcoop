@@ -580,7 +580,7 @@ class OpenCodeBackend(AgentBackend):
         except Exception as e:
             logger.debug("Pipe drain stopped: %s", e)
 
-    async def stop(self) -> None:
+    async def stop(self) -> None:  # noqa: C901
         """Terminate the ``opencode serve`` process.
 
         Idempotent — returns immediately if already stopped.
@@ -1058,7 +1058,7 @@ class OpenCodeBackend(AgentBackend):
         )
         return self._parse_http_response(raw, session_id)
 
-    async def stream(
+    async def stream(  # noqa: C901
         self,
         session_id: str,
         prompt: str,
@@ -1253,7 +1253,7 @@ class OpenCodeBackend(AgentBackend):
                 f"opencode sidecar unreachable (prompt_async) for session {session_id[:16]!r}"
             ) from None
 
-    async def _parse_sse_events(
+    async def _parse_sse_events(  # noqa: C901
         self,
         session_id: str,
         queue: asyncio.Queue[str | Exception],

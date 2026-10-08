@@ -207,7 +207,7 @@ class ControlServer:
 
     # ── Command routing ───────────────────────────────────────────────────────
 
-    async def dispatch_command(self, request: dict) -> dict:
+    async def dispatch_command(self, request: dict) -> dict:  # noqa: C901
         """Route a CLI command to the appropriate SessionManager.
 
         Uses the 'connector' field in the request to select the target entry.
@@ -455,7 +455,7 @@ class ControlServer:
             return {"ok": False, "error": f"Migration failed: {exc}"}
         return {"ok": True, **report.to_dict()}
 
-    def _handle_schedule_create(self, request: dict) -> dict:
+    def _handle_schedule_create(self, request: dict) -> dict:  # noqa: C901
         from datetime import UTC, datetime
 
         from .core.scheduler import compute_next_run
@@ -752,7 +752,7 @@ class ControlServer:
             logger.error("send_to_room failed for connector '%s': %s", entry.name, e)
             return {"ok": False, "error": str(e)}
 
-    async def _handle_fetch_history(self, request: dict) -> dict:
+    async def _handle_fetch_history(self, request: dict) -> dict:  # noqa: C901
         """Handle the 'fetch-history' command: on-demand channel history for agents.
 
         Resolves the watcher name to its connector + room, applies the

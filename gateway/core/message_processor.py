@@ -309,7 +309,7 @@ class MessageProcessor:
 
     # ── Consumer loop ─────────────────────────────────────────────────────────
 
-    async def _run(self) -> None:
+    async def _run(self) -> None:  # noqa: C901
         """Consumer loop: process messages one at a time until drained or cancelled.
 
         In ``running`` state, blocks on ``queue.get()`` indefinitely.
@@ -462,7 +462,7 @@ class MessageProcessor:
             is_scheduled=is_scheduled_message(msg),
         )
 
-    async def _process_batch(self, batch: list[IncomingMessage]) -> None:
+    async def _process_batch(self, batch: list[IncomingMessage]) -> None:  # noqa: C901
         """Process a batch of IncomingMessages as a single catch-up turn.
 
         Called when the queue had >1 messages pending after the previous turn.

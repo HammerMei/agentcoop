@@ -349,7 +349,7 @@ def _closest_type(written: str) -> str | None:
     return matches[0] if matches else None
 
 
-def _check_connectors(config: GatewayConfig, result: ValidationResult) -> None:
+def _check_connectors(config: GatewayConfig, result: ValidationResult) -> None:  # noqa: C901
     """Instantiate each connector's own config dataclass and flag empty
     credentials — fields from_connector_config defaults to "" rather than
     validating."""
@@ -467,7 +467,7 @@ def _check_session_uniqueness(config: GatewayConfig, result: ValidationResult) -
         return
 
 
-def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> None:
+def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> None:  # noqa: C901
     """Warn when a connector's persisted state carries records the next boot
     will prune.
 
@@ -619,7 +619,7 @@ def _check_state_orphans(config: GatewayConfig, result: ValidationResult) -> Non
             )
 
 
-def _lint_config(raw: dict, result: ValidationResult) -> None:
+def _lint_config(raw: dict, result: ValidationResult) -> None:  # noqa: C901
     # PR review finding: this used to assume re-parsing these blocks "cannot
     # raise" because validate_config() only reached here after a successful
     # GatewayConfig.from_file() call. That's no longer true now that

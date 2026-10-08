@@ -67,7 +67,7 @@ async def driver(url, admin_user, admin_pw, member_room, extra_user, probe_user,
     log("driver finished")
 
 
-async def listener(url, user, password, added_event, ready, seconds):
+async def listener(url, user, password, added_event, ready, seconds):  # noqa: C901
     ws_url = url.replace("https://", "wss://").replace("http://", "ws://").rstrip("/") + "/websocket"
     async with websockets.connect(ws_url) as ws:
         async def send(o):

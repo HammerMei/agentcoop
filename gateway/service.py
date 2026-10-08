@@ -160,7 +160,7 @@ class AgentRuntimeManager:
         """
         return await self.start_some(set(self._agents), registry, notifier, maps)
 
-    async def start_some(
+    async def start_some(  # noqa: C901
         self,
         names: set[str],
         registry: PermissionRegistry,
@@ -1087,7 +1087,7 @@ class GatewayService:
             if name not in self._runtime_manager.unavailable_agents:
                 del self._agent_errors[name]
 
-    async def reload_config(self, *, dry_run: bool, config_path: str | None = None) -> dict:
+    async def reload_config(self, *, dry_run: bool, config_path: str | None = None) -> dict:  # noqa: C901
         """`config reload`: validate the file, plan, and unless `dry_run` apply.
 
         One request, one response. The file is read once, here; the plan is
@@ -1282,7 +1282,7 @@ class GatewayService:
         plan.notes.extend(notes)
         return plan
 
-    async def _apply_reload(
+    async def _apply_reload(  # noqa: C901
         self, diff: ConfigDiff, candidate: GatewayConfig, plan: ReloadPlan
     ) -> None:
         """Execute a reload plan: one stop pass, one start pass, then reconcile.

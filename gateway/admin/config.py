@@ -245,7 +245,7 @@ def _resolve_config_path(path: str | Path | None) -> Path:
     return DEFAULT_CONFIG_PATH
 
 
-def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, dict]]:
+def load_raw_profiles(path: str | Path | None = None) -> tuple[Path, dict[str, dict]]:  # noqa: C901
     """The file's profiles as written — name → field mapping — checked for
     shape only (a mapping of mappings with string names), not for content.
 

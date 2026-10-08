@@ -458,7 +458,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():
+def main():  # noqa: C901
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -679,7 +679,7 @@ def _run_lifecycle_verb(args) -> None:
     _run_lifecycle_glob(verb, target, force=args.force)
 
 
-def _run_lifecycle_glob(verb: str, pattern: str, *, force: bool) -> None:
+def _run_lifecycle_glob(verb: str, pattern: str, *, force: bool) -> None:  # noqa: C901
     import fnmatch
 
     listing = _send_command({"cmd": "list", "states": list(_ALL_STATES)})
@@ -1048,7 +1048,7 @@ def _run_config_reload(args) -> None:
     sys.exit(0)
 
 
-def _run_config_show(args) -> None:
+def _run_config_show(args) -> None:  # noqa: C901
     """Handle 'config show [--json]' (#144).
 
     Prints the SHA-256 digest of the RESOLVED file and its flattened contents
@@ -1187,7 +1187,7 @@ def _run_config_show_raw(args) -> None:
     sys.exit(0 if ok else 1)
 
 
-def _run_config_edit(args) -> None:
+def _run_config_edit(args) -> None:  # noqa: C901
     """Handle 'config add|remove|patch [--dry-run] [--if-digest] [--json]'
     (coop-keeper design §3.10). Every command builds one fragment and takes
     the one plan-then-write path in `config_edit.edit_document`; nothing this
@@ -1358,7 +1358,7 @@ def _run_fetch_history(args) -> None:
         sys.exit(1)
 
 
-def _run_send(args) -> None:
+def _run_send(args) -> None:  # noqa: C901
     """Handle the 'send' subcommand: post a message or upload a file via the control socket.
 
     Routes through the running daemon's control socket so the send goes through
@@ -1445,7 +1445,7 @@ def _run_schedule(args) -> None:
         sys.exit(1)
 
 
-def _run_schedule_create(args) -> None:
+def _run_schedule_create(args) -> None:  # noqa: C901
     """Handle 'schedule create': parse interval, build cron, send to daemon."""
     # For one-shot tasks (--starting datetime, no --every), enforce times=1 to prevent
     # the job from re-firing every year (5-field cron has no year field).
@@ -1763,7 +1763,7 @@ class _ParsedStarting:
     tz_str: str               # IANA timezone name actually used (e.g. "America/Los_Angeles")
 
 
-def _parse_starting(starting_str: str, tz_name: str | None, now_utc: datetime) -> "_ParsedStarting":
+def _parse_starting(starting_str: str, tz_name: str | None, now_utc: datetime) -> "_ParsedStarting":  # noqa: C901
     """Parse a --starting value into a _ParsedStarting result.
 
     Accepts the following formats:
@@ -1988,7 +1988,7 @@ _DOW_MAP: dict[str, str] = {
 }
 
 
-def _build_cron_expression(every: str | None, at: str | None) -> str:
+def _build_cron_expression(every: str | None, at: str | None) -> str:  # noqa: C901
     """Convert ``--every INTERVAL`` + optional ``--at TIME`` to a 5-field cron string.
 
     Supported intervals:

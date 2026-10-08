@@ -475,7 +475,7 @@ class RocketChatConnector(Connector):
         for room_id in list(self._rooms):
             await self.replay_room_since(room_id)
 
-    async def replay_room_since(
+    async def replay_room_since(  # noqa: C901
         self, room_id: str, after_ts: str | None = None
     ) -> None:
         """Replay one tracked room's outage window.
@@ -1071,7 +1071,7 @@ class RocketChatConnector(Connector):
             )
             return None
 
-    async def _on_unrouted_message(self, doc: dict, access: dict | None = None) -> None:
+    async def _on_unrouted_message(self, doc: dict, access: dict | None = None) -> None:  # noqa: C901
         """A message for a room this connector has no watcher for (§2.2).
 
         Three gates before the room is offered, in this order and for different reasons:
@@ -1178,7 +1178,7 @@ class RocketChatConnector(Connector):
             return True
         return self._capacity_check(room_id) is not RoomCapacity.UNROUTED
 
-    async def _route_room(
+    async def _route_room(  # noqa: C901
         self,
         room_id: str,
         doc: dict,
@@ -2111,7 +2111,7 @@ class RocketChatConnector(Connector):
             result.sender, reason, remaining,
         )
 
-    async def _on_raw_ddp_message(
+    async def _on_raw_ddp_message(  # noqa: C901
         self,
         room_id: str,
         doc: dict,

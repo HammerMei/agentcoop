@@ -286,7 +286,7 @@ class SessionManager:
             self._sweep.start()
         return errors
 
-    async def _eager_start_rule_rooms(self, errors: list[str]) -> None:
+    async def _eager_start_rule_rooms(self, errors: list[str]) -> None:  # noqa: C901
         """Start every literal rule room on a connector that cannot discover (§2.6).
 
         Script's messages arrive by direct injection and Voice's rooms as HTTP
@@ -956,7 +956,7 @@ class SessionManager:
             self._lifecycle._exit_verb()
         return False
 
-    async def _replay_persisted_records(self, down_window: dict[str, str]) -> None:
+    async def _replay_persisted_records(self, down_window: dict[str, str]) -> None:  # noqa: C901
         """Recover messages that arrived while the daemon was down (§2.2).
 
         The abort guarantee — "watermark unchanged, so redelivery can retry" —
@@ -1733,7 +1733,7 @@ class SessionManager:
 
     # ── Control command dispatch (called by GatewayService) ───────────────────
 
-    async def dispatch_command(self, request: dict) -> dict:
+    async def dispatch_command(self, request: dict) -> dict:  # noqa: C901
         cmd = request.get("cmd")
 
         if cmd == "list":

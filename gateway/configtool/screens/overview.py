@@ -258,7 +258,7 @@ class OverviewScreen(Screen):
         tabs.active = _TAB_ORDER[(index + 1) % len(_TAB_ORDER)]
 
     @work
-    async def action_edit_row(self) -> None:
+    async def action_edit_row(self) -> None:  # noqa: C901
         """'e' on the Connectors/Agents tabs: open the row under the cursor
         DIRECTLY in edit mode — no view-mode detour. User-requested: the
         common case is "I know which entry I want to change," and having to
@@ -338,7 +338,7 @@ class OverviewScreen(Screen):
         self.app.push_screen(screen)
 
     @work
-    async def action_delete_row(self) -> None:
+    async def action_delete_row(self) -> None:  # noqa: C901
         """'d' on the Connectors/Agents/Tool-Presets tabs: delete the row
         under the cursor directly.
 
@@ -656,7 +656,7 @@ class OverviewScreen(Screen):
         app.reload_config()
 
     @work
-    async def action_new_entity(self) -> None:
+    async def action_new_entity(self) -> None:  # noqa: C901
         """'n' — scoped to whichever tab is active. Agents, Connectors,
         Rules, and Tool Presets support creation. Unsupported tabs just
         notify, rather than doing nothing silently or crashing."""
@@ -800,7 +800,7 @@ class OverviewScreen(Screen):
 
     # ── Core refresh logic (the one testable seam per docs/design) ──────────
 
-    def repaint_from_memory(self) -> None:
+    def repaint_from_memory(self) -> None:  # noqa: C901
         """Redraw every tab from EditableConfig's CURRENT in-memory document —
         does not touch disk. Name is deliberate (code review item 9: the prior
         name `refresh_overview` invited exactly the bug action_refresh's
@@ -1002,7 +1002,7 @@ class OverviewScreen(Screen):
             return watchers[index]
         return None
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:  # noqa: C901
         app: "ConfigToolApp" = self.app  # type: ignore[assignment]
         cfg = app.editable_config
         if cfg is None:

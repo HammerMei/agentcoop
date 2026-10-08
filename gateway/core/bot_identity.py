@@ -299,7 +299,7 @@ def fold_record_dm_claims(claim: DmClaim, records) -> DmClaim:
     )
 
 
-def find_identity_conflicts(entries: list[ConnectorIdentity]) -> list[str]:
+def find_identity_conflicts(entries: list[ConnectorIdentity]) -> list[str]:  # noqa: C901
     """Every reason these connectors cannot run together, as operator-facing lines.
 
     Returns all conflicts rather than the first: a config with three colliding

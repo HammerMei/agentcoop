@@ -178,7 +178,7 @@ def _first_unknowable(text: str) -> int:
     return -1
 
 
-def _redirect_param(file_redirect, src: bytes) -> str | None:
+def _redirect_param(file_redirect, src: bytes) -> str | None:  # noqa: C901
     """Return the parameter string for a ``file_redirect`` node, or None.
 
     ``cmd > /tmp/x`` yields ``"> /tmp/x"``.  The operator is kept so a rule that
@@ -295,7 +295,7 @@ def _heredoc_is_quoted(heredoc_redirect, src: bytes) -> bool:
     return False
 
 
-def extract_bash_subcommands(command: str) -> list[str]:
+def extract_bash_subcommands(command: str) -> list[str]:  # noqa: C901
     """Split a compound bash command string into individual sub-command strings.
 
     Uses tree-sitter-bash to parse the AST.  Each ``command`` node (i.e. a
@@ -359,7 +359,7 @@ def extract_bash_subcommands(command: str) -> list[str]:
             else:
                 arithmetic(child)
 
-    def walk(node) -> None:
+    def walk(node) -> None:  # noqa: C901
         if node.child_count == 0:
             if node.is_named and node.type not in _NEVER_EXPANDED_LEAVES:
                 text = src[node.start_byte:node.end_byte].decode()

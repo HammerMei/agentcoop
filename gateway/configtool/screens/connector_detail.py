@@ -566,7 +566,7 @@ class ConnectorDetailScreen(FormScreen):
             self._open_inherits_picker()
 
     @work
-    async def _open_inherits_picker(self) -> None:
+    async def _open_inherits_picker(self) -> None:  # noqa: C901
         if self.mode == "view":
             return
         # User-reported: this used to list EVERY connector template
@@ -678,7 +678,7 @@ class ConnectorDetailScreen(FormScreen):
     # ── save ─────────────────────────────────────────────────────────────────
 
     @work
-    async def action_save(self) -> None:
+    async def action_save(self) -> None:  # noqa: C901
         if self.mode == "view":
             return
 

@@ -268,7 +268,7 @@ class TUIState:
 # Main loop
 # ---------------------------------------------------------------------------
 
-async def run_tui(
+async def run_tui(  # noqa: C901
     config_path: str,
     agent_name: str | None,
     role: str,

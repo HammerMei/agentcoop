@@ -215,7 +215,7 @@ class OpenCodePermissionBroker(PermissionBroker):
                 logger.warning("SSE connection lost: %s — reconnecting in 3s", e)
                 await asyncio.sleep(3)
 
-    async def _handle_sse_line(self, line: str) -> None:
+    async def _handle_sse_line(self, line: str) -> None:  # noqa: C901
         if not line.startswith("data:"):
             if line:  # suppress blank separator lines from debug output
                 logger.debug("SSE non-data line: %r", line)

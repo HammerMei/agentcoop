@@ -33,21 +33,40 @@ is not a discount.
 
 ## Complexity limit for the `cheap` gate
 
-**Cyclomatic complexity ≤ 10 (radon grade A or B) on the touched function, after the
-fix.** Measure with `uvx radon cc -s <file>`; the number to compare is the function's,
-not the file's. A fix that pushes a function past 10, or lands in one already past it,
-is not `cheap` — score it, and charge the complexity as `tax_hours_per_year`.
+**McCabe complexity ≤ 10 on the touched function, after the fix, as ruff's `C901`
+computes it.** Measure with
+
+```bash
+uv run ruff check --select C901 --ignore-noqa <file>
+```
+
+which prints each over-limit function with its number (`--ignore-noqa` so a function
+that carries a ratchet marker is still reported). The number to compare is the
+function's, not the file's. A fix that pushes a function past 10, or lands in one
+already past it, is not `cheap` — score it, and charge the complexity as
+`tax_hours_per_year`.
+
+**One metric, on purpose.** `radon cc` counts boolean operators and comprehensions
+as well as branches, so it reads higher than `C901` on the same function (the two
+handlers below: radon 46/43, `C901` 32/29; a 12-term `and` passes `C901` at 10 and
+radon counts it 12). A gate measured one way and a backstop enforcing the other would
+let CI pass what the gate refuses, so the gate uses the backstop's metric. radon is a
+fine second opinion when deciding whether a branch *or a condition* is the thing to
+simplify; it is not the number the gate compares.
 
 Why this limit and not a diff size: on 2026-10-07 the two connector message handlers
-measured F — `_on_raw_ddp_message` 46, `_on_posted_event` 43 — and they are where the
-`cheap` fixes of PR #121 (27 rounds) and PR #181 (9 rounds) landed. Each of those fixes
-passed the gate as written then. The cheapest fix for PR #195's one finding would have
-been one more `if` in the 46.
+measured `_on_raw_ddp_message` 32 and `_on_posted_event` 29, and they are where the
+`cheap` fixes of PR #121 (27 rounds) and PR #181 (9 rounds) landed. Each of those
+fixes passed the gate as written then. The cheapest fix for PR #195's one finding
+would have been one more `if` in the 32.
 
-`ruff`'s `C901` (max-complexity 10) is the CI backstop, **ratcheted**: files already over
-the limit are listed under `per-file-ignores` in `pyproject.toml` so the rule bites only
-on code that is still under it. Remove a file from that list when its last over-limit
-function has been brought down; never add one.
+`ruff`'s `C901` (max-complexity 10) is the CI backstop, **ratcheted per function**:
+the 88 functions already over the limit when the rule was enabled carry
+`# noqa: C901` on their def line (added with `ruff --add-noqa`), so the rule bites on
+every function that is still under it — including a new one in a file whose
+neighbours are marked. Remove a marker when its function is brought under 10; never
+add one. What the backstop cannot see is growth *inside* a marked function — the
+hundredth `if` in the 32 — and that is exactly the case the gate exists for.
 
 ## Revisit window — 12 months
 

@@ -71,7 +71,7 @@ class FilterResult:
     agent_chain_max_turns: int = 5  # from config
 
 
-def filter_rc_message(
+def filter_rc_message(  # noqa: C901
     doc: dict,
     config: "RocketChatConfig",
     room_type: str,

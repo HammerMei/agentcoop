@@ -118,7 +118,7 @@ def _wait_for_startup_signal(read_fd: int) -> None:
     sys.exit(0)
 
 
-def start_daemon(config_path: str) -> None:
+def start_daemon(config_path: str) -> None:  # noqa: C901
     """Daemonize and run the gateway service.
 
     Blocks the parent process until the daemon has completed its full startup
