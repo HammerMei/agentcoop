@@ -762,4 +762,28 @@ Notes:
 - Rater 2's enumerating test (every `**DROP`/`**FILE` outcome has a ledger row) is the
   MAKE IT LOUD for the ledger class; a new test file, not taken this round.
 
-**Status: open.** Settles with the confirming round on the response commits.
+**Status: open.** Settles with round 2 below.
+
+## 2026-10-08 — PR #196 round 2 (confirming round on `bddb38a`)
+
+**Chain detector:** 5 findings over 2 rounds, round 2 `--`, no chain.
+**Control finding:** #181 r9 F1 is now `settled: implemented` and would serve; not used
+— one finding, decided at the `cheap` gate, no second rater convened (one `cheap`
+config/doc finding on a confirming round; stop-loss as on PR #184/#186).
+**Cost:** ~10 min, 1 round, 1 rater.
+
+| | rater 1 (author) | outcome |
+|---|---|---|
+| **F1** three `scripts/` functions carry ratchet markers and the doc counts them in the 88, but CI and the Makefile lint only `gateway/ tests/`, so `scripts/` is never checked (P2) | true (`ci.yml:28`, `Makefile:24`). `cheap`: the honest fix is to stop claiming a baseline CI does not enforce — remove the three markers, count 85, say `scripts/` is out of scope; a separate C901-only CI step for probe scripts that are not shipped would be a rule for code the backstop is not for | **FIX** — markers removed, doc says 85 in `gateway/`+`tests/` and that `scripts/` is not ratcheted |
+
+Notes:
+- Adoption: 1 of 1. Codex's P2 is generous for a count in a doc and three markers on
+  unshipped probes; ranked below every round-1 finding.
+- Also in this commit, from the owner (2026-10-08): failing the complexity condition
+  is **not** a DROP — look for a shape that adds no complexity first, and if none,
+  the refactor is its own scored item whose cost is never charged to the fix. Written
+  into the skill's `cheap` gate and `finding-triage.md`.
+- Security review did not run (Codex usage limit); the code review did, on `bddb38a`.
+
+**Status: settled for this PR** — the confirming round found nothing on round 1's
+fixes and nothing that contradicts a promise.

@@ -142,7 +142,7 @@ async def rc_driver(a, ready: asyncio.Event) -> None:
     log("driver finished")
 
 
-async def rc_listener(a, ready: asyncio.Event) -> int:  # noqa: C901
+async def rc_listener(a, ready: asyncio.Event) -> int:
     ws_url = a.url.replace("https://", "wss://").replace("http://", "ws://").rstrip("/") + "/websocket"
     async with websockets.connect(ws_url) as ws:
         async def send(o):

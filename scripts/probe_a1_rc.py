@@ -120,7 +120,7 @@ async def driver(url: str, admin_user: str, admin_pw: str, probe_user: str,
     log("driver finished")
 
 
-async def listener(url: str, user: str, password: str, added_event: bool,  # noqa: C901
+async def listener(url: str, user: str, password: str, added_event: bool,
                    ready: asyncio.Event, seconds: int) -> int:
     ws_url = url.replace("https://", "wss://").replace("http://", "ws://").rstrip("/") + "/websocket"
     log(f"connecting {ws_url}")

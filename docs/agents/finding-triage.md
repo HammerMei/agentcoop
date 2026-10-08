@@ -61,12 +61,33 @@ fixes passed the gate as written then. The cheapest fix for PR #195's one findin
 would have been one more `if` in the 32.
 
 `ruff`'s `C901` (max-complexity 10) is the CI backstop, **ratcheted per function**:
-the 88 functions already over the limit when the rule was enabled carry
-`# noqa: C901` on their def line (added with `ruff --add-noqa`), so the rule bites on
-every function that is still under it — including a new one in a file whose
-neighbours are marked. Remove a marker when its function is brought under 10; never
-add one. What the backstop cannot see is growth *inside* a marked function — the
-hundredth `if` in the 32 — and that is exactly the case the gate exists for.
+the 85 functions in `gateway/` and `tests/` already over the limit when the rule was
+enabled carry `# noqa: C901` on their def line (added with `ruff --add-noqa`), so the
+rule bites on every function that is still under it — including a new one in a file
+whose neighbours are marked. Remove a marker when its function is brought under 10;
+never add one. `scripts/` is outside CI's lint scope (`ci.yml`, `Makefile`: `gateway/
+tests/`) and is not ratcheted — probe scripts are not shipped code. What the backstop
+cannot see is growth *inside* a marked function — the hundredth `if` in the 32 — and
+that is exactly the case the gate exists for.
+
+### Failing the complexity condition is not a DROP
+
+The condition takes a fix out of the `cheap` lane; it does not decide the finding.
+A bug in a function that is already over the limit is still a bug, and the functions
+over the limit are the message handlers — the code where a dropped fix costs the most.
+When the complexity condition is the only part of `cheap` that fails:
+
+1. **Look for a fix that adds no complexity.** Extract the condition into a named
+   predicate (`is_mention()` is the house pattern), reuse a helper that already
+   exists, or make the check at the layer that owns the concern — which Step 3 asks
+   for anyway. If such a shape exists, the fix is `cheap` again. Most are.
+2. **Otherwise, the refactor is its own item.** Bringing the function under the limit
+   is scored as a separate finding — the "pattern, not findings" sweep — with its own
+   `fix_hours` and its own payback. **Its cost is never charged to the bug.** Decide
+   the refactor first; then the fix: on a refactored function it is `cheap`; on one
+   left as it is, score the fix on its own harm with the added branch as its tax.
+   "The function is already a mess" is a reason to file the refactor, not to drop
+   the fix.
 
 ## Revisit window — 12 months
 
