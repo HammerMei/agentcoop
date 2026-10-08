@@ -31,6 +31,45 @@ Section numbers are `docs/requirements.md` § *Operational Commitments*. **Cite 
 clause.** If no clause covers the case the discount is 1.0 — the absence of a promise
 is not a discount.
 
+## Complexity limit for the `cheap` gate
+
+**Cyclomatic complexity ≤ 10 (radon grade A or B) on the touched function, after the
+fix.** Measure with `uvx radon cc -s <file>`; the number to compare is the function's,
+not the file's. A fix that pushes a function past 10, or lands in one already past it,
+is not `cheap` — score it, and charge the complexity as `tax_hours_per_year`.
+
+Why this limit and not a diff size: on 2026-10-07 the two connector message handlers
+measured F — `_on_raw_ddp_message` 46, `_on_posted_event` 43 — and they are where the
+`cheap` fixes of PR #121 (27 rounds) and PR #181 (9 rounds) landed. Each of those fixes
+passed the gate as written then. The cheapest fix for PR #195's one finding would have
+been one more `if` in the 46.
+
+`ruff`'s `C901` (max-complexity 10) is the CI backstop, **ratcheted**: files already over
+the limit are listed under `per-file-ignores` in `pyproject.toml` so the rule bites only
+on code that is still under it. Remove a file from that list when its last over-limit
+function has been brought down; never add one.
+
+## Revisit window — 12 months
+
+Every DROP and FILE carries a **reversal observation** (one sentence, greppable: a log
+line, an issue keyword, a file and line) and a **revisit date twelve months out**, kept
+in the ledger at the top of `finding-triage-log.md`. At the date: observation seen →
+`settled: bit`; not seen → `settled: held`. With this project's population
+(§14.5, a handful of operators), a clean year is `hits_per_year ≤ 3/N` by the rule of
+three — for three operators, at most one a year, which is the magnitude the DROP anchor
+assumes. So `held` is a measurement, not a shrug. Entries flagged `silent` settle as
+`held (unobservable)` and are not control material.
+
+## Triage cost — recorded, not scored
+
+Each log entry records **minutes, rounds and raters**. Tokens may be noted and are not
+compared across entries: they vary with the model more than with the finding. None of
+it enters the ROI: a round whose output is a *rule* — PR #186 round 4 wrote the host
+co-tenant boundary into SECURITY.md and closed that class — is worth more than the
+findings it dropped, and a per-finding cost ratio would have called it waste. The
+record exists for the trend, and for the one question it can answer: whether a fast
+lane is needed for findings whose harm and fix are both far below the cost of deciding.
+
 ## Decision bands
 
 | `payback_years` | verdict |

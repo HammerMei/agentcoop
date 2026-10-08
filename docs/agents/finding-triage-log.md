@@ -9,6 +9,33 @@ rater; until one exists, every round runs without a control and says so.
 
 Constants and anchors: `finding-triage.md` in this directory.
 
+## Revisit ledger
+
+Every DROP and FILE, with the observation that would prove it wrong and the date it
+settles (twelve months, per `finding-triage.md` § *Revisit window*). Sweep quarterly:
+grep the reversal column against issues, `gateway.log` and the tree; an entry whose
+observation appeared is `bit`, one whose date has passed is `held`. `silent` entries
+settle `held (unobservable)`. Rows marked *untrue* or *stale* in their round made no rate
+claim and are not listed.
+
+| decided | finding | verdict | reversal — what would prove it wrong | revisit | status |
+|---|---|---|---|---|---|
+| 2026-09-14 | #166 r1 F1 — concurrent `resume`/`reset` on a still-broken agent queue a second ~40 s attempt | DROP | a `_recover_agent` attempt logged within 60 s of a failed one for the same agent, or an operator reporting a verb that waited on a prior attempt | 2027-09-14 | open |
+| 2026-09-14 | #167 r1 F3 — a pure `{"*": "deny"}` plugin copy re-introduces `ask` on bash | DROP (`cannot-occur`) | any hook sees a bash call under a pure-deny permissions file | 2027-09-14 | open |
+| 2026-09-23 | #181 r6 F1 — relative `working_directory` validated in a scratch dir when the config dir is absent | DROP | a bootstrap into an absent config dir with a relative `working_directory` where `validate` passes and the applied config resolves elsewhere (issue or log) | 2027-09-23 | open |
+| 2026-09-23 | #181 r8 F3 — a dry run creates `~/.agentcoop` via `validate_config` | DROP | anyone reports a dry run's directory creation as a defect | 2027-09-23 | open |
+| 2026-09-24 | #184 r1 F8 — shared agent-chain list lets a same-named human bypass the sender allow-list (security) | DROP (design §3.7) | the keeper template's `filter_sender` default changes from `false`, or a report of a human posting under an agent's name getting through | 2027-09-24 | open |
+| 2026-09-24 | #184 r3 F1 — a symlinked keeper dir or `agents/` defeats the ancestor guard (chain deleted; symlinks followed by ruling) | DROP | a report of a keeper sync writing somewhere the operator did not point a link at | 2027-09-24 | open |
+| 2026-09-24 | #184 r3 F3 — `server.team` given as an id plans a duplicate bot; runtime refuses at reload | DROP | an operator hits the duplicate-bot refusal and the message does not lead them to the fix (issue) | 2027-09-24 | open |
+| 2026-09-24 | #184 r3 F4 — `_remove_path` then `copytree`: a failed copy leaves the old skill gone until the next upgrade | DROP | a failed skill copy that the next `coop upgrade` did not repair, or that needed a manual repair | 2027-09-24 | open |
+| 2026-09-24 | #184 r3 F7 — a hand edit between plan steps re-shares an account before `delete-user` | DROP (§3.8/§4 best effort) | a shared account deleted because of a mid-plan hand edit | 2027-09-24 | open |
+| 2026-09-24 | #184 r4 F2 — a plan past its 10-minute lease taken over mid-execution | DROP | a keeper report showing a takeover of a plan whose first keeper was still running | 2027-09-24 | open |
+| 2026-09-25 | #186 r3 F1 (ii) — a non-default COOP_HOME under an ancestor another local user can write to | FILE, 6-month decay; `silent` | a report or audit showing `repo/.venv/bin/coop` replaced via a writable ancestor | 2027-03-25 | open |
+| 2026-09-25 | #186 r3 F1 (i-b) — 0700 on create | DROP; `silent` | a report of secrets or config read through the directory mode (secrets are 0600) | 2027-09-25 | open |
+| 2026-09-25 | #186 r4 F1 — a group-writable COOP_HOME (0770/0775) passes `runtime_dir_is_ours` (boundary written in SECURITY.md) | DROP; `silent` | a report of a lower-privileged group member altering COOP_HOME contents | 2027-09-25 | open |
+| 2026-09-25 | #186 r4 F2 — a container started with `COOP_HOME` set splits where the entrypoint writes and `coop` reads | DROP, recorded on #183 | #183's image ships still honouring `COOP_HOME`, or a user report of `coop start` failing in the container | 2027-09-25 | open |
+| 2026-10-07 | #195 r1 F1 — RC replay re-runs the human reset for an unmentioned post; an in-flight agent delivery keeps a free turn | DROP | `Agent chain counters reset … had turns` logged directly after `replaying missed messages` for a room whose human post was unmentioned, or any chain observed past `max_turns+1` | 2027-10-07 | open |
+
 ---
 
 ## 2026-09-14 — PR #166 round 1
