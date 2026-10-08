@@ -167,7 +167,7 @@ class TestPermissionFiles(unittest.TestCase):
     def test_both_files_pin_the_default_agent_to_the_cli_builtin(self):
         """An operator whose CLI defaults to a persona agent of their own would
         otherwise run the keeper *as* that persona. The keeper is its own agent."""
-        self.assertEqual(self.settings.get("agent"), "")
+        self.assertEqual(self.settings.get("agent"), "claude")
         self.assertEqual(self.opencode.get("default_agent"), "build")
 
     def test_claude_settings_deny_the_credential_files(self):

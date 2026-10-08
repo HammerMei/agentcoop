@@ -672,3 +672,30 @@ ruling; one class (directory safety against a local co-tenant) closed by writing
 boundary. Two blind rounds contaminated by a protocol slip in round 1, none after.
 
 **Status: settled for this PR.**
+
+## 2026-10-07 — PR #195 round 1 (#187: human reset before the mention gate)
+
+**Chain detector:** 1 finding on `360c8a1`, first round, `--`, no chain.
+**Control finding:** none — the log still has no settled finding. Agreement
+**uncorroborated**. Tree untouched until rater 2 reported (the only working-tree change
+during the rating was the unrelated `test_coop_keeper_shipped.py` assertion, not committed
+and not on the finding's path).
+
+Increment: "a human post in a room resets the agent-chain counters for that room/thread
+whether or not it @mentions this bot."
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** RC: an unmentioned human post now resets and is then rejected, so it is neither remembered in `seen_ids` nor does it advance the watermark; a reconnect replay (filter pinned to the outage boundary) resets a second time and an in-flight agent delivery keeps a free turn (P2) | true, and this PR created the class (before, only accepted human posts reset, and those are always remembered) — Q2 passes, not droppable on scope. MM immune: `_remember_seen` runs before the filter (`mattermost/connector.py:1744`). Harm needs H to be the last pre-outage message with no accepted post after it *and* a live agent post inside the replay's dispatch window; consequence is one extra turn, chain still cut at `max_turns+1`. Not `cheap`: the 2-line `sub.remember` on the rejected branch sits in `connector.py`, outside the increment, and reverses the documented "filtered posts are not remembered" rule at `:2452`. Not silent: `reset_all` now logs INFO when a counter was spent. `hours_per_hit 0.05` · `hits_per_year 0.15 (0.01–1)` · `discount 1.0` · `fix 1` · `tax 0.1` → net ≤ 0 | same trace, narrower window: per agent delivery it is filter → normalize → `enqueue` (`put_nowait`) → watermark commit, 5–50 ms for a text post; nothing correlates a reconnect with a live agent post inside it (LLM latency ≫ replay dispatch). `hours_per_hit 0.05 (0.02–0.2)` · `hits_per_year 0.005 (1e-4–0.5)` · `discount 1.0` · `fix 2` · `tax 0.1` → net ≤ 0 across the whole range; lighter than the DROP anchor. Owning layer is the connector's replay idempotence (`seen_ids`/watermark), not the filter line the finding points at. Flagged that remembering a rejected post may suppress an edit that adds the @mention (untraced) | **DROP** — written on the thread. Reopen for free if RC ever adopts MM's pre-filter `_remember_seen` order |
+
+Notes:
+- Adoption: 0 of 1. Verdicts agree and the `hits_per_year` ranges overlap (0.01–1 vs
+  1e-4–0.5) → settled per Step 4, uncorroborated.
+- Severity re-ranked: Codex's P2 reads as a loop-guard weakening; the traced outcome is a
+  bounded `+1` turn in a sub-second race, with the reset line now visible at INFO.
+- No promise-contradicting finding (`requirements.md` §14.3/§14.4 promise reconnect
+  handling and make no loop-bound promise beyond "cut the chain"). By the stop-loss
+  agreed on PR #184, no further Codex round: the only commits after `360c8a1` are a stale
+  test assertion from `250851a` and this log.
+
+**Status: settled for this PR.**
