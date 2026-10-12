@@ -664,6 +664,17 @@ its code, the code is reported.
 | `FoundationAgents/MetaGPT` | `11cdf46` | role agents on a publish/subscribe environment, run in rounds |
 | `crewAIInc/crewAI` | `744bf60` | ordered task list, sequential or manager-driven |
 
+A bare file name resolves under the project's main directory: AutoGen
+`python/packages/autogen-agentchat/src/autogen_agentchat/teams/_group_chat/`
+(Magentic-One files under its `_magentic_one/` subdirectory, tests under
+`python/packages/autogen-agentchat/tests/`); ADK `src/google/adk/agents/`
+and `src/google/adk/flows/llm_flows/core/`; MetaGPT `metagpt/roles/`,
+`metagpt/environment/` and `metagpt/environment/mgx/`; crewAI
+`lib/crewai/src/crewai/` and its `tools/agent_tools/`, `utilities/`, `a2a/`
+subdirectories; QM `src/harness/` and `src/api/`; jinn
+`packages/jinn/src/`; OpenClaw `preflight.ts` is
+`extensions/discord/src/monitor/message-handler.preflight.ts`.
+
 ### B.1 Decision by decision
 
 **Who speaks.** None of the five gateways has a selector: the sender
@@ -674,8 +685,10 @@ to exactly one agent by a first-match binding rule
 (`src/routing/resolve-route.ts:389-435`) and gates bot-authored posts with
 `allowBots: true | false | "mentions"`
 (`extensions/discord/src/monitor/message-handler.preflight.ts:197-199`);
-jinn drops every bot-authored post at the connector
-(`packages/jinn/src/connectors/slack/index.ts:103-106`). QM is the
+jinn drops every bot-authored `message` event at the connector
+(`packages/jinn/src/connectors/slack/index.ts:103-106`; its `app_mention`
+handler checks only `event.user`, so a bot that @-mentions another is not
+verifiably excluded). QM is the
 exception that matters here: a bot with a stake in a thread runs a
 **small-model `YES` / `NO` / `REACT` classifier** before any real turn
 (`src/core/orchestrator.ts:2474-2533`, verdict parse
@@ -797,24 +810,28 @@ heartbeat (`schema/schema.sql:90`; `crates/buzz-acp/src/lib.rs:5940-5948`)
 jinn's "guard state is a fresh start after restart" matching §7's "reset,
 not reconciliation" for counts.
 
-**Failure notices.** Every gateway posts a failure into the room from the
-failing bot's own account, and in all but one the notice is an ordinary
-bot post that other bots can act on — OpenClaw gates it only by `allowBots`
-and the pair guard (`src/auto-reply/reply/agent-runner-error-handler.ts:142-145`),
-QM passes it through the other bots' classifiers
-(`src/slack/message-gating.ts:55`). Buzz is the exception: the notice is
-built with an empty mention list, so it carries no `p` tag and cannot wake
-a mention-gated agent (`crates/buzz-acp/src/pool.rs:5540-5548`). That is
-§3.3's rule — a failure notice queues, never dispatches — implemented at
-the addressing layer. The frameworks either stop the whole team on a
-participant error (AutoGen `_chat_agent_container.py:150-159`; ADK
-`parallel_agent.py:120-131`; MetaGPT `base_env.py:210`, `gather` without
-`return_exceptions`) or return the failure to the delegating agent as a
-tool result (crewAI `base_agent_tools.py:121-124`; jinn `child-error`
-callback `sessions/callbacks.ts:106-118`).
+**Failure notices.** The three gateways with a shared room post a failure
+into it from the failing bot's own account, and in two of them the notice
+is an ordinary bot post that other bots can act on — OpenClaw gates it
+only by `allowBots` and the pair guard
+(`src/auto-reply/reply/agent-runner-error-handler.ts:142-145`), QM passes
+it through the other bots' classifiers (`src/slack/message-gating.ts:55`).
+Buzz is the exception: the notice is built with an empty mention list, so
+it carries no `p` tag and cannot wake a mention-gated agent
+(`crates/buzz-acp/src/pool.rs:5540-5548`). That is §3.3's rule — a
+failure notice queues, never dispatches — implemented at the addressing
+layer. Everywhere else a failure has one addressee: the frameworks either
+stop the whole team on a participant error (AutoGen
+`_chat_agent_container.py:150-159`; ADK `parallel_agent.py:120-131`;
+MetaGPT `base_env.py:210`, `gather` without `return_exceptions`) or
+return the failure to the delegating agent as a tool result (crewAI
+`base_agent_tools.py:121-124`), and jinn and munder-difflin, which have
+no shared room, deliver it to the parent session or the god agent as a
+message that does start that agent's turn (jinn `child-error` callback
+`sessions/callbacks.ts:106-118`; munder `src/main/index.ts:506-518`).
 
-**Human messages.** No project resets a budget on a human post, because
-no project keeps a per-sender budget. The closest precedents: jinn clears
+**Human messages.** No project resets a per-sender count on a human post.
+The closest precedents: jinn clears
 the relay-hop chain and supersedes a running turn when a human writes via
 the web API — but a human writing via Slack only queues behind the running
 turn (`packages/jinn/src/gateway/api.ts:4185-4190, 4280-4286`;
