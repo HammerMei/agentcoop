@@ -787,3 +787,52 @@ Notes:
 
 **Status: settled for this PR** — the confirming round found nothing on round 1's
 fixes and nothing that contradicts a promise.
+
+## 2026-10-12 — PR #198 round 1 (docs/design/multi-agent-enhancement.md, a proposal; no code)
+
+**Chain detector:** 9 findings, 1 round, `--`, no chain (single commit).
+**Control finding:** #181 r9 F1 (`settled: implemented`), presented as a code
+finding F10. Rater 2 decided it DROP-as-stale with "had it been live: FILE,
+owned by the loader" — the settled answer — but **disclosed** it had seen the
+ledger row while verifying, so the control is contaminated and this round's
+agreement is **uncorroborated**. Rater 1 (author) did not score F10.
+**Gates for a doc:** `cheap` = ≤10 doc lines, no new named design concept;
+`silent` = a rule an implementer would follow without noticing it is wrong.
+**Cost:** ~40 min, 1 round, 2 raters.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** moderator authority undefined for a room whose bots span gateways (P1) | true — prod is multi-host; the guarantee "one count per topic per sender" is unscoped. Not `cheap`: needs an ownership decision → owner | true; `cheap` as a scope statement ("one moderator per room, in one gateway; cross-gateway rooms keep today's behaviour") + §7; the protocol Codex asks for is not the cheapest correct fix; `silent` | **FIX** as scope statement (§3.1, §3.6, §7); cross-gateway design left to the owner |
+| **F2** moderator returns one topic id; §3.2 lets a message close one and open another (P1) | true, output shape; `cheap` | true, internal inconsistency; `cheap`; `silent` | **FIX** — list of (topic, action) |
+| **F3** "end of the conversation" undefined (P2) | true; `cheap` | mostly true (ceiling is one terminal event); `cheap` | **FIX** — last open topic closes or a human says so; §7 marks it provisional |
+| **F4** `parallel:` override not restricted to humans (P2) | true; 2 lines | true; role is server-injected so no new concept; `silent` | **FIX** |
+| **F5** late reply after hop timeout starts a second plan on the same topic (P2) | true; ranked above Codex — defeats sequential ordering, not one duplicate | true; §5's residual covers a different consequence | **FIX** — late reply joins the running sequence; one plan per topic |
+| **F6** `done` can skip an explicitly mentioned bot (P2) | true, table vs prose contradiction | true; mostly loud to the human | **FIX** — mentioned bots are required participants |
+| **F7** objection always opens a topic with a fresh budget (P1) | true, bypasses §3.2's own retag guard | true; fix is "tag and validate like any post", not a round cap (new concept) | **FIX** — objection retagged to its topic, runs under remaining budget |
+| **F8** one topic's ceiling triggers the conversation-level round (P2) | true, wrong layer | true; `silent` | **FIX** — ceiling closes that topic only |
+| **F9** step 2 shadows tags only, step 7 grants four decision types (P1) | true; the §8 claim "accuracy known before authority" is false as written | true; wrong rationale is the consequence to price | **FIX** — step 2 shadows every message-only decision, step 5 shadows `next`/`done`, step 7 switches on one type at a time |
+
+Notes:
+- Adoption: 9 of 9. The skill says a rate near 100% usually means triage is not
+  running; recorded as a flag, not excused. The counter-reading: a proposal's first
+  external read, where every finding is a gap in a model that has no code yet and no
+  fix touches a function. The next round is the test — if it also adopts everything,
+  the triage is rubber-stamping.
+- Severity re-ranked by both: F1 > F9 > F7 top three (agree); rater 1 F5 fourth, rater
+  2 F8 fourth (F5 sixth). Both demote F2 from P1 (a table row out of sync with its
+  section) and rater 2 promotes F7/F8 above it. Differences are in ordering, not
+  verdict.
+- Only disagreement: F1's gate — rater 1 sent it to the owner, rater 2 gated it
+  `cheap` as a scope statement. Rater 1 conceded on the method's own rule ("judge
+  against the cheapest correct fix, not the one the finding proposes"): the
+  scope statement is correct for a status-proposal doc, and the owner still decides
+  whether to design cross-gateway moderation (§7). Converged, not escalated.
+- Pattern (rater 2): three roots, not nine findings — (a) topic vs conversation
+  conflated (F2, F3, F8); (b) "the moderator" assumed singular, co-located and
+  pre-validated (F1, F9); (c) rule rows whose wording drops a constraint the prose
+  asserts — which sender, which topic, one plan, mentioned bots reply (F4, F5, F6,
+  F7). The fixes were applied as that sweep: every rule row re-read for sender,
+  topic and scope. §3.1's "a conversation that has exhausted its budget" was
+  caught by the sweep and was not a finding.
+
+**Status: open.** Settles with the confirming round.
