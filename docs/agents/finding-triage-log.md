@@ -836,3 +836,55 @@ Notes:
   caught by the sweep and was not a finding.
 
 **Status: open.** Settles with the confirming round.
+
+## 2026-10-12 — PR #198 round 2 (on `18b8761`)
+
+**Chain detector:** 18 findings over 2 rounds; round 2 fires once — 5 of 9 on the
+round-1 fixes, **streak 1**. Once is noise by the rule; a second consecutive fire
+is the stop signal, so round 3 decides whether this PR patches or re-reads the
+increment.
+**Control finding:** #181 r9 F1 again as G10, to a fresh rater told not to open
+this log. Rater 2 DROPped it as `cannot-occur` with the code chain
+(`config_base_dir()` → `RUNTIME_DIR`, ADR 0003, PR #186) — the settled answer
+reached from the code, uncontaminated. **First corroborated round.**
+**Cost:** ~45 min, 1 round, 2 raters.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **G1** human post in the gap resets per-topic budgets; repeated interjections bypass them (P1) | true as a leftover rule; fix differs from Codex's — keep the reset (human presence is the designed reset, as today and PR #195) but scope it to the topics the post touches; extends not returned | partly true: the "bypass" is by the human, who already holds `extend_limit`; the doc must *choose* a rule; `silent` | **FIX** — scoped reset, stated as deliberate (§3.3) |
+| **G2** one closed topic suppresses a whole multi-topic reply (P1) | true; suffix only when every selected topic is closed | true on wording; consequence overstated (context stays complete, one turn's contribution lost) | **FIX** — mixed case runs with a note; moderator charges the closed part (§3.5) |
+| **G3** `decided`/`discussed` never shadowed (P2) | true | true, low stakes (a misclassified topic still gets the conversation-end round) | **FIX** — step 2 shadow list |
+| **G4** step 7 activates cross-gateway notices the scope forbids (P2) | true, own round-1 inconsistency | true, loud (implementer finds no input) | **FIX** — clause removed (§3.3, §8) |
+| **G5** `close` authoritative in 7, closing round in 8 (P1) | true; proposed moving the per-topic round into step 7 | half: "strands" is wrong — queues are delivered at next turn/flush and step 6 ships first, so strictly better than today's drop; the measurement confound is real; one line, no reorder | **FIX** as rater 2's one line — rater 1 conceded on §3.5's queue delivery and step order: the cheaper fix is correct; step 7's measurement marked provisional until 8 |
+| **G6** TTL is lazy, no timer; "ends by TTL alone" has no event (P1) | true — verified `_gc` has one caller, `check_and_increment` | true; `silent`; doc must choose timer (new concept → scored) or lazy-with-stated-cost | **FIX** — lazy, stated: closed at next inbound, round runs before the new conversation; a silent room has nothing waiting (§3.4) |
+| **G7** fallback starts with empty/stale per-sender counters (P1) | true; consequence bounded to one budget window, degraded+logged — state it and accept (§14.3) | true; scored: `hours_per_hit` 0.3 · `hits_per_year` 0.6–9 (outages 2–10 × 3 operators × P(chain active) 0.1–0.3) · discount 1.0 · one sentence 0.1 h vs dual-write 4 h + 1 h/yr tax → sentence FIX, dual-write FILE at best | **FIX** — one sentence: the per-sender store keeps counting under moderation, fallback starts from live counts (§3.6). Codex's P1 demoted by both |
+| **G8** `@all` replies each start a competing sequential plan (P1) | true, the round's biggest; same root as r1 F5 | true; `silent`; "followed literally it reproduces today's fan-out, squared" | **FIX** — structural: "attribution before dispatch" paragraph (§3.3) |
+| **G9** queue of a bot the relevance filter excluded survives the boundary (P2) | true; deliver, never clear | true; "clear" contradicts "nothing is dropped" — only deliver is correct | **FIX** — every queue drained at every boundary (§3.5) |
+
+Notes:
+- Adoption: 9 of 9 again (18 of 18 over two rounds). Flagged in round 1 as the
+  rubber-stamp signal; this round's test was whether the raters would *disagree
+  with Codex's fixes*, and they did on G1 (direction), G5 (reorder not needed),
+  G6 (no timer), G7 (no dual-write) and G9 ("clear" rejected). The verdicts are
+  FIX; the fixes are not Codex's.
+- Severity re-ranked by both: G8 first; rater 1 G5 > G6, rater 2 G6 > G2 > G1 > G5.
+  Codex's six P1s hold for three (G8, G6, G2/G5 by one rater each); G7 demoted
+  by both to a one-line statement.
+- One concession, with evidence: rater 1 dropped the step-7 reorder for G5 on
+  §3.5's queue-delivery rule and the step order (6 before 7) — the "strands"
+  half of the finding is false, which leaves only the measurement confound.
+- Pattern (rater 2, taken): two roots. (1) *Attribution before dispatch was never
+  stated* — G1, G2, G8, G9 and r1 F5 are one paragraph: every post is attributed
+  to topics, then to a running plan, before any dispatch; replies made under a
+  plan join it; a plan ends when its selected bots have replied, timed out or
+  self-terminated. Written into §3.3; the late-reply and human-gap paragraphs are
+  now cases of it. (2) *§8 did not enumerate the §3.1 decision table* — G3, G4,
+  G5 are one missing cross-check; a table mapping each decision to its shadow
+  step, activation step and measurement is now in §8 (the doc equivalent of the
+  "test that enumerates the surface").
+- Two rounds, two patterns, both structural: a sign the proposal was written
+  rule-by-rule and the invariants were implicit. If round 3 fires the chain, the
+  response is to re-read §2's principles for a third implicit invariant, not to
+  patch.
+
+**Status: open.** Settles with round 3.

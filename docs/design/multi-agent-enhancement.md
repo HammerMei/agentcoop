@@ -191,8 +191,30 @@ speak, and today it is dispatched like any agent post: the receiving bots
 run turns on it, fail or self-terminate, and in the failing case post their
 own notices, which trigger the next round. The plan for a notice the
 gateway itself produced is a fixed rule, not a classification: no turn,
-queue only. A notice from a bot another gateway runs looks like an
-ordinary agent post, and there the moderator classifies it the same way.
+queue only. A notice from a bot another gateway runs is outside this
+proposal's scope (§3.1); it would become a moderator decision only if
+cross-gateway moderation is built (§7).
+
+**Attribution comes before dispatch.** Every inbound post is attributed
+before any dispatch decision is made, and the attribution answers three
+questions in order:
+
+1. *Which topics?* The moderator's topic list (§3.1), applied to the post's
+   tags. Counts belong to the topic, and nothing but `close` ends them.
+2. *Under which plan?* A reply made by a bot that a plan selected is that
+   plan's output, not a new trigger: it joins the plan and never starts one.
+   A parallel plan ends when every selected bot has replied, timed out or
+   self-terminated; a sequential plan ends at `done` or when its required
+   participants are exhausted. When a plan ends, the moderator looks at its
+   replies once and decides `next` / `done` for the topic — so an `@all`
+   round is followed by at most one sequential continuation, not by one
+   plan per reply. One topic has at most one plan in flight.
+3. *Does it start a plan?* Only a post attributed to no running plan — a
+   human post, or an agent post made outside any plan, such as a scheduled
+   fire — is dispatched by the table above.
+
+The rules that follow — hop timeouts, late replies, the human gap — are
+cases of this paragraph, not exceptions to it.
 
 **Parallel versus sequential for multiple mentions** is decided by the
 moderator on one criterion: *do the later replies gain from seeing the
@@ -225,18 +247,24 @@ acts before the hop starts (a turn is in flight); this one acts inside it
 (the bot was free but has not answered). When it fires the sequence moves
 to the next bot; the slow bot's turn keeps running, and its reply, when it
 arrives, is posted — classified into its topic and counted against the
-budget — not dropped. While the sequence it timed out of is still running,
-the late reply **joins that sequence**: it becomes part of what the
-moderator sees at the next hop decision, and it does not start a plan of
-its own. Only a late reply that lands after the sequence has ended is a
-new inbound post. One topic has at most one plan in flight. A mentioned
-bot moved to the end of the sequence is under the same timeout, otherwise
+budget — not dropped. It is attributed to the plan that selected the bot
+(attribution rule 2): while that plan is still running it is part of what
+the moderator sees at the next hop decision; after the plan has ended it
+is a reply to an ended plan, and the moderator decides once whether it
+warrants a `next`. It never starts a plan of its own. A mentioned bot
+moved to the end of the sequence is under the same timeout, otherwise
 "moved to the end" is the stall by another name.
 
 **A gap between hops leaves room for the human.** Sequential dispatch holds
 `human_gap_seconds` after each reply, or after a hop timeout, before
 triggering the next bot. A human post during the gap takes the next slot
-and resets budgets as today. The value is a tuning question (§6).
+and ends the running plan. It resets the per-sender counts of **the topics
+it is attributed to** — deliberately, as today: a human in the exchange is
+the strongest evidence it is not a runaway, and the reset is the human's
+lever for keeping a topic alive. Topics the post does not touch keep their
+counts, and extends already consumed are not returned, so repeated
+interjections buy one `max_turns_per_topic` window each, never a fresh
+`extend_limit`. The gap's value is a tuning question (§6).
 
 **`@all` keeps its redundancy.** Parallel dispatch cannot avoid it. The
 human chooses it when they want every voice; the cost is theirs to accept.
@@ -265,7 +293,13 @@ When the round runs is decided by whether the topic produced a decision:
 TTL, or at the ceiling — or when a human says it has. That is the whole
 boundary rule, and it is provisional (§7): a room is one conversation at a
 time, the next human post after the end opens the next one, and an
-agent-only room ends its conversations by TTL alone.
+agent-only room ends its conversations by TTL. TTL expiry is observed at
+the next inbound post, as today (`_gc` in `gateway/core/agent_chain.py`
+runs only from the budget check; scheduled fires are inbound posts): a
+room that falls silent is closed late, when something next arrives, and
+its closing round runs before the new conversation opens. Nothing in a
+silent room is waiting on that round, so the delay costs nothing; a timer
+would be a new mechanism for no observable gain.
 
 At the end of a conversation the round is structured: a full model
 summarises the conclusions (once per conversation — this is the judgement
@@ -297,15 +331,18 @@ accumulate the whole conversation unseen. When its queue passes
 `queue_flush_threshold` posts, the gateway grants it a catch-up turn at the
 next hop boundary: it receives the queued batch with the usual instruction
 — add something, or answer with the token. If it posts, the post counts
-against its topic budget like any other. The closing round already flushes
-every bot at the end of a topic or conversation, so this rule only matters
-in a long conversation that has not reached one; it is a bounded-lag versus
+against its topic budget like any other. Every queue is drained at every
+boundary: a bot in the closing round receives its queue there, and a bot
+the relevance filter left out receives it as a plain batch — context, no
+turn — before the next conversation's first post, so nothing arrives as
+stale context later. This rule therefore only matters in a long
+conversation that has not reached a boundary; it is a bounded-lag versus
 turn-cost knob, and it also restores, bounded, the chance for an
 unaddressed bot to correct a mistake it has been watching.
 
 A bot that was about to speak — selected by the plan, or explicitly
-mentioned — but whose topic is closed or whose extend limit is reached runs
-its turn with a suffix:
+mentioned — when **every topic it was selected for** is closed or at its
+ceiling runs its turn with a suffix:
 
 > Agent chain limit reached: your reply to this message will not be posted.
 > If it matters, say it again the next time you are allowed to speak. You
@@ -315,6 +352,13 @@ The turn runs; its reply is suppressed by the same path that already handles
 a self-terminated reply. The bot's context stays complete, it knows what
 happened, and there is nothing to buffer. The cost is one suppressed turn,
 which the suffix invites the agent to make cheap.
+
+When only some of the bot's topics are closed, the turn runs normally with
+a note naming the closed ones. The reply is posted; the moderator tags it,
+and a part that continues a closed topic is charged to that topic as any
+post would be. Suppressing the whole reply for one closed topic would lose
+the open topic's contribution, which is the divergence this section exists
+to remove.
 
 ### 3.6 Fallbacks
 
@@ -329,7 +373,10 @@ which the suffix invites the agent to make cheap.
   moderator in place the TTL is the fallback for a moderator that is
   unavailable, not the primary reset, so it can stay long.
 - **Moderator unavailable.** Dispatch falls back to today's behaviour:
-  parallel trigger, per-sender budget. Degraded, logged, never silent.
+  parallel trigger, per-sender budget. The per-sender store keeps counting
+  while the moderator is healthy — it already exists and costs nothing to
+  leave running — so the fallback starts from live counts, not empty ones.
+  Degraded, logged, never silent.
 
 ---
 
@@ -446,12 +493,12 @@ what a bot sees. Production stays on today's behaviour throughout.
 | # | Step | Needs | What it proves | Measured by |
 |---|---|---|---|---|
 | 1 | **Topic tags in the agent prompt.** Agents name the topic they answer and any they open; the gateway parses and logs the tag, nothing else changes. | — | Agents tag reliably enough to be a signal (§6.1 precondition). | Tag presence rate; hand-check a sample. |
-| 2 | **Moderator in shadow.** The classifier runs on every inbound message and logs every decision it can make from messages alone — topic tags `accept` / `retag`, `extend` / `close` at each point today's Layer 2 fires, `parallel` / `sequential` for each multi-mention message — and none of it has any effect. This is the first moderator wiring, without authority. | 1 | Accuracy of each decision type (§6.1, §6.3), measured separately. | Agreement with hand labels on the lab transcript, per decision type. |
+| 2 | **Moderator in shadow.** The classifier runs on every inbound message and logs every decision it can make from messages alone — topic tags `accept` / `retag`, `extend` / `close` and `decided` / `discussed` at each point today's Layer 2 or TTL closes an exchange, `parallel` / `sequential` for each multi-mention message — and none of it has any effect. This is the first moderator wiring, without authority. | 1 | Accuracy of each decision type (§6.1, §6.3), measured separately. | Agreement with hand labels on the lab transcript, per decision type. |
 | 3 | **Per-bot message queue.** A message can enter a bot's queue without starting a turn; the queue is delivered as a batch at the bot's next turn; `queue_flush_threshold` grants a catch-up turn. First consumer: the gateway's own failure notices, which today each start a turn (§3.3). | — | The "no turn, still seen" primitive works; the error cascade is gone. | Error-notice turns per failure: today 4, target 0. |
 | 4 | **Rule-based dispatch plan.** The plan is computed from addressing alone — single mention, `@all`, multi-mention in mention order, no mention in random order, explicit `parallel:` / `sequential:` — with no moderator (§3.3 table). | 3 | The plan model fits the room without classification. | Posts per human prompt (today ~25 in the lab); self-termination rate. |
 | 5 | **Sequential engine.** Runs a plan hop by hop: busy skip, `hop_timeout_seconds`, `human_gap_seconds`, late replies joining the running sequence (§3.3). The moderator shadows `next` / `done` here, against the rule-based order, since this is the first point those decisions have an input. | 3, 4 | Sequential raises self-termination and leaves room for the human (§6.2, §6.4); `next` / `done` accuracy. | Self-termination rate under sequential vs today; human posts landing inside a gap; shadow `next` vs the bot that actually had something to say. |
 | 6 | **Inform instead of drop.** Layer 2 overflow runs the turn with the suffix and suppresses the reply (§3.5). Independent of the rest; can ship any time. | — | A bot's context no longer diverges from the room (issue #190). | Dropped posts: today 21 of 207 lab turns, target 0. |
-| 7 | **Moderator with authority, one decision type at a time.** Each decision the shadow measured is switched on separately, behind its own flag, in the order its shadow accuracy earned: topic budget with `extend` / `close` and `extend_limit` (replaces Layer 2), then multi-mention mode, then `next` / `done`, then failure notices from other gateways. A type whose shadow accuracy is not known stays in shadow. | 2, 5, 6 | Each decision type beats the rule it replaces from step 4. | Posts per prompt and self-termination rate vs step 4, per switch-on. |
+| 7 | **Moderator with authority, one decision type at a time.** Each decision the shadow measured is switched on separately, behind its own flag, in the order its shadow accuracy earned: topic budget with `extend` / `close` and `extend_limit` (replaces Layer 2), then multi-mention mode, then `next` / `done`. A type whose shadow accuracy is not known stays in shadow. | 2, 5, 6 | Each decision type beats the rule it replaces from step 4. | Posts per prompt and self-termination rate vs step 4, per switch-on. **Provisional until step 8**: until the closing round exists, a `close` silences the correction it would have invited, so a reduction in posts measured here is an upper bound, re-measured at step 8. |
 | 8 | **Closing round.** Parallel per-topic / per-conversation round, conversation summary, `agree` / `object` (§3.4). | 7 | Converged topics go quiet; objections are caught at the right time. | Token-only share in the round (lab, 2026-10-12: 4 of 5). |
 
 Steps 1–2 and 3–5 are independent chains and can run in parallel; 6 is
@@ -459,6 +506,17 @@ independent of both. The moderator exists from step 2 but decides nothing
 until step 7, and step 7 gives it authority only over decision types whose
 shadow accuracy was measured first — in step 2 for the ones that need only
 messages, in step 5 for `next` / `done`.
+
+Every row of the §3.1 decision table has a shadow step, an activation step
+and a measurement; this table is the check that none was skipped:
+
+| §3.1 decision | Shadowed in | Activated in | Measured by |
+|---|---|---|---|
+| topics a message touches; `accept` / `retag` | 2 | 7 (budget) | agreement with hand labels |
+| `extend` / `close` | 2 | 7 (budget) | hand-checked at each ceiling; posts per prompt, provisional until 8 |
+| `parallel` / `sequential` for multi-mention | 2 | 7 (mode) | precision against a hand-labelled set (§6.3) |
+| `next` / `done` | 5 | 7 (`next` / `done`) | shadow `next` vs the bot that had something to say |
+| `decided` / `discussed` | 2 | 8 | objections caught at topic close vs at conversation end |
 
 ---
 
