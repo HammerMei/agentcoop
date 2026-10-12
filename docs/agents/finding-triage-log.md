@@ -888,3 +888,55 @@ Notes:
   patch.
 
 **Status: open.** Settles with round 3.
+
+## 2026-10-12 — PR #198 round 3 (on `65d98b4`) — chain stop
+
+**Chain detector:** 28 findings over 3 rounds; round 3 fires again — 6 of 10 on
+the round-2 fixes, **streak 2 — STOP**. Per the rule, no patch round: the
+increment was re-read and the owner chose how to end.
+**Control finding:** none convened — no second rater this round, because the
+stop rule replaces triage-and-fix with a decision about the chain itself.
+**Cost:** ~25 min, 1 round, 1 rater + owner decision.
+
+**What the chain is.** Not out-of-scope work: every finding is inside the doc.
+It is a proposal being specified by review — round 2 added a plan lifecycle in
+prose, round 3 enumerated the states the prose missed (`failed`, a busy bot in
+parallel mode, a mid-hop human post, a reopened decided topic). A round 4 would
+enumerate what the state table misses. The increment is "a design proposal";
+the specification of each mechanism belongs to its §8 step's PR, where it can
+be tested instead of argued.
+
+**Owner's decision (option A):** one structural close-out, no further Codex
+round, then merge. Three wrong statements fixed (wrong rationale outranks a
+small gap — CLAUDE.md); the plan lifecycle written once as a participant-state
+table so the states are enumerated rather than implied; implementation-level
+findings recorded in §7 with a default answer and the step that owns them.
+
+| | author | outcome |
+|---|---|---|
+| **H8** "suppressed by the same path as self-termination" — the token path posts surrounding text (P1) | true, verified `agent_turn_runner.py:151-160`; a wrong rationale in the doc | **FIX** — forced-suppression result, token path explicitly not reused (§3.5) |
+| **H9** "nothing before step 7 changes what a bot sees" (P2) | true, false claim; steps 3–6 all change it | **FIX** — invariant restated: moderator non-authoritative before 7; each step measured against the previous (§8) |
+| **H10** shadow `next` metric is counterfactual (P1) | true; the rule-selected bot speaks first and changes the state | **FIX** — hand labels on replayed snapshots (§8 step 5, coverage table) |
+| **H5** failed turn is not a terminal plan state (P1) | true | **FIX** — `failed` row in the participant-state table (§3.3) |
+| **H6** a busy bot in a parallel plan later sees peers' replies (P2) | true, contradicts §3.3's own independence rationale | **FIX** — parallel participants receive the triggering post only; busy bot gets the same snapshot (§3.3) |
+| **H1** mid-hop human post vs the one-plan invariant (P1) | true; the gap rule was the only interrupt | **FIX** — `interrupted` row: a human post on the topic ends the plan at any point (§3.3) |
+| **H7** decided topic corrected in its closing round has no reopen (P1) | true | **FIX** — substantive closing-round reply reopens the topic, sequential dispatch (§3.4) |
+| **H3** only a human post opens the next conversation; agent-only rooms have none (P2) | true, one phrase | **FIX** — any post attributed to no running plan (§3.4) |
+| **H2** context-only delivery primitive does not exist (P2) | true (`send`/`stream` both run a turn; handoff uses `send`); step 3's concern | **§7 open question** with default: costed as a suppressed turn until a second consumer appears |
+| **H4** moderator recovery after fallback undefined (P1) | true; the owner added that an in-memory queue has the same problem on restart — one question, two triggers | **§7 open question** with default: reset, not reconciliation; queues rebuilt from room history (the platform is durable); step 7 decides against an observed outage |
+
+Notes:
+- Adoption: 8 FIX + 2 recorded with defaults; nothing dropped. Codex's six P1s:
+  H8 holds; H1/H5/H7 are table rows; H4/H10 are design-level but belong to a
+  step's PR. H6 (P2) ranked above several P1s — it contradicts the doc's own
+  stated reason for parallel mode.
+- Third structural root, as predicted in round 2: *the plan's states were
+  implied, not enumerated.* The table in §3.3 now says "where a rule below and
+  the table disagree, the table is wrong and should be fixed" — one place to
+  look, which is what an enumerating test gives code.
+- The chain's lesson for the next design doc: write the state tables first and
+  the prose as their cases; prose rules invite a reviewer to find the state
+  the prose skipped, one per round, indefinitely.
+
+**Status: settled for this PR** — closed by the stop rule and an owner decision,
+not by a clean round. The ten findings are decided; none is open.
