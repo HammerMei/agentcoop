@@ -1135,6 +1135,24 @@ Both products put the whole weight of loop prevention and of "nothing to
 add" on the prompt, and both make silence free at the transport: in Buzz
 an agent that does not call `send` has posted nothing, in munder-difflin
 an agent that writes no file has sent nothing. Neither counts turns.
+
+**Buzz against this gateway today.** The two look alike — peers on a
+shared chat, addressed by mention, no coordinator, a full model call to
+decide to stay silent — and differ on one rule that explains why one has
+a chain limit and the other does not. Here, the mention gate applies to
+humans only: a post from another agent is dispatched to every bot in the
+room whether or not it names them (`gateway/connectors/rocketchat/normalize.py:196-214`,
+"agent senders bypass @mention requirement (listen-all for agents)";
+`gateway/connectors/mattermost/normalize.py:222`). In Buzz the gate
+applies to agents exactly as to humans, at the relay, and the receiver's
+author gate applies on top. So an agent's post here wakes N−1 bots, each
+of which must spend a turn deciding whether to answer, and the per-sender
+budget exists to bound what that creates; an agent's post in Buzz wakes
+the agents it names and no one else, and the cost of that is the other
+half of B.1's Buzz entry — an agent that was not named has not seen the
+post, and catches up only in a thread or by pulling. §7's "unmentioned
+bot posts as queue-only" is this one rule flipped, with the queue
+supplying the context Buzz's design leaves to the agent.
 Neither has a mechanism for several agents to converge on one answer in
 the room; Buzz has no synthesis step at all, munder-difflin's happens in
 one agent's head. Neither has been exercised with the number of agents
