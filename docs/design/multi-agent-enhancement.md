@@ -349,11 +349,28 @@ A bot the dispatch plan does not select runs **no turn**. The message queues
 and the bot sees it in its next batch or in the closing round (§3.3, §3.4).
 This is where the saving over today comes from.
 
+**The queue is not stored.** "Queue" throughout this document names the
+room's posts since the bot's **watermark** — the id of the last post
+delivered to its session — and nothing else. At the bot's next turn the
+gateway fetches the room's posts after the watermark from the platform,
+the query that history handoff and reconnect replay already run
+(`Connector.replay_room_since`, `gateway/core/connector.py`), delivers them
+with the triggering post, and advances the watermark. The platform holds
+every post durably, so the gateway holds one id per bot per room, nothing
+is copied into N per-bot structures, and a gateway restart changes
+nothing: the next turn runs the same query. This is how Buzz delivers a
+thread's history to an agent that was not addressed (Appendix B.2), and
+it was adopted from there on 2026-10-13 in place of a stored per-bot
+queue. The cost is one history fetch per dispatched turn, bounded by the
+flush rule below.
+
 **The queue is bounded.** A bot that is never selected would otherwise
-accumulate the whole conversation unseen. When its queue passes
-`queue_flush_threshold` posts, the gateway grants it a catch-up turn at the
-next hop boundary: it receives the queued batch with the usual instruction
-— add something, or answer with the token. If it posts, the post counts
+accumulate the whole conversation unseen. The gateway sees every post in
+the room, so it counts posts past each bot's watermark; when the count
+passes `queue_flush_threshold`, the gateway grants the bot a catch-up turn
+at the next hop boundary: it receives the batch with the usual instruction
+— add something, or answer with the token. The count is a cache of the
+query and is re-derived by it after a restart. If it posts, the post counts
 against its topic budget like any other. Every queue is drained at every
 boundary: a bot in the closing round receives its queue there, and a bot
 the relevance filter left out receives it as a plain batch — context, no
@@ -515,23 +532,13 @@ to remove.
   meanwhile — one question, two triggers. The default answer is **reset,
   not reconciliation**: on recovery every topic is closed without a
   closing round, no plan is in flight, and the next post opens a new
-  conversation; the degraded window is logged. Queues are the exception,
-  because the platform already holds every post durably: a queue is
-  rebuilt from room history since the bot's last delivered post, the way
-  history handoff rebuilds a new session today, so "nothing is dropped"
-  survives a restart. Whether reconciliation of counts is ever worth its
-  cost is for the step 7 PR to decide against an observed outage.
-- **Queue as watermark plus fetch (step 3, Appendix B).** §3.5 describes
-  a stored per-bot queue and this section's recovery answer rebuilds it
-  from room history. Buzz has no stored queue at all: a per-session set
-  of delivered event ids, and a fetch of the thread at dispatch time with
-  the delivered ones removed. The platform holds the posts, so the queue
-  is a watermark and a query, and restart recovery is the normal path
-  rather than an exception. The history handoff that seeds a new session
-  is already that query. Whether step 3 stores anything beyond the
-  watermark — the flush threshold needs a count, which a query can also
-  give — is for the step 3 PR; the stored queue is the default only
-  because §3.5 was written first.
+  conversation; the degraded window is logged. Queues need no recovery:
+  a queue is a watermark and a query (§3.5), so the next turn after a
+  restart delivers exactly what it would have, and the only per-bot state
+  to persist is the watermark itself — one post id per bot per room,
+  alongside the room watermark the connector already keeps. Whether
+  reconciliation of counts is ever worth its cost is for the step 7 PR to
+  decide against an observed outage.
 - **Age-based queue flush.** The queue bound is a count. Whether a queue
   that is small but old also warrants a catch-up turn is open; nothing in
   the logs says yet that it does.
@@ -589,7 +596,7 @@ moderator. Production stays on today's behaviour throughout.
 |---|---|---|---|---|
 | 1 | **Topic tags in the agent prompt.** Agents name the topic they answer and any they open; the gateway parses and logs the tag, nothing else changes. | — | Agents tag reliably enough to be a signal (§6.1 precondition). | Tag presence rate; hand-check a sample. |
 | 2 | **Moderator in shadow.** The classifier runs on every inbound message and logs every decision it can make from messages alone — topic tags `accept` / `retag`, `extend` / `close` and `decided` / `discussed` at each point today's Layer 2 or TTL closes an exchange, `parallel` / `sequential` for each multi-mention message — and none of it has any effect. This is the first moderator wiring, without authority. | 1 | Accuracy of each decision type (§6.1, §6.3), measured separately. | Agreement with hand labels on the lab transcript, per decision type. |
-| 3 | **Per-bot message queue.** A message can enter a bot's queue without starting a turn; the queue is delivered as a batch at the bot's next turn; `queue_flush_threshold` grants a catch-up turn. First consumer: the gateway's own failure notices, which today each start a turn (§3.3). | — | The "no turn, still seen" primitive works; the error cascade is gone. | Error-notice turns per failure: today 4, target 0. |
+| 3 | **Per-bot watermark.** A message can reach a bot without starting a turn: the bot's watermark stays behind it, and at the bot's next turn the gateway fetches the room's posts past the watermark and delivers them as a batch (§3.5); `queue_flush_threshold` grants a catch-up turn. First consumer: the gateway's own failure notices, which today each start a turn (§3.3). | — | The "no turn, still seen" primitive works; the error cascade is gone. | Error-notice turns per failure: today 4, target 0. |
 | 4 | **Rule-based dispatch plan.** The plan is computed from addressing alone — single mention, `@all`, multi-mention in mention order, no mention in random order, explicit `parallel:` / `sequential:` — with no moderator (§3.3 table). | 3 | The plan model fits the room without classification. | Posts per human prompt (today ~25 in the lab); self-termination rate. |
 | 5 | **Sequential engine.** Runs a plan hop by hop: busy skip, `hop_timeout_seconds`, `human_gap_seconds`, late replies joining the running sequence (§3.3). The moderator shadows `next` / `done` here, against the rule-based order, since this is the first point those decisions have an input. | 3, 4 | Sequential raises self-termination and leaves room for the human (§6.2, §6.4); `next` / `done` accuracy. | Self-termination rate under sequential vs today; human posts landing inside a gap; shadow `next` against hand labels on replayed snapshots — the live room cannot score it, because the rule-selected bot speaks first and changes the state the shadow choice was made in. |
 | 6 | **Inform instead of drop.** Layer 2 overflow runs the turn with the suffix and suppresses the reply (§3.5). Independent of the rest; can ship any time. | — | A bot's context no longer diverges from the room (issue #190). | Dropped posts: today 21 of 207 lab turns, target 0. |
@@ -1210,8 +1217,9 @@ nothing earns a turn from the size of the gap. The first and second are
 the design choices that separate the two; the construction — watermark
 plus fetch, no stored structure — is one this gateway already has half
 of, in the history handoff that seeds a new session
-(`gateway/core/history_context.py`), and §7 now asks whether step 3
-needs a stored queue at all.
+(`gateway/core/history_context.py`) and in the reconnect replay
+(`Connector.replay_room_since`). §3.5 adopted it on 2026-10-13: the queue
+is a watermark and a query, not a stored structure.
 Neither has a mechanism for several agents to converge on one answer in
 the room; Buzz has no synthesis step at all, munder-difflin's happens in
 one agent's head. Neither has been exercised with the number of agents
