@@ -716,7 +716,30 @@ no context is fetched at all — `ContextTarget::None`, "plain channel"
 Otherwise B can pull: the prompt tells it to catch up once with
 `buzz messages get --channel <UUID> --since <ts>` (`base_prompt.md:78`).
 `--subscribe all` makes B receive every event of the configured kinds,
-each as a turn it may end silently (`config.rs:55-59`).
+each as a turn it may end silently (`config.rs:55-59`), still subject to
+the author gate.
+
+So an agent's view of a channel is incomplete by construction, and the
+design says so to the agent rather than repairing it. The session-model
+prompt tells each session it is "not the only copy", that sessions "do
+NOT share conversation context", and to "answer from what you can verify
+(core memory, workspace files, relay messages)"
+(`crates/buzz-acp/src/session_model_channel.md`). There is no rule to
+fetch the channel before replying: the harness fetches thread history
+automatically when the turn is in a thread, and otherwise the prompt's
+only pointer is "to catch up once, use `buzz messages get --channel
+<UUID> --since <ts>`", offered as the alternative to waiting on a tool
+call (`base_prompt.md:78`); the heartbeat, off by default, checks the
+feed for unanswered mentions and pending approvals, not for channel
+context (`lib.rs:5940-5952`; `config.rs:308-310`). The mitigation is
+structural: `SessionPolicy::Thread` makes the thread the unit of
+collaboration, with its history fetched on every mention, and the prompt
+confines agent-to-agent traffic to completed work. The gap this leaves —
+two agents mentioned in one top-level post, or an agent joining a thread
+late past the context limit — is the same divergence issue #190
+describes here, with one difference: in Buzz the missing posts are the
+ones that did not name the agent, which the agent is told to expect; here
+they are whichever posts exceeded a counter.
 
 **Agent to agent.** Yes, by mention, and it is a designed path: the prompt
 requires an agent that finishes delegated work to `@mention` the
