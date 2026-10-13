@@ -83,8 +83,8 @@ nothing to check.
 |---|---|---|
 | G1 | **Mention gate** | The same for human and agent senders. A bot the post names (`@bot`, `@all`, a room-wide mention) gets a turn, subject to G3. A bot it does not name goes to G2. |
 | G2 | **Mode for unaddressed bots** | Per room; a thread overrides it; set at runtime. `snooze`: no turn. `listen`: a turn — serial, in roster order, each seeing the previous reply, token if nothing to add. `catch-up` (default): no turn now; the sweeper (D2) grants one when the backlog is large or old. |
-| G3 | **Rate limit** | Per thread. After N agent turns since the last reset the thread **pauses**: posts are still delivered (D1), no agent turn starts, one notice is posted. Resets: a human post, the orchestrator's `extend:`, or `ttl_seconds` of silence. A pause lands at a plan boundary. N has a per-mode default; `limit:` overrides it for the thread. |
-| G4 | **Authority** | Control words are honoured from owner-role humans and from the bot named by `orchestrator:` for that thread. From any other sender they are text. |
+| G3 | **Rate limit** | Per thread. After N agent turns since the last reset the thread **pauses**: posts are still delivered (D1), no agent turn starts, one notice is posted. Turns of the thread's designated orchestrator bot do not count; every other agent turn does, including plan members and hops. Resets: a human post, the orchestrator's `extend:`, or `ttl_seconds` of silence. A pause lands at a plan boundary. N has a per-mode default; `limit:` overrides it for the thread. |
+| G4 | **Authority** | Control words are honoured from owner-role humans and from the bot named by `orchestrator:` for that thread. `orchestrator:` itself is honoured from humans only. From any other sender control words are text. |
 
 ### Delivery
 
@@ -257,15 +257,22 @@ and every participant buffers every broadcast until selected (D1's
 effect). Google ADK, MetaGPT and crewAI are task pipelines; parallel
 branches in all three see only the fan-out point, which is P1's `parallel:`.
 
-**What the literature says about debate.** Multi-agent debate among copies
-of one model does not reliably beat self-consistency or majority voting on
-single-answer benchmarks, and a persona told to disagree flips correct
-answers; mixing different models is what produces the gain, and the gain
-comes from questions one model gets right and another wrong. For a room:
-a parallel blind round plus a synthesis captures most of the value, one
-bounded revision round captures the rest, and agents that differ — in
-model, information or tools — are worth hearing from each other; agents
-that are copies trading opinions are not.
+**What the literature says about debate.** On single-answer benchmarks,
+multi-agent debate among copies of one model does not reliably beat
+self-consistency (Smit et al., ICML 2024, arXiv:2311.17371; Zhang et al.
+2025, arXiv:2502.08788) or majority voting (Choi et al. 2025,
+arXiv:2508.17536), and costs more at an equal number of responses (Huang
+et al., ICLR 2024, arXiv:2310.01798, Table 7). A persona instructed to
+disagree flips correct answers (Smit et al.). Mixing different models is
+what produces a gain, and the gain comes from questions one model gets
+right and another wrong (Zhang et al., §4). A synthesising aggregator over
+independent proposals beats selecting one proposal (Wang et al. 2024,
+arXiv:2406.04692). None of these studied a chat room with a human in it;
+the inference this document draws is that a parallel blind round plus a
+synthesis captures most of the value, one bounded revision round captures
+the rest, and agents that differ — in model, information or tools — are
+worth hearing from each other, while agents that are copies trading
+opinions are not.
 
 ---
 
@@ -311,6 +318,9 @@ and 5; 7 on 5; 8 on 5 and 6.
   the room's history, so gateways applying the same rules to the same
   history converge without a coordinator, up to timing races. Not
   specified here.
+- **Glossary.** "Orchestrator", "mode", "watermark", "sweeper" and
+  "control word" are new terms; if this proceeds they go into `CONTEXT.md`
+  with the synonyms to avoid (moderator, judge, router, queue).
 - **Human posts inside a bot-run meeting.** A human post names nobody →
   the chair gets a turn. Whether it should also end the plan, or only
   queue for the chair, is a skill question to settle in task 7.
