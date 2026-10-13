@@ -3,9 +3,9 @@
 Status: **proposal, not implemented.** This document proposes replacing the
 per-sender agent-chain limit with a moderated model for multi-agent rooms. It is a design
 direction, not a specification; §6 lists the assumptions that have to hold
-before any of it is built. Appendix B describes how nine other projects
-run several agents, each on its own terms, and where this proposal sits
-among them.
+before any of it is built. Appendix B reads nine other projects at code
+level, sorted by whether they position agents as teammates, and evaluates
+the two that do against the questions this document asks.
 
 ---
 
@@ -645,12 +645,16 @@ turns. Thirteen turns, two posts.
 ## Appendix B — How other projects run several agents
 
 Nine projects were read at code level on 2026-10-12. Each is described on
-its own terms first — what it is for, how its agents are arranged, how an
-agent reaches another agent and what keeps that from looping, and whether
-a human can address each agent directly — and judged against the use case
-it claims, not against this proposal. B.2 groups them by topology, because
-the loop mechanism follows from the topology; B.3 is the only part that
-looks back at this document. Citations are `path:line` at the commit in
+its own terms — what it is for, how its agents are arranged, how an agent
+reaches another agent and what keeps that from looping, and whether a
+human can address each agent directly — and judged against the use case
+it claims, not against this proposal. B.1 sorts them by product intent:
+the two that position agents as **teammates** — several agents with
+personas, in one place, talking to humans and to each other — come first
+and are read in depth, because that is this gateway's position; the seven
+that position agents as a single assistant or as workers given tasks are
+summarised after. B.2 draws out how the two teammate products handle the
+questions this document asks; B.3 is the only part that looks back at it. Citations are `path:line` at the commit in
 the table; `[docs-only]` marks a claim found in a README and not traced to
 code. Where a project's own description disagreed with its code, the code
 is reported.
@@ -678,6 +682,12 @@ and `src/google/adk/flows/llm_flows/`; MetaGPT `metagpt/roles/`,
 
 ### B.1 Project by project
 
+**Positioned as teammates.** The README of each says so in its own words:
+Buzz — "people and agents building together in the same room… the same
+affordances as a human teammate, a different keypair" (`README.md`,
+`ARCHITECTURE.md:5` "first-class equals"); munder-difflin — "an office of
+your clones… agents that message, route, and remember" (`README.md:7,24`).
+
 #### Buzz
 
 **Multi-agent, and for what.** Yes. The product is a team chat where an
@@ -691,24 +701,53 @@ CLI agent; N agents are N processes.
 room-level coordinator; any member can address any member by `p`-tag
 mention, and the relay fans out.
 
-**Agent to agent.** An agent reaches another by mentioning it in a post.
-The receiving harness subscribes with a relay-side filter on its own
-pubkey, so a post that does not mention it never reaches the process
-(`crates/buzz-acp/src/relay.rs:3366-3372`); the harness never auto-posts,
-so the agent's text reaches the room only when it calls `buzz messages
-send` itself (`crates/buzz-acp/src/acp.rs:1836-1841`). What keeps this
-from looping is not a counter: (1) the agent ignores its own events;
-(2) by default it accepts posts only from its registered owner and from
-"sibling" agents with the same owner (`crates/buzz-acp/src/config.rs:93-105`;
-`crates/buzz-acp/src/lib.rs:3702-3725`), so an agent from another owner
-cannot pull it into an exchange at all; (3) the base prompt tells it that
-silence is usually correct and that a bare acknowledgement "re-triggers
-everyone you mention" (`crates/buzz-acp/src/base_prompt.md:73-75`). Two
-siblings that keep mentioning each other have no code-level stop; the
-process-level guards are a 500-event queue per scope with drop-oldest and
-a two-hour wall clock per turn (`crates/buzz-acp/src/queue.rs:34-42`;
-`config.rs:35-40`). A failure notice is posted without any mention tag,
-so it cannot wake another agent (`crates/buzz-acp/src/pool.rs:5540-5548`).
+**What an unmentioned agent sees.** In the default `mentions` mode,
+nothing at the time: the harness subscribes with a relay-side filter on
+its own pubkey, so a post addressed to agent A never reaches agent B's
+process (`crates/buzz-acp/src/relay.rs:3366-3372`; mode default
+`config.rs:336-340`). B learns of it in one of three ways. If B is later
+mentioned **in the same thread**, its harness fetches that thread's
+history before prompting — all messages under the root, including other
+agents' and humans' non-mention posts, up to `--context-message-limit`
+(default 12, max 100) (`crates/buzz-acp/src/pool.rs:4105-4135`;
+`config.rs:388-392`). If B is mentioned in a **top-level channel post**,
+no context is fetched at all — `ContextTarget::None`, "plain channel"
+(`pool.rs:4155-4162`) — and B answers knowing only the triggering post.
+Otherwise B can pull: the prompt tells it to catch up once with
+`buzz messages get --channel <UUID> --since <ts>` (`base_prompt.md:78`).
+`--subscribe all` makes B receive every event of the configured kinds,
+each as a turn it may end silently (`config.rs:55-59`).
+
+**Agent to agent.** Yes, by mention, and it is a designed path: the prompt
+requires an agent that finishes delegated work to `@mention` the
+delegator, and says task assignments to other agents go in the same
+channel (`base_prompt.md:53-54, 66`). The receiving side accepts the
+mention only if its author gate admits the sender — by default the
+agent's registered owner and "sibling" agents with the same owner
+(`crates/buzz-acp/src/config.rs:93-105`; `crates/buzz-acp/src/lib.rs:3702-3725`);
+`allowlist`, `anyone` and `nobody` are the other settings. The harness
+never auto-posts, so an agent's text reaches the room only when it calls
+`buzz messages send` itself (`crates/buzz-acp/src/acp.rs:1836-1841`).
+What keeps a sibling pair from looping, or from trading empty
+acknowledgements, is prompt text and nothing else (`base_prompt.md:71-75`):
+"publishing is optional and silence is usually correct — when a message
+leaves you nothing new to contribute, end the turn without publishing";
+"never publish a bare acknowledgement … it re-triggers everyone you
+mention", with a prohibited list ("Got it", "Confirmed", "Aligned",
+"Standing by", "I won't reply again"); mention the delegator "for
+completed work only — do not `@mention` to accept an assignment, confirm
+receipt, or close a loop conversationally"; and "only `@mention` when you
+need their attention — naming someone while talking about them is
+narrative, drop the `@`". The one asymmetry is for humans: "if a human
+asked you something, you MUST reply — even if the reply is only that you
+have nothing to add" (`base_prompt.md:72`). In code there is no hop,
+depth or turn counter; the guards are ignore-self, the author gate, a
+500-event queue per scope with drop-oldest, and a two-hour wall clock per
+turn (`crates/buzz-acp/src/queue.rs:34-42`; `config.rs:35-40`). A failure
+notice is posted without any mention tag, so it cannot wake another agent
+(`crates/buzz-acp/src/pool.rs:5540-5548`). No test runs two agent
+identities in one channel (`crates/buzz-acp/tests/`; `--agents 1..=32` is
+N subprocesses sharing one identity, `config.rs:302-305`).
 
 **Humans.** The owner talks to their agents freely, by mention or DM. A
 human who is not the owner is dropped by default and needs an allow-list
@@ -727,6 +766,78 @@ post gives the agent no context of what other agents have already replied
 mentioned together answer blind; the owner-only default means a team's
 agents do not hear the team unless configured; and loop safety between
 same-owner agents rests on the prompt.
+
+#### munder-difflin
+
+**Multi-agent, and for what.** Yes: a desktop app that runs real CLI
+agents in terminals as "clones" of team members, each with a mailbox and
+memory, meant to keep working while the team is away. Its site describes
+peer-to-peer encrypted agent messaging with no central orchestrator; the
+code is a central router in the Electron main process moving JSON files
+between per-agent `outbox/` and `inbox/` directories (`src/main/hive.ts:1832-1893`),
+and no transport encryption was found.
+
+**Topology.** Mechanically a mesh, by design a hub with a blackboard.
+The router delivers to whatever `to:` names — any agent id, `god`, or
+`broadcast` to every live agent but the sender (`hive.ts:1684-1693`) — so
+any clone can mail any clone. But the protocol text every agent receives
+steers traffic to the hub: "for anything ambiguous, cross-cutting, or
+needing sign-off, message `god`"; `board.md` "is the shared plan — don't
+edit it directly, `propose` changes to `god`, who is its sole scribe"
+(`hive.ts:2985-2999`). The god's own prompt is the hub-and-spoke
+contract in full: "decompose work and fan it out to the hive agents via
+their inboxes… own only the important, high-leverage things — task
+decomposition, dispatch decisions, sign-offs, conflict resolution, branch
+integration, and final QA — and remain the sole scribe of board.md"; each
+dispatch is a four-part contract (objective, output, tools, boundaries)
+(`hive.ts:1585`). The design document names the pattern: a blackboard
+architecture after Hearsay-II (`HIVE.md:23, 159`). Nothing in prompt or
+code asks workers to deliberate among themselves; the message schema has
+`agree` and `refuse` acts (`hive.ts:2979`) but no protocol uses them, and
+there is no round, vote or synthesis step. A five-agent discussion of the
+kind in Appendix A would, in this design, be the god sending one
+`request` to each clone, each replying to the god's inbox, and the god
+writing the conclusion to `board.md` alone — the clones would see each
+other's answers only if someone used `broadcast`. The only all-hands
+exchange in code is the shutdown handshake (below).
+
+**Agent to agent.** A message carries a speech act: `request`, `query` and
+`propose` expect a reply, `inform` and `done` are terminal — but only by
+prompt; the router derives `requires_reply` and enforces nothing
+(`hive.ts:1638, 2989-2991`). `HOP_CAP = 12` exists but hops are
+incremented only when a message bounces to god (`hive.ts:205, 1659-1668`);
+the regression test says the fuse "can only fire on a REAL relay loop"
+(`test/hive-hop-cap.test.cjs:3-18`). What actually stops a runaway is a
+per-agent circuit breaker on behaviour rather than on messages: repeated
+identical tool calls, an error storm, token velocity, two no-progress
+beats, escalating steer → constrain → stop (`src/main/breaker.ts:89-108`).
+Delivery is a file write; a recipient is nudged when idle and its inbox is
+non-empty, every 4 s (`src/renderer/src/hooks/useHive.ts:690-731`), so an
+agent with no mail costs nothing and an agent with an `inform` spends a
+turn reading it.
+
+**Humans.** To any clone, yes — each has a terminal in the UI. Slack is
+one bot and everything from it goes to god. A human prompt exempts the
+agent from the breaker's no-progress arm (`breaker.ts:384-390`).
+
+**Against its own use case.** Pros: the inbox is on disk and committed to
+git, so an overnight crash loses nothing and the history is inspectable;
+shutdown is a closing round — god broadcasts, each worker ACKs, the
+harness counts ACKs and rejects a premature "complete"
+(`src/main/closingTime.ts:10-18, 182-204`); the god's prompt carries every
+agent's context occupancy so it can route by headroom (`src/main/hooks.ts:535-544`).
+Cons: the stated loop rule is not implemented; the breaker is heuristic
+and off (`hardStop: false`) by default; the product's own description of
+its transport is wrong, which matters for a tool meant to hold company
+code and credentials.
+
+**Positioned otherwise.** OpenClaw is "your assistant" with optional
+isolated personas; QM is one company bot ("multiplayer" means the
+humans); jinn is "a persistent AI company" whose named employees receive
+tickets from a Todo ledger; AutoGen, ADK, MetaGPT and crewAI are
+frameworks whose agents are roles in a task. They are kept here because
+each solves one of this document's sub-problems well, not because they
+share its position.
 
 #### OpenClaw
 
@@ -865,52 +976,6 @@ loosened to admit real review loops and is still a bound rather than a
 judgement; delegation cycles are not capped; a human in chat cannot
 interrupt what a human in the web UI can.
 
-#### munder-difflin
-
-**Multi-agent, and for what.** Yes: a desktop app that runs real CLI
-agents in terminals as "clones" of team members, each with a mailbox and
-memory, meant to keep working while the team is away. Its site describes
-peer-to-peer encrypted agent messaging with no central orchestrator; the
-code is a central router in the Electron main process moving JSON files
-between per-agent `outbox/` and `inbox/` directories (`src/main/hive.ts:1832-1893`),
-and no transport encryption was found.
-
-**Topology.** Mesh over mailboxes, with a privileged hub. Any agent can
-mail any agent by id or `broadcast` (`hive.ts:1684-1693`); a "god" agent
-(Michael) is the bounce target for undeliverable mail, the proxy for
-`to: human`, the recipient of failure reports and heartbeat prompts, and
-the only one who may write the shared board. Its orchestration is prompt
-text; in code it is an ordinary agent with a flag.
-
-**Agent to agent.** A message carries a speech act: `request`, `query` and
-`propose` expect a reply, `inform` and `done` are terminal — but only by
-prompt; the router derives `requires_reply` and enforces nothing
-(`hive.ts:1638, 2989-2991`). `HOP_CAP = 12` exists but hops are
-incremented only when a message bounces to god (`hive.ts:205, 1659-1668`);
-the regression test says the fuse "can only fire on a REAL relay loop"
-(`test/hive-hop-cap.test.cjs:3-18`). What actually stops a runaway is a
-per-agent circuit breaker on behaviour rather than on messages: repeated
-identical tool calls, an error storm, token velocity, two no-progress
-beats, escalating steer → constrain → stop (`src/main/breaker.ts:89-108`).
-Delivery is a file write; a recipient is nudged when idle and its inbox is
-non-empty, every 4 s (`src/renderer/src/hooks/useHive.ts:690-731`), so an
-agent with no mail costs nothing and an agent with an `inform` spends a
-turn reading it.
-
-**Humans.** To any clone, yes — each has a terminal in the UI. Slack is
-one bot and everything from it goes to god. A human prompt exempts the
-agent from the breaker's no-progress arm (`breaker.ts:384-390`).
-
-**Against its own use case.** Pros: the inbox is on disk and committed to
-git, so an overnight crash loses nothing and the history is inspectable;
-shutdown is a closing round — god broadcasts, each worker ACKs, the
-harness counts ACKs and rejects a premature "complete"
-(`src/main/closingTime.ts:10-18, 182-204`); the god's prompt carries every
-agent's context occupancy so it can route by headroom (`src/main/hooks.ts:535-544`).
-Cons: the stated loop rule is not implemented; the breaker is heuristic
-and off (`hardStop: false`) by default; the product's own description of
-its transport is wrong, which matters for a tool meant to hold company
-code and credentials.
 
 #### AutoGen
 
@@ -1053,66 +1118,52 @@ SQLite log of task outputs allows replay from any step. Cons: not a
 conversation at all — agents meet only through context strings and tool
 results.
 
-### B.2 Three families
+### B.2 The two teammate products, against this document's questions
 
-The loop mechanism each project uses follows from its topology, and its
-topology follows from its use case.
+| | Buzz | munder-difflin |
+|---|---|---|
+| Who hears a post addressed to one agent | nobody else (relay filter); a thread-mate catches up at its next mention, a channel-mate only by pulling | the addressee only; `broadcast` is explicit |
+| Can agent A address agent B | yes, by mention, if B's author gate admits A (default: same owner) | yes, by id; nothing restricts it |
+| Does a later agent see earlier agents' replies | in a thread, yes, at its own dispatch time (a race, not an order); in the channel, no | only if mailed to it |
+| What stops A ↔ B | prompt: silence is correct, no bare acknowledgement, mention only for completed work; no counter | prompt: `inform` / `done` are terminal; a behavioural breaker on repetition and no-progress; the hop cap does not apply |
+| What stops talk without substance | the same prompt rules; a human's question must always be answered, an agent's need not | nothing specific; the breaker's no-progress arm |
+| Human to each agent | the owner, freely; others by allow-list | any clone has a terminal; the design says brief Michael only |
+| A conclusion from several agents | none — each answers its mention | the god synthesises into `board.md`; no round among the clones |
+| Agents tested together | none with two identities | three in tests; "5–15" `[docs-only]` |
 
-**Shared-platform mesh — Buzz, OpenClaw in a group, QM in Slack.** The
-use case is a chat room that humans already live in; agents are peers
-addressed by mention. No one coordinates. Loop control is whatever can be
-decided per receiver from the post alone: ignore self, require a mention
-(Buzz at the relay, OpenClaw `allowBots: "mentions"`), restrict who may
-address you (Buzz owner-only), a cheap pre-turn classifier (QM), a rate
-guard per pair or per actor (OpenClaw, QM), and prompt etiquette. None of
-them counts turns per conversation, and the two that act at a cap drop
-silently. Humans talk to every agent freely — that is the point of the
-room — and nothing gives a human priority over an agent beyond "stop".
-Context for an agent that was not addressed is either free and bounded
-(OpenClaw's window, QM's re-read of thread history) or a pull the agent
-makes itself (Buzz).
-
-**Tree with a coordinator — jinn, munder-difflin, crewAI, ADK, MetaGPT's
-default environment.** The use case is work with an owner: an org chart,
-a pipeline, a task. Agent-to-agent traffic is mostly parent ↔ child and
-is bounded structurally — the child lacks the delegation tool (crewAI),
-the leaf lacks the spawn tool (OpenClaw's sub-agents), transfers are
-enum-constrained (ADK), callbacks return to one parent (jinn). Where a
-lateral path exists it is guarded separately and more crudely: jinn's
-hop budget and send rate, munder-difflin's behavioural breaker. Humans
-reach agents through a designated door — one bot per employee (jinn), a
-terminal per clone (munder-difflin), the root agent (ADK) — and in jinn
-the door determines whether the human can interrupt.
-
-**Managed group chat — AutoGen.** The use case is one task, one process.
-A manager picks each speaker, every participant hears everything, and
-stopping is an explicit condition. This is the only family where "who
-speaks next" is a decision at all and where a loop can be detected by
-content (Magentic-One's ledger). The human is a participant, not a
-visitor.
+Both products put the whole weight of loop prevention and of "nothing to
+add" on the prompt, and both make silence free at the transport: in Buzz
+an agent that does not call `send` has posted nothing, in munder-difflin
+an agent that writes no file has sent nothing. Neither counts turns.
+Neither has a mechanism for several agents to converge on one answer in
+the room; Buzz has no synthesis step at all, munder-difflin's happens in
+one agent's head. Neither has been exercised with the number of agents
+that Appendix A measures.
 
 ### B.3 Where this proposal sits
 
-This gateway's room is a shared-platform mesh: humans and agents on
-Rocket.Chat or Mattermost, agents addressed by mention, each bot's
-gateway deciding for itself. §1 measured what that family's standard
-tools cost here — the per-sender count is a rate guard by another name,
-and its drops fall on the convergence phase. The proposal's response is
-to bring the managed-group-chat family's decisions — who speaks next,
-whether a topic is done, what every participant has read — into a room
-that keeps the mesh's properties: humans can address any agent, the
-platform stays the transport, nothing is removed from anyone's view. No
-surveyed project combines the two; the mesh gateways stop at per-receiver
-rules, and AutoGen has no room.
+This gateway is the third product in B.1's first tier: agents with
+personas, on a chat platform humans already use, addressed by mention,
+talking to humans and to each other. Appendix A is the measurement the
+two teammate products do not have — what happens when five such agents
+are actually put in one room and asked to converge — and §1.2 is what it
+showed: the prompt-only discipline that Buzz and munder-difflin rely on
+holds for roughly half to two thirds of turns, and the convergence phase
+is where it fails. The proposal keeps everything the tier shares —
+silence is free, humans address anyone, the platform is the transport,
+nothing is removed from anyone's view — and adds the two things neither
+teammate product has: a reader of the room that decides who speaks next
+and whether a topic is done, and a round in which agents converge. Those
+two things exist only in AutoGen's group chats, which have no room and no
+human visitor; the mesh gateways outside the tier (OpenClaw, QM) stop at
+per-receiver rules and rate guards.
 
-Three things the survey changes, recorded in §7: the mesh gateways'
-cheapest rules — a bot post with no mention starts no turn, and a
-moderator that fails answers silence or the rule-based choice — are
-candidates this proposal did not have; Magentic-One's content-based loop
-detection is the natural input to `extend` / `close`; and a rate guard is
-the family's backstop, orthogonal to a topic budget. Two things it does
-not change: every framework delivers context to an unselected agent
-without a model call, so §7's "suppressed turn" default is the minority
-choice and is marked as such; and no project has run more than five
-agents in one shared conversation, so the ten-agent room is untested
-everywhere.
+Four of the seven other projects contributed a mechanism to §7: QM's
+fail-closed classifier and AutoGen's selector fallback (moderator error
+per decision), Magentic-One's progress ledger (the input to `extend` /
+`close`), OpenClaw's and QM's rate guards (a backstop), and OpenClaw's
+`allowBots: "mentions"` together with Buzz's relay filter (unmentioned
+bot posts as queue-only). Two things no project changes: every framework
+delivers context to an unselected agent without a model call, so §7's
+"suppressed turn" default is the minority choice and is marked as such;
+and no project has run more than five agents in one shared conversation.
