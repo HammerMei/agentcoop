@@ -23,6 +23,14 @@ Loop protection in a multi-agent room is three layers (`docs/agent-chain.md`):
    not dispatched and never reaches that bot's session.
 3. **TTL.** Counters are cleared after `ttl_seconds` of silence.
 
+Underneath the three layers is a rule the layers compensate for: the
+`require_mention` gate applies to human senders only. A post from another
+agent is dispatched to every bot in the room whether or not it names
+them — "listen-all for agents" (`gateway/connectors/rocketchat/normalize.py:197, 213`;
+`gateway/connectors/mattermost/normalize.py:222`), introduced with the
+agent-chain feature itself (PR #13). Every agent post therefore wakes
+every other bot, and Layer 2 exists to bound what that produces.
+
 ### 1.2 What the gateway logs show
 
 Two deployments were measured — a five-agent lab debate with deliberately
@@ -171,7 +179,8 @@ to learn.
 | `@all …` | parallel, every bot — the human explicitly wants every voice |
 | `@a … @b …` with independent tasks | parallel, `[a, b]` |
 | `@a and @b …` asking for views | sequential, `[a, b]` in mention order |
-| no mention | sequential; the moderator picks each hop |
+| no mention, `require_mention` on (the default) | **no turn**, from any sender — the post stays past every bot's watermark and reaches each at its next turn (§3.5). The moderator does not pick |
+| no mention, `require_mention` off (listen-all room) | sequential; the moderator picks each hop |
 | explicit mode, e.g. `parallel:` / `sequential:`, **from a human sender** | as stated; the moderator does not classify. In an agent's post the same words are ordinary text — the sender's role is server-injected, so the check is free |
 | gateway failure notice | no dispatch; queues for every bot |
 
@@ -185,6 +194,27 @@ The moderator's criterion ("do later replies gain from seeing earlier
 ones?") has a negative side, and the human often knows which side applies
 before the moderator can; an explicit mode marker in the message overrides
 classification.
+
+**The mention gate applies to agents.** Today it applies to humans only
+(§1.1): a human must name a bot to start its turn, an agent need not, and
+an agent's reply that names nobody still wakes every other bot. In this
+design the gate is the same for every sender. A post that names nobody
+starts no turn, whoever wrote it; an agent that wants a peer's attention
+names the peer, as a human does, and a reply that names nobody is the end
+of an exchange, not the start of N−1 more. Room-wide mentions (`@all`,
+`@channel`) count as mentions, as they do for humans today, so the
+closing round's `@all` reaches everyone (§3.4). This is the rule Buzz
+enforces at its relay (Appendix B.2), and it is what §2's "the default is
+silence" means at the transport: an agent that was not named has not
+been asked. Its cost is the one Buzz pays — a bot that was not named has
+not seen the post when it next speaks — and §3.5's watermark is what
+pays it: the post is delivered at the bot's next turn, not lost. With the
+gate in place the topic budget (§3.2) bounds exchanges that are
+deliberately addressed, which is the case it was designed for, rather
+than the fan-out the bypass creates. The gate was listed as an open
+question for step 4; it was decided on 2026-10-13, and the bypass is
+treated as a defect of the current model rather than a behaviour to
+preserve.
 
 **A failure notice is context, not a trigger.** When a turn fails, the
 gateway posts a notice from the bot's own account. Other bots should see it
@@ -569,14 +599,6 @@ to remove.
   surface the budget was meant to remove. Not in the design; the step 7
   PR decides against an observed case where the budget alone was not
   enough.
-- **Unmentioned bot posts under step 4 (Appendix B).** The rule table
-  dispatches a post with no mention in random sequential order. Two
-  gateways default the other way for bot-authored posts: no mention, no
-  turn — the post is context only. That rule is cheaper and is what §2's
-  "default is silence" says; it also means a bot's reply never starts a
-  chain unless it names someone. Whether lab agents mention reliably
-  enough for it, or whether it silences legitimate follow-ups, is a
-  step 4 measurement.
 
 ---
 
@@ -597,7 +619,7 @@ moderator. Production stays on today's behaviour throughout.
 | 1 | **Topic tags in the agent prompt.** Agents name the topic they answer and any they open; the gateway parses and logs the tag, nothing else changes. | — | Agents tag reliably enough to be a signal (§6.1 precondition). | Tag presence rate; hand-check a sample. |
 | 2 | **Moderator in shadow.** The classifier runs on every inbound message and logs every decision it can make from messages alone — topic tags `accept` / `retag`, `extend` / `close` and `decided` / `discussed` at each point today's Layer 2 or TTL closes an exchange, `parallel` / `sequential` for each multi-mention message — and none of it has any effect. This is the first moderator wiring, without authority. | 1 | Accuracy of each decision type (§6.1, §6.3), measured separately. | Agreement with hand labels on the lab transcript, per decision type. |
 | 3 | **Per-bot watermark.** A message can reach a bot without starting a turn: the bot's watermark stays behind it, and at the bot's next turn the gateway fetches the room's posts past the watermark and delivers them as a batch (§3.5); `queue_flush_threshold` grants a catch-up turn. First consumer: the gateway's own failure notices, which today each start a turn (§3.3). | — | The "no turn, still seen" primitive works; the error cascade is gone. | Error-notice turns per failure: today 4, target 0. |
-| 4 | **Rule-based dispatch plan.** The plan is computed from addressing alone — single mention, `@all`, multi-mention in mention order, no mention in random order, explicit `parallel:` / `sequential:` — with no moderator (§3.3 table). | 3 | The plan model fits the room without classification. | Posts per human prompt (today ~25 in the lab); self-termination rate. |
+| 4 | **Rule-based dispatch plan, and the mention gate for agents.** The plan is computed from addressing alone — single mention, `@all`, multi-mention in mention order, no mention → no turn, explicit `parallel:` / `sequential:` — with no moderator (§3.3 table). The gate applying to agent senders lands here, since it is the "no mention" row. | 3 | The plan model fits the room without classification; agents name their addressee reliably enough that the gate does not silence legitimate follow-ups. | Posts per human prompt (today ~25 in the lab); self-termination rate; agent posts with no mention, hand-checked for whether a reply was wanted. |
 | 5 | **Sequential engine.** Runs a plan hop by hop: busy skip, `hop_timeout_seconds`, `human_gap_seconds`, late replies joining the running sequence (§3.3). The moderator shadows `next` / `done` here, against the rule-based order, since this is the first point those decisions have an input. | 3, 4 | Sequential raises self-termination and leaves room for the human (§6.2, §6.4); `next` / `done` accuracy. | Self-termination rate under sequential vs today; human posts landing inside a gap; shadow `next` against hand labels on replayed snapshots — the live room cannot score it, because the rule-selected bot speaks first and changes the state the shadow choice was made in. |
 | 6 | **Inform instead of drop.** Layer 2 overflow runs the turn with the suffix and suppresses the reply (§3.5). Independent of the rest; can ship any time. | — | A bot's context no longer diverges from the room (issue #190). | Dropped posts: today 21 of 207 lab turns, target 0. |
 | 7 | **Moderator with authority, one decision type at a time.** Each decision the shadow measured is switched on separately, behind its own flag, in the order its shadow accuracy earned: topic budget with `extend` / `close` and `extend_limit` (replaces Layer 2), then multi-mention mode, then `next` / `done`. A type whose shadow accuracy is not known stays in shadow. | 2, 5, 6 | Each decision type beats the rule it replaces from step 4. | Posts per prompt and self-termination rate vs step 4, per switch-on. **Provisional until step 8**: until the closing round exists, a `close` silences the correction it would have invited, so a reduction in posts measured here is an upper bound, re-measured at step 8. |
@@ -1191,9 +1213,10 @@ of which must spend a turn deciding whether to answer, and the per-sender
 budget exists to bound what that creates; an agent's post in Buzz wakes
 the agents it names and no one else, and the cost of that is the other
 half of B.1's Buzz entry — an agent that was not named has not seen the
-post, and catches up only in a thread or by pulling. §7's "unmentioned
-bot posts as queue-only" is this one rule flipped, with the queue
-supplying the context Buzz's design leaves to the agent.
+post, and catches up only in a thread or by pulling. §3.3 now applies
+the gate to agents — the same rule — with §3.5's watermark supplying the
+context Buzz's design leaves to the agent; both were adopted on
+2026-10-13.
 
 Buzz does have the queue's mechanism, for threads, and it is built the
 other way round. When an agent is mentioned in a thread the harness
@@ -1247,8 +1270,8 @@ Four of the seven other projects contributed a mechanism to §7: QM's
 fail-closed classifier and AutoGen's selector fallback (moderator error
 per decision), Magentic-One's progress ledger (the input to `extend` /
 `close`), OpenClaw's and QM's rate guards (a backstop), and OpenClaw's
-`allowBots: "mentions"` together with Buzz's relay filter (unmentioned
-bot posts as queue-only). Two things no project changes: every framework
+`allowBots: "mentions"` together with Buzz's relay filter (the mention
+gate for agents, since adopted into §3.3). Two things no project changes: every framework
 delivers context to an unselected agent without a model call, so §7's
 "suppressed turn" default is the minority choice and is marked as such;
 and no project has run more than five agents in one shared conversation.
