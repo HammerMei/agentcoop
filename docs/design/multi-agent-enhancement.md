@@ -521,6 +521,17 @@ to remove.
   history handoff rebuilds a new session today, so "nothing is dropped"
   survives a restart. Whether reconciliation of counts is ever worth its
   cost is for the step 7 PR to decide against an observed outage.
+- **Queue as watermark plus fetch (step 3, Appendix B).** §3.5 describes
+  a stored per-bot queue and this section's recovery answer rebuilds it
+  from room history. Buzz has no stored queue at all: a per-session set
+  of delivered event ids, and a fetch of the thread at dispatch time with
+  the delivered ones removed. The platform holds the posts, so the queue
+  is a watermark and a query, and restart recovery is the normal path
+  rather than an exception. The history handoff that seeds a new session
+  is already that query. Whether step 3 stores anything beyond the
+  watermark — the flush threshold needs a count, which a query can also
+  give — is for the step 3 PR; the stored queue is the default only
+  because §3.5 was written first.
 - **Age-based queue flush.** The queue bound is a count. Whether a queue
   that is small but old also warrants a catch-up turn is open; nothing in
   the logs says yet that it does.
@@ -1176,6 +1187,31 @@ half of B.1's Buzz entry — an agent that was not named has not seen the
 post, and catches up only in a thread or by pulling. §7's "unmentioned
 bot posts as queue-only" is this one rule flipped, with the queue
 supplying the context Buzz's design leaves to the agent.
+
+Buzz does have the queue's mechanism, for threads, and it is built the
+other way round. When an agent is mentioned in a thread the harness
+fetches that thread from the relay, drops every event this session has
+already been given, and injects the remainder as `<thread-context>` in
+the same prompt (`pool.rs:4055-4073`, `:4136-4150`). The only state is
+the set of delivered event ids per session (`pool.rs:119, 240`); there is
+no stored queue, because the relay already holds every post and the
+fetch is the queue. That is §7's recovery answer for a restart —
+"rebuilt from room history since the bot's last delivered post" — used
+as the primary path, with the same effect as §3.5's "delivered as a
+batch at the bot's next turn": late-arriving posts, including other
+agents' replies and humans' unaddressed ones, reach the agent on its next
+turn without a turn of their own. Three things differ. It covers a thread
+only; a top-level channel post fetches nothing (`pool.rs:4155-4162`),
+whereas the queue is room-wide. It is bounded by a message limit (12,
+max 100), and what falls outside it is silently gone, whereas
+`queue_flush_threshold` turns a long gap into a catch-up turn so nothing
+is truncated. And it fills only when the agent is mentioned anyway;
+nothing earns a turn from the size of the gap. The first and second are
+the design choices that separate the two; the construction — watermark
+plus fetch, no stored structure — is one this gateway already has half
+of, in the history handoff that seeds a new session
+(`gateway/core/history_context.py`), and §7 now asks whether step 3
+needs a stored queue at all.
 Neither has a mechanism for several agents to converge on one answer in
 the room; Buzz has no synthesis step at all, munder-difflin's happens in
 one agent's head. Neither has been exercised with the number of agents
