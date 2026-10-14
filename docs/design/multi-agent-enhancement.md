@@ -261,7 +261,8 @@ only. A human post resets the rate limit before step 3.
   watermark advances to the backlog's newest post.
 - *Exceptions*: one pending catch-up turn per bot at a time; a thread that
   is paused or has a running plan is context in the turn but not in the
-  allowed set.
+  allowed set; a thread that qualified but was absorbed into a triggered
+  turn (`REPLY_ENVELOPE`) needs no sweep.
 - Also posts the pause notice and acknowledges mode changes.
 
 ### FAILURE_NOTICE (D3)
@@ -339,7 +340,12 @@ only. A human post resets the rate limit before step 3.
   *allowed* (the turn may reply there), *pending* (a sequential hop is
   coming; do not reply here), or *paused*. The default thread is the one
   the trigger belongs to, or the newest allowed thread for a catch-up
-  turn. The global agent context describes the format once; the per-turn
+  turn. The allowed set of a triggered turn is the trigger's thread, the
+  threads of any posts coalesced into the turn, and any thread that
+  qualifies for catch-up for this bot at that moment — so a turn the bot
+  is running anyway absorbs the catch-up the sweeper would otherwise
+  grant. Most turns have one allowed thread; a single block with no
+  handle is the common output. The global agent context describes the format once; the per-turn
   block is the reminder.
 - *Output*: the turn's text is parsed as an envelope — one block per
   thread, each with the handle and the text, or a `done` marker for a
