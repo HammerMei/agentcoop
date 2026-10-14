@@ -88,22 +88,25 @@ the room diverged by whatever its own counter had removed.
 Room `#team`: bots `a`, `b`, `c`; human `H`; mode `catch-up`; `turn_limit`
 6 per thread.
 
-1. `H: a, can you check the nginx log?` — `a` is addressed by name; one
-   turn starts for `a`. `b` and `c` are not addressed: no turn; the post is
-   past their watermark.
+1. `H: a, can you check the nginx log?` — `a` is addressed by username;
+   one turn starts for `a`. `b` and `c` are not addressed: no turn; the
+   post is past their watermark.
 2. `a` replies: "Found a 502 burst at 09:12. b, was the backend restarted
-   then?" — `b` is addressed; one turn for `b`, and `b`'s session receives
-   `H`'s post and `a`'s post first (its backlog), then the trigger.
+   then?" — `b` is addressed; one turn for `b`. Its session receives its
+   backlog first — `H`'s post — then the trigger, `a`'s post.
 3. `b` replies "Yes, at 09:11." — nobody addressed; no turn. Two agent
    turns counted on this thread.
 4. The sweeper finds `c` with three undelivered posts and the room on
    `catch-up`: one catch-up turn for `c`, which sees all three and answers
    with the token. Three counted.
-5. `H: everyone, is this the same as last week's incident?` — `everyone`
-   addresses all three; a three-member parallel plan; three turns; six
-   counted — the thread **pauses** with a notice. Replies are delivered to
-   each bot as they come, but no agent turn starts until `H` posts again,
-   `H` writes `extend: 4`, or the thread is silent for `ttl_seconds`.
+5. `H: @all, is this the same as last week's incident?` — a human post
+   resets the count to zero; `@all` addresses all three: a three-member
+   parallel plan, three turns, three counted.
+6. `a` answers and names `b`; `b` answers and names `a`; `a` answers and
+   names `c` — three agent turns, six counted: the thread **pauses** with a
+   notice. `c`'s turn does not start. Posts are still delivered to each
+   bot's backlog, but no agent turn starts until `H` posts again, `H`
+   writes `extend: 4`, or the thread is silent for `ttl_seconds`.
 
 ---
 
@@ -226,7 +229,8 @@ only. A human post resets the rate limit before step 3.
 - *Normal*: a bot whose backlog has ≥ `catch_up_post_threshold` posts or
   whose oldest undelivered post is older than `catch_up_age_seconds` gets
   one catch-up turn, counted against the thread of the newest post in
-  the backlog.
+  the backlog. A catch-up turn has no trigger: the backlog is its whole
+  input, and the watermark advances to the backlog's newest post.
 - *Exceptions*: no turn in a paused thread; no turn while a plan is
   running on that thread; one pending catch-up turn per bot at a time.
 - Also posts the pause notice and acknowledges mode changes.
@@ -248,7 +252,9 @@ only. A human post resets the rate limit before step 3.
   mode and order once that decision has passed shadow measurement (§8).
 - *Parallel*: every member's turn starts now; every member receives the
   same backlog, cut at the plan's post, so no member sees another's reply
-  from the same plan.
+  from the same plan. Each member is bounded by `timeout:` (default
+  `hop_timeout_seconds`) measured from the plan's post; a member still
+  running at the timeout is `timed-out` and the plan can end.
 - *Sequential*: members run one at a time in order; each hop receives the
   earlier replies in its backlog. A hop waits for its bot if the bot is
   busy, up to `timeout:` (default `hop_timeout_seconds`); on timeout the
@@ -318,8 +324,10 @@ gate, no inferred interruption, and no knowledge of what a meeting is.
 
 ### 6.1 A brainstorm run by a bot with a skill
 
-Room: bots `chair`, `a`, `b`, `c`, `d`; human `H`; thread `turn_limit` 8;
-`chair` is designated. Columns: the event, new turns (counted / exempt),
+Room: bots `chair`, `a`, `b`, `c`, `d`; human `H`. The meeting runs in a
+platform thread, so the skill's `mode: snooze` and the `turn_limit` of 8
+are scoped to it and the room's top-level thread keeps its own mode;
+`chair` is designated on that thread. Columns: the event, new turns (counted / exempt),
 public posts, the thread's count, callbacks.
 
 | # | Event | Turns | Posts | Count | Callback |
@@ -397,7 +405,7 @@ fewer posts is not fewer tokens.
 | # | Task | Builds | Mechanism tests | Effect measurements |
 |---|---|---|---|---|
 | 1 | **Deliver, do not drop.** Per-bot watermark; history fetch extended with ids, thread ids and paging; Layer 2 overflow and failure notices delivered at the next turn. | WATERMARK, FAILURE_NOTICE | backlog delivered once, in order, trigger not duplicated; watermark survives restart; failed fetch delivers the trigger alone. | Lab: dropped posts 21 → 0 over a debate; the two misattributions in Appendix A absent on replay. Production: error-notice turns per failure 4 → 0. |
-| 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
+| 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | count includes token-only turns; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
 | 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS | mode change applies to the next post; sweeper fires on threshold and on age, not in a paused thread; one pending catch-up turn per bot; the three-scenario day (§7 row 1) as an end-to-end test. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
 | 5 | **Plans.** Parallel snapshot, sequential hops, coalescing, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | parallel members share one cut; a sequential hop sees earlier replies; coalescing yields one turn; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
