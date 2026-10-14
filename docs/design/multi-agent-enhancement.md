@@ -296,11 +296,15 @@ only. A human post resets the rate limit before step 3.
 - *Concurrency*: plans on a thread, and across threads, run concurrently;
   only a sequential plan orders its own members.
 - *Pending hop*: while a sequential plan has a hop still to come for bot
-  X on thread T, T is marked *pending* in every other turn X runs: the
-  posts are context, but a reply block to T is not posted, and X is told
-  so when its hop starts. X answers T in its hop, having seen everything;
-  nothing is stored in between. This is what keeps a bot from speaking
-  out of turn when two plans on two threads reach it at once.
+  X on thread T, every other turn X runs is instructed not to reply in T
+  — T is listed as *pending* in the turn's thread block — and a block for
+  T is not posted if the instruction is ignored. X answers T in its hop,
+  having seen everything; nothing is stored in between. Plans do not know
+  about each other: the gateway holds every running plan of the room, and
+  when it builds a turn for X it looks up, for each thread, whether a
+  sequential plan on that thread still has a hop for X — that lookup is
+  the *pending* mark. This is what keeps a bot from speaking out of turn
+  when two plans on two threads reach it at once.
 - *Restart*: plans live in memory. After a gateway restart no plan is
   running: members that had not run do not run, and the owner is told the
   members' states as after `stop:`. The rate-limit count is rebuilt from
@@ -350,7 +354,8 @@ only. A human post resets the rate limit before step 3.
   encoding is an implementation choice; the contract is the fields.
 - *Routing*: a block is posted to its thread if the handle is in the
   turn's allowed set, and counts against that thread's `RATE_LIMIT`. A
-  block for a *pending* thread is not posted; the agent is told at its
+  block for a *pending* thread is not posted — the turn was told not to
+  reply there, so this is the backstop, and the agent is reminded at its
   hop. A block for a *paused* thread is posted and counted as overshoot.
   A handle the turn did not list is treated as missing. The gateway keeps
   no agent output: a block is posted or it is not.
