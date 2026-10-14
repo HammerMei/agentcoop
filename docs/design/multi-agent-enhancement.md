@@ -297,10 +297,15 @@ only. A human post resets the rate limit before step 3.
   only a sequential plan orders its own members.
 - *Pending hop*: while a sequential plan has a hop still to come for bot
   X on thread T, T is marked *pending* in every other turn X runs: the
-  posts are context, but a reply block to T is held, not posted, and X is
-  told so at its next turn. X answers T in its hop, having seen everything.
-  This is what keeps a bot from speaking out of turn when two plans on
-  two threads reach it at once.
+  posts are context, but a reply block to T is not posted, and X is told
+  so when its hop starts. X answers T in its hop, having seen everything;
+  nothing is stored in between. This is what keeps a bot from speaking
+  out of turn when two plans on two threads reach it at once.
+- *Restart*: plans live in memory. After a gateway restart no plan is
+  running: members that had not run do not run, and the owner is told the
+  members' states as after `stop:`. The rate-limit count is rebuilt from
+  room history — agent posts on the thread since the last human post —
+  and the watermark is on disk, so nothing else needs recovery.
 - *Member states*: exactly one per member — `replied`, `self-terminated`,
   `failed`, `timed-out`, `cancelled` (by `stop:` before the member ran).
 - *Boundary*: the plan ends when every member has a state. The owner's
@@ -345,9 +350,10 @@ only. A human post resets the rate limit before step 3.
   encoding is an implementation choice; the contract is the fields.
 - *Routing*: a block is posted to its thread if the handle is in the
   turn's allowed set, and counts against that thread's `RATE_LIMIT`. A
-  block for a *pending* thread is held. A block for a *paused* thread is
-  posted and counted as overshoot. A handle the turn did not list is
-  treated as missing.
+  block for a *pending* thread is not posted; the agent is told at its
+  hop. A block for a *paused* thread is posted and counted as overshoot.
+  A handle the turn did not list is treated as missing. The gateway keeps
+  no agent output: a block is posted or it is not.
 - *Fallback*: output with no envelope is one block for the default thread
   — today's behaviour. A block with a missing or unknown handle goes to
   the default thread. `<end-of-agent-chain>` anywhere is `done` for the
@@ -480,7 +486,7 @@ fewer posts is not fewer tokens.
 | 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | token-only and failed turns count zero; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
 | 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS | mode change applies to the next post; a thread qualifies on threshold and on age, never when paused; one catch-up turn per bot covers several qualifying threads and replies in each; two threads in one room on different modes; the three-scenario day and the three-scenario thread (§7 rows 1–2) as end-to-end tests. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
-| 5 | **Plans.** Parallel snapshot, sequential hops, coalescing, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | parallel members share one cut; a sequential hop sees earlier replies; coalescing yields one turn across threads; a reply to a pending-hop thread is held and the hop still runs; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
+| 5 | **Plans.** Parallel snapshot, sequential hops, coalescing, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | parallel members share one cut; a sequential hop sees earlier replies; coalescing yields one turn across threads; a reply to a pending-hop thread is not posted and the hop still runs; after a restart a running plan ends with a member-state notice and the count is rebuilt from history; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
 | 6 | **Listen mode.** Serial listen turns; wait for a running plan. | UNADDRESSED_MODE (listen) | order follows the roster; listen turns suspended during a plan. | Lab debugging rehearsal: a planted wrong claim corrected on the next turn; turns per post. |
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 member turns, 5 counted posts, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
 | 8 | **Resolver.** Tier-3 addressing and mode recommendation in shadow; then `LISTEN_GATE` in shadow. | ADDRESS_RESOLVER, LISTEN_GATE | — | Agreement with hand labels per decision type before any of them is given effect. |
