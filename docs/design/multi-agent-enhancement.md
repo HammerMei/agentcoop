@@ -170,6 +170,11 @@ only. A human post resets the rate limit before step 3.
   nothing to add. While a plan is running on the thread, listen turns wait
   for the plan boundary. `listen: parallel` is not offered in this version.
 - `catch-up` (default): no turn now; `SWEEPER` grants one later.
+- *Switching*: a mode change applies to the next post. Running plans and
+  pending turns finish under the old mode; listen turns resume at the plan
+  boundary. The rate-limit count is kept across a mode change — the
+  human's control post resets it like any human post — and the new mode's
+  default `turn_limit` applies from then on unless `limit:` was set.
 - *Exceptions*: control-word-only posts and gateway notices trigger nobody
   in any mode.
 
@@ -376,6 +381,7 @@ whose backlog contains the notice.
 | Scenario | Mode and control | How it runs | Supported |
 |---|---|---|---|
 | One room, three scenarios in a day | `catch-up` → `mode: snooze` + `orchestrator:` → `mode: catch-up` | Casual talk; a meeting on one thread; casual talk again — no restart, no second room (goal 2). | yes — a test in §8 |
+| One thread, three scenarios | `listen` → `mode: snooze` + `orchestrator:` → `mode: listen` | A debugging thread becomes a vote run by a chair, then a debugging thread again; the running plan finishes under the old mode, the count carries over. | yes — a test in §8 |
 | Casual conversation (production `#nest`) | `catch-up` | Addressed bots run; others catch up at the sweep; a correction arrives at the next catch-up turn rather than being dropped. | yes |
 | Brainstorm (lab, five bots) | chair skill; `snooze` | §6.1. | yes |
 | Status / decision / roadmap meeting | chair skill | `sequential:` reports; `parallel:` vote by token; brainstorm skill. | yes |
@@ -407,7 +413,7 @@ fewer posts is not fewer tokens.
 | 1 | **Deliver, do not drop.** Per-bot watermark; history fetch extended with ids, thread ids and paging; Layer 2 overflow and failure notices delivered at the next turn. | WATERMARK, FAILURE_NOTICE | backlog delivered once, in order, trigger not duplicated; watermark survives restart; failed fetch delivers the trigger alone. | Lab: dropped posts 21 → 0 over a debate; the two misattributions in Appendix A absent on replay. Production: error-notice turns per failure 4 → 0. |
 | 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | count includes token-only turns; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
-| 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS | mode change applies to the next post; sweeper fires on threshold and on age, not in a paused thread; one pending catch-up turn per bot; the three-scenario day (§7 row 1) as an end-to-end test. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
+| 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS | mode change applies to the next post; sweeper fires on threshold and on age, not in a paused thread; one pending catch-up turn per bot; the three-scenario day and the three-scenario thread (§7 rows 1–2) as end-to-end tests. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
 | 5 | **Plans.** Parallel snapshot, sequential hops, coalescing, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | parallel members share one cut; a sequential hop sees earlier replies; coalescing yields one turn; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
 | 6 | **Listen mode.** Serial listen turns; wait for a running plan. | UNADDRESSED_MODE (listen) | order follows the roster; listen turns suspended during a plan. | Lab debugging rehearsal: a planted wrong claim corrected on the next turn; turns per post. |
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 counted turns, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
