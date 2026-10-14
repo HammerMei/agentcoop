@@ -49,15 +49,18 @@ the room diverged by whatever its own counter had removed.
    human or an orchestrator. One room goes from casual conversation into a
    meeting and back without a restart or a second room.
 3. **Rate limiting, convergence and guidance are kept apart.**
-   - The **rate limit** pauses agent turns after a set number so that a
-     human can absorb what was said and table, rescope or continue. It is
-     not a convergence mechanism: muting agents does not end a topic.
+   - The **rate limit** pauses agent turns after a set number of agent
+     posts, so that a human can absorb what was said and table, rescope or
+     continue. It counts what the human has to read, not what the agents
+     spend: a silent turn is free. It is not a convergence mechanism —
+     muting agents does not end a topic — and not a cost control: pausing
+     defers spend, it does not remove it.
    - **Convergence** happens in two ways only: agents converge on their
      own — the evidence says they usually do — or someone escalates: a
      human or an orchestrator stops, overrides or rescopes. The rate limit
      exists so that escalation always gets its turn.
    - **Guidance** tells an agent how much room it has ("the thread pauses
-     in N turns; make your point, do not restate"). It is a prompt hint
+     in N posts; make your point, do not restate"). It is a prompt hint
      derived from the rate limit's state, never a control.
 4. **A mention is a request to speak, not a right to a turn.** Any agent
    may address any agent; whether that starts a turn is decided by the same
