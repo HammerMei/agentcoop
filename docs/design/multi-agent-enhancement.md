@@ -510,25 +510,41 @@ upgrades 3's boundary rule. 6 needs 4 and 5. 7 needs 5. 8 needs 5 and 6.
 
 ## 9. Undecided
 
-- **Integration senders.** Allow-listing a CI or webhook account as a
-  guest works and inherits human semantics (reset). Whether a noisy feed
-  needs its own sender class is decided when one is observed; which
-  username a webhook post carries on each platform is to be verified.
-- **Per-mode `post_limit`, `catch_up_post_threshold`, `catch_up_age_seconds`
-  defaults** — measured in task 4.
-- **`listen: parallel`** — today's behaviour for unaddressed bots; not
-  offered until a room wants it.
-- **Inferred interruption** — whether a classifier or the chair should
-  judge that a human post makes a plan obsolete, and confirm with the
-  human when unsure; not in this version.
-- **Envelope encoding and extensions.** Whether the envelope is a fenced
-  JSON block, the whole reply, or a backend-native structured output where
-  one exists; and whether it later carries other signals — mentions
-  resolved by name, a reply-to post, a reaction — so that
-  `<end-of-agent-chain>` and `@`-text stop being parsed out of prose.
-- **Glossary.** "Orchestrator", "mode", "watermark", "sweeper", "control
-  word", "coordination thread" go into `CONTEXT.md` with the synonyms to
-  avoid (moderator, judge, router, queue, topic) if this proceeds.
+Decisions this version needs and does not yet make; each names the task
+that settles it.
+
+- **Envelope encoding** (task 1). A fenced JSON block, the whole reply, or
+  a backend-native structured output where one exists. The contract is
+  the fields; the encoding is chosen when the parser is written.
+- **Per-mode `post_limit`, `catch_up_post_threshold`,
+  `catch_up_age_seconds`** (task 4). Measured in the lab before defaults
+  are fixed.
+- **Webhook sender identity** (task 2). Which username a webhook post
+  carries on each platform, so that allow-listing a CI account as a guest
+  is known to work there.
+- **Glossary** (on acceptance). "Orchestrator", "mode", "watermark",
+  "sweeper", "control word", "coordination thread", "reply envelope" go
+  into `CONTEXT.md` with the synonyms to avoid (moderator, judge, router,
+  queue, topic).
+
+## 10. Out of scope for this version
+
+Known, deliberately not built now; each names what would reopen it.
+
+- **`listen: parallel`** — today's behaviour for unaddressed bots. Reopened
+  if a room wants immediacy over the redundancy it produces.
+- **Inferred interruption** — a classifier or the chair judging that a
+  human post makes a running plan obsolete, confirming with the human
+  when unsure. Reopened once `stop:` has been used enough to show what
+  humans actually interrupt.
+- **An integration sender class** — a role between human and agent for
+  CI and webhook accounts. Reopened the first time a feed's human
+  semantics (rate-limit reset) are observed to be wrong.
+- **Envelope extensions** — mentions resolved by name, a reply-to post, a
+  reaction, so that `<end-of-agent-chain>` and `@`-text stop being parsed
+  out of prose. Reopened after the envelope has run in the lab.
+- **Rooms spanning gateways**, **hidden information**, and **convergence
+  by the gateway** — non-goals (§2).
 
 ---
 
