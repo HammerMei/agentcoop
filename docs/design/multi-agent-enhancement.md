@@ -354,7 +354,9 @@ only. A human post resets the rate limit before step 3.
   they were posted; a plan starts when the previous one has ended. Plans
   on different threads run concurrently. (A member of the running plan
   addressing another bot creates the next plan in the queue; it does not
-  interleave.)
+  interleave.) The order holds between human and bot requesters too: a
+  human replies to what they have read, so a plan that jumped the queue
+  would answer before the posts it depends on.
 - *Parallel*: every member's turn starts now, with no ordering between
   them. Parallel is for work that does not depend on order — "a, kick off
   the tests; b, revise the doc". It makes no promise of isolation: a
@@ -632,7 +634,11 @@ through it. Its purpose is to see the conversations this design produces
   member states at its end, every pause, every sweep — and a tally of
   turns, posts, counted posts, tokens and context size per bot. The
   transcript is reviewed by people for exchanges that read wrong; what
-  reads wrong is fixed in §5 and the scenario is run again.
+  reads wrong is fixed in §5 and the scenario is run again. One thing to
+  count: in a room where bots address each other often, how many plans
+  are refused at a pause with members in mixed states, and whether an
+  orchestrator skill that waits one to three minutes before `extend:` —
+  the plans continue, the human has time to read — removes them.
 - **The classifier**: `ADDRESS_RESOLVER` and `LISTEN_GATE` run in the
   simulator in shadow — every decision logged against the rule-based
   one and hand labels — and, as a separate run, with effect, so that the
