@@ -47,9 +47,14 @@ the room diverged by whatever its own counter had removed.
 1. **Consistent context.** No post is ever withheld from a bot's context by
    admission policy. A post that did not start a bot's turn reaches that
    bot's session at its next admitted turn, fetched from the platform. For
-   every coordination thread, every bot's context is a prefix of that
-   thread's history, never a history with holes. (A skill may give its orchestrator a fresh session
-   for one conversation; that is the skill's choice, not a gateway rule.)
+   every coordination thread, what a bot has been delivered is a prefix
+   of that thread's history — never a history with holes, except for the
+   bounded gap after a failed fetch, which the next fetch closes. A bot
+   has one backend session per room, as today; every thread's backlog is
+   appended to it, so a bot in a room sees every thread it has been
+   delivered, in delivery order. Delivery is per thread; context is per
+   room. (A skill may give its orchestrator a fresh session for one
+   conversation; that is the skill's choice, not a gateway rule.)
 2. **A room is not bound to one scenario.** Mode, rate limit and
    orchestrator are runtime state of a coordination thread, settable by a
    human or an orchestrator. One room goes from casual conversation into a
@@ -125,7 +130,7 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; mode `catch-up`; `post_limit`
 | Term | Meaning |
 |---|---|
 | **post** | One message on the platform. |
-| **turn** | One run of a bot's backend, started by one trigger in one coordination thread. It produces zero or one post, in that thread. A turn whose reply is `done` produces none. |
+| **turn** | One run of a bot's backend, started by one trigger or by a sweeper admission, in one coordination thread. It produces zero or one post, in that thread. A turn whose reply is `done` produces none. |
 | **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, the username in the text, or — with the resolver (§5, `ADDRESS_RESOLVER`) — the bot's display name, an alias, or a description of what it does. In an agent post: the platform's mention set or the room-wide mention only; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
 | **coordination thread** | The unit of mode, rate limit and orchestrator. A post inside a platform thread belongs to that thread; every top-level post in a room belongs to the room's own thread. A bot's reply inherits the thread of its trigger. |
 | **plan** | The dispatch of one post to the bots it addresses: one turn per member, in parallel (default) or in sequence. A single addressed bot is a one-member plan. A post that carries only control words creates no plan. |
@@ -225,8 +230,9 @@ only. A human post resets the rate limit before step 3.
   higher one than `catch-up` rooms.
 - *State*: count, remaining budget and the time of the last reset are
   persisted per thread (`THREAD_STATE`), so a restart resumes the thread
-  where it was. (They cannot be rebuilt from history: `extend:` and the
-  TTL reset leave no post.)
+  where it was. (They cannot be rebuilt by counting posts: the TTL reset
+  leaves no post, and what `extend:` added depends on the count at that
+  moment.)
 
 ### AUTHORITY (G4)
 
@@ -240,8 +246,9 @@ only. A human post resets the rate limit before step 3.
 
 - *Scope*: one post id per bot per coordination thread — the end of the
   last range of that thread's history successfully delivered to the bot's
-  session. Context and replies are both bounded by the thread: a turn in
-  `T1` receives `T1`'s backlog and nothing of `T2`.
+  session. Delivery and replies are both bounded by the thread: a turn in
+  `T1` receives `T1`'s backlog and nothing of `T2`. The session is the
+  room's: what earlier turns delivered from `T2` stays in it.
 - *Normal*: when a bot starts a turn in a thread, the gateway fetches that
   thread's posts after the bot's watermark from the platform and delivers
   them as the turn's context ahead of the trigger; once the backend has
@@ -266,8 +273,13 @@ only. A human post resets the rate limit before step 3.
   `/posts/{id}/thread`) or by filtering room history.
 - *Lifecycle*: the entry exists only while the bot has undelivered posts
   in that thread (`THREAD_STATE`). A thread with no entry is fully
-  delivered; its next post starts a new backlog at that post. A gateway
-  restart changes nothing.
+  delivered; its next post starts a new backlog at that post. Posts that
+  arrive while the gateway is down are found by the connector's per-room
+  reconnect watermark and replayed as inbound posts
+  (`Connector.replay_room_since`, `gateway/core/connector.py:629`), so
+  they create backlogs like live ones; a thread with no entry has no
+  undelivered post, not an unobserved one. A gateway restart changes
+  nothing else.
 
 ### SWEEPER (D2)
 
@@ -312,14 +324,15 @@ only. A human post resets the rate limit before step 3.
   | watermark, per bot | the first post the bot has not yet been delivered in that thread | the bot's backlog for the thread is fully delivered | room record |
   | rate limit: count, remaining, last reset | the first agent post counted | a reset leaves the thread at its defaults — a human post with no extension outstanding, or `ttl_seconds` of silence | room record |
   | mode override, orchestrator | set by a control word | `thread_state_ttl` of silence (days, not seconds), or the platform archives or deletes the thread; the room default applies again | room record |
-  | queued and running plans | a post creates a plan | the plan ends | memory |
+  | plan record: thread, post id, requester, members, mode | a post creates a plan | the plan ends | room record (member states and pending turns in memory) |
 
 - *Garbage collection*: the sweeper removes entries that have returned to
   their defaults on each pass. `coop room status` lists only threads with
   entries.
-- *Bound*: entries scale with threads active within `thread_state_ttl`,
-  times the bots in the room for watermarks — kilobytes, not a per-thread
-  record forever.
+- *Bound*: the active overrides and plan records, plus one watermark per
+  bot per thread with undelivered backlog. A `snooze` thread keeps a
+  watermark for a bot never addressed there until the thread is archived
+  — the backlog is kept, not dropped for a tidier bound. Kilobytes.
 
 ### PLAN (P1)
 
@@ -342,8 +355,9 @@ only. A human post resets the rate limit before step 3.
   the tests; b, revise the doc". It makes no promise of isolation: a
   member that starts later may see an earlier member's reply in its
   backlog. Each member is bounded by `timeout:` (default
-  `hop_timeout_seconds`) from the plan's post; a member still running at
-  the timeout is `timed-out` and the plan can end.
+  `hop_timeout_seconds`) from the plan's start — when it reaches the head
+  of the thread's queue; time in the queue does not count. A member
+  still running at the timeout is `timed-out` and the plan can end.
 - *Sequential*: members run one at a time in order; each hop receives the
   earlier replies in its backlog. A hop waits for its bot if the bot is
   busy, up to `timeout:` (default `hop_timeout_seconds`); on timeout the
@@ -359,22 +373,28 @@ only. A human post resets the rate limit before step 3.
   `failed`, `timed-out`, `cancelled` (by `stop:` before the member ran),
   `unknown` (after a restart, for a member whose outcome is not visible
   in the room).
-- *Boundary*: the plan ends when every member has a state. The
+- *Boundary*: the plan ends when every member has a state — a queued
+  plan whose members were all served by earlier turns ends without
+  reaching the head of the queue, and its callback fires then. The
   requester's post is the trigger; member posts count against
   `RATE_LIMIT`. Overshoot past a pause is at most the running plan's
   members minus one.
-- *Restart*: plans live in memory. After a gateway restart no plan is
-  running: members that had not run do not run; the requester is told the
-  members' states, `replied` where a post is visible and `unknown`
-  otherwise. The thread's rate-limit state and watermarks are on disk
-  (`THREAD_STATE`), so nothing else needs recovery.
+- *Restart*: a plan's record — thread, post id, requester, members, mode
+  — is on disk (`THREAD_STATE`); member states and pending turns are in
+  memory. After a gateway restart no plan is running: each recorded plan
+  ends, with members `replied` where a post is visible and `unknown`
+  otherwise, its requester is told, and the record is removed. The
+  thread's rate-limit state and watermarks are on disk, so nothing else
+  needs recovery.
 
 ### CALLBACK (P2)
 
 - When a plan ends and its requester is the thread's orchestrator bot,
   the orchestrator gets one turn carrying the members' replies and states
   (through `WATERMARK`). A member's post addressed to that orchestrator
-  creates no plan: it is the plan's reply and arrives in the callback.
+  creates no plan for the orchestrator: it is the plan's reply and
+  arrives in the callback. Other bots the same post names form a plan as
+  usual.
 - A plan requested by a human or by any other bot ends without a
   callback. Its members' replies reach the requester as any addressed
   post does — a human is notified; a bot gets a turn, one per reply
@@ -385,11 +405,12 @@ only. A human post resets the rate limit before step 3.
 
 ### STOP (P3)
 
-- `stop:` from a human on a thread: every running plan on the thread marks
-  members that have not started `cancelled`, lets running turns finish,
-  and ends at that boundary. The notice lists each member and its state
-  (`a: replied`, `b: replied`, `c: cancelled`) so the human knows what was
-  done and what was not. Nothing else interrupts a plan.
+- `stop:` from a human on a thread: every running and queued plan on the
+  thread marks members that have not started `cancelled`, lets running
+  turns finish, and ends at that boundary. The notice lists each plan
+  with each member and its state (`a: replied`, `b: replied`, `c:
+  cancelled`) so the human knows what was done and what was not. Nothing
+  else interrupts a plan.
 
 ### REPLY_ENVELOPE (R1)
 
@@ -416,7 +437,8 @@ only. A human post resets the rate limit before step 3.
   reads the platform mentions and reaches the same set — after a restart
   and from a history fetch alike. Every post is parsed one way, from the
   platform, whoever wrote it.
-- *Validation*: no envelope, `text` without `to`, an empty `to`, a `to`
+- *Validation*: no envelope, `text` without `to` (unless it consists
+  only of control words), an empty `to`, a `to`
   naming only the sender, or a name that is neither a room member nor a
   bot the gateway knows, is returned to the same session once as a schema
   error — a continuation of the turn, not a post, not counted. A second
@@ -468,7 +490,7 @@ only. A human post resets the rate limit before step 3.
 
 No topic ids or per-topic budgets, no per-message classification of mode
 without the resolver, no persisted copy of the message backlog (history is
-fetched from the platform; pending turns and queued plans exist in
+fetched from the platform; pending turns and member states exist in
 memory), no agent bypass of the mention gate, no addressing inferred from
 an agent's text, no inferred interruption,
 no isolation between members of a plan, and no knowledge of what a meeting
@@ -493,7 +515,7 @@ public posts, the thread's post count, callbacks.
 | 3 | `chair: mode: snooze` · `@a @b @c @d — answer independently in one post; do not address other bots. <question>` | — | 1 (chair; control + plan) | 0 | — |
 | 4 | Plan P1 (parallel, 4 members) runs; each member's backlog is whatever has arrived when its turn starts — usually just #1–#3; each replies `to: [chair]`, which starts no chair turn (`CALLBACK`) | 4 | 4 (a, b, c, d) | 4 | — |
 | 5 | P1 ends | 1 exempt (chair) | — | 4 | 1st |
-| 6 | `chair: <synthesis: positions, agreements, conflicts, open questions>` · `@a @b @c @d — read the synthesis and the others' replies; post only a substantive addition or objection, otherwise `done`.` | — | 1 (chair) | 4 | — |
+| 6 | `chair: <synthesis: positions, agreements, conflicts, open questions>` · `@a @b @c @d — read the synthesis and the others' replies; post only a substantive addition or objection, otherwise done.` | — | 1 (chair) | 4 | — |
 | 7 | Plan P2 runs; `a`, `b`, `c` answer `done`; `d` objects to one point, `to: [chair]` | 4 | 1 (d) | 5 → **pause** | — |
 | 8 | Gateway: `thread paused (5/5). extend: N, or a human post, to continue.` | — | 1 (gateway) | 5 | — |
 | 9 | P2 ends | 1 exempt (chair; runs while paused) | — | 5 | 2nd |
@@ -533,10 +555,11 @@ whose backlog contains the notice.
 replied, `b` is running. On `T2`, `H: x, is the staging deploy green?`
 creates a one-member plan; `T2` has no running plan, so it starts now.
 
-- `x`'s `T2` turn: its context is `T2`'s backlog and `H`'s post; nothing
-  of `T1` is delivered, `T1`'s backlog entry for `x` is untouched, and
-  the turn replies in `T2` only.
-- `b` replies on `T1`; `x`'s hop starts: its context is `T1`'s backlog —
+- `x`'s `T2` turn receives `T2`'s backlog and `H`'s post; nothing of
+  `T1` is delivered by this turn (what earlier `T1` turns delivered is in
+  the room session as before), `T1`'s backlog entry for `x` is untouched,
+  and the turn replies in `T2` only.
+- `b` replies on `T1`; `x`'s hop starts: it receives `T1`'s backlog —
   `a`'s and `b`'s replies — and it replies in `T1`.
 - Had `H` posted `x, …` on `T1` instead, that plan would queue behind the
   sequential one and `x` would get its hop first, then a second turn for
@@ -592,10 +615,11 @@ through it. Its purpose is to see the conversations this design produces
   executable form of §5; where it and the text disagree, one of them is
   wrong and the text is fixed or the script is.
 - **Members**: each agent turn is one `claude -p` (or OpenCode) call with
-  the bot's persona from the lab configuration; its context is exactly
-  the thread prefix the watermark delivers — nothing else. The
-  orchestrator is the same, loaded with its skill; its control words are
-  parsed by the script.
+  the bot's persona from the lab configuration, in one session per bot
+  per room, as the gateway keeps it; each turn appends what the watermark
+  delivers for its thread, and nothing else is injected. The orchestrator
+  is the same, loaded with its skill; its control words are parsed by the
+  script.
 - **Humans**: scripted lines in the scenario file, placed at a step; an
   optional model playing the human is allowed and labelled as such.
 - **Output**: a transcript with the script's annotations before each
@@ -608,10 +632,14 @@ through it. Its purpose is to see the conversations this design produces
   simulator in shadow — every decision logged against the rule-based
   one and hand labels — and, as a separate run, with effect, so that the
   model's accuracy and its cost are known before task 8.
+- **Two kinds of run**: a run with live models is for behaviour — what
+  the agents do with the rules, over several runs, read by people; it is
+  not expected to repeat. A run's inbound events and agent outputs can
+  be saved as a replay fixture, and replaying it is deterministic.
 - **Afterwards**: the mechanism tests in the table below are written
-  against the simulator first and carried to the gateway unchanged; a
-  scenario run through the gateway must produce the same annotation
-  sequence as the simulator.
+  against the simulator first and carried to the gateway unchanged; on a
+  replay fixture, the gateway must produce the same annotation sequence
+  as the simulator.
 
 What the simulator cannot show: platform behaviour — threads, the
 mention array each platform computes from a canonical post (code blocks,
@@ -627,7 +655,7 @@ compaction; those belong to the lab tasks.
 | 2 | **Mention gate for agents.** Agent senders pass the same gate, read from their canonical mentions; username without `@` counts in human posts only. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post addressed only to humans starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post addressed only to humans hand-checked for whether a bot's reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | token-only and failed turns count zero; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
 | 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status; thread-state GC. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS, THREAD_STATE | mode change applies to the next post; a thread qualifies on threshold and on age, never when paused or under a running plan; one catch-up turn per qualifying thread, in newest-post order, each delivering and replying in its own thread; no turn when nothing qualifies; two threads in one room on different modes; rate-limit and override entries vanish at their reset or `thread_state_ttl`. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
-| 5 | **Plans.** One plan at a time per thread, parallel and sequential members, a turn serving every waiting plan, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`, restart notice. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | plans on a thread run in posting order, one at a time; a sequential hop sees earlier replies; a run of posts to one bot is one turn; an unreached hop is never served early; after a restart the requester is told `replied` / `unknown` per member; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
+| 5 | **Plans.** One plan at a time per thread, parallel and sequential members, a turn serving every waiting plan, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`, restart notice. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | plans on a thread run in posting order, one at a time; a sequential hop sees earlier replies; a run of posts to one bot is one turn; an unreached hop is never served early; after a restart the requester is told `replied` / `unknown` per member; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported for running and queued plans; a queued plan fully served by earlier turns ends before reaching the head; `timeout:` runs from the plan's start, not its post; plan records survive restart and are removed at the end. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
 | 6 | **Listen mode.** Serial listen turns; wait for a running plan. | UNADDRESSED_MODE (listen) | order follows the roster; listen turns suspended during a plan; the three-scenario day and the three-scenario thread (§7 rows 1–2) as end-to-end tests. | Lab debugging rehearsal: a planted wrong claim corrected on the next turn; turns per post. |
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 member turns, 5 counted posts, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
 | 8 | **Resolver.** Tier-3 addressing and mode recommendation in shadow; then `LISTEN_GATE` in shadow. | ADDRESS_RESOLVER, LISTEN_GATE | — | Agreement with hand labels per decision type before any of them is given effect. |
@@ -797,7 +825,8 @@ its `SelectorGroupChat` is one model call per hop over the whole transcript
 with a rule that short-circuits it (`ADDRESS_RESOLVER`, with the plan issued by rule first),
 and every participant buffers every broadcast until selected (`WATERMARK`'s
 effect). Google ADK, MetaGPT and crewAI are task pipelines; parallel
-branches in all three see only the fan-out point, which is `PLAN`'s `parallel:`.
+branches in all three see only the fan-out point — an isolation `PLAN`'s
+`parallel:` does not promise.
 
 ### Debate in the literature
 
@@ -813,7 +842,8 @@ right and another wrong (Zhang et al., §4). A synthesising aggregator over
 independent proposals beats selecting one proposal (Wang et al. 2024,
 arXiv:2406.04692). None of these studied a chat room with a human in it.
 This design takes from them a default flow to validate in the lab — a
-parallel blind round, a synthesis, one bounded revision round — and a
+parallel independent first round, a synthesis, one bounded revision
+round — and a
 preference for members that differ in model, information or tools over
 copies trading opinions.
 
