@@ -393,7 +393,8 @@ only. A human post resets the rate limit before step 3.
   turn limit (`agents.timeout`, `gateway/core/config.py:132`) is a
   separate floor per deployment. On a timeout the plan ends: the member
   is `timed-out`, members not yet started are `cancelled`, and the
-  requester is told (`CALLBACK`). Whether the remaining hops depended on
+  requester is told (`CALLBACK`). A turn still running is left to finish,
+  as under `stop:`; its post, if it makes one, lands after the notice. Whether the remaining hops depended on
   the one that timed out is not the gateway's to guess; the requester
   answers by re-posting the rest or not. `timeout:` defaults to
   `hop_timeout_soft_seconds`; a plan an orchestrator posts carries the
