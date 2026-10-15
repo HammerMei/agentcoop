@@ -206,15 +206,17 @@ only. A human post resets the rate limit before step 3.
   human's control post resets it like any human post — and the new mode's
   default `post_limit` applies from then on unless `limit:` was set.
 - *Exceptions*: control-word-only posts create no plan and trigger nobody
-  in any mode; gateway notices likewise.
+  in any mode; gateway notices likewise, with one exception — the
+  plan-end notice addressed to a bot requester (`CALLBACK`).
 
 ### RATE_LIMIT (G3)
 
 - *Scope*: per coordination thread. Counts **posts by agents** — what the
   human has to absorb. A turn that posts nothing (token-only, or a failed
   turn) counts zero; the thread's orchestrator's posts do not count. A
-  turn only ever starts from an admitted plan, a listen admission or the
-  sweeper, so a run of silent turns cannot loop. Cost is not what this limit bounds; pausing
+  turn only ever starts from an admitted plan, a listen admission, the
+  sweeper, the orchestrator's callback or a plan-end notice to a bot
+  requester, so a run of silent turns cannot loop. Cost is not what this limit bounds; pausing
   defers spend, it does not remove it.
 - *Normal*: after `post_limit` agent posts since the last reset the thread
   **pauses**: no agent turn starts, posts are still delivered to backlogs,
@@ -304,7 +306,8 @@ only. A human post resets the rate limit before step 3.
   qualify; they are still delivered as context by whichever turn comes
   next.
 - *Normal*: for each qualifying thread the bot gets one catch-up turn in
-  that thread, in the order of the threads' newest posts. Each turn
+  that thread, in the order of the threads' newest posts; the qualifying
+  set is taken once at the start of the pass. Each turn
   delivers the bot's whole backlog — the first of them delivers
   everything, the later ones nothing new — and its trigger names the
   thread it is answering; the reply is posted there and counts there. A
@@ -321,7 +324,8 @@ only. A human post resets the rate limit before step 3.
 - A failed turn — a backend failure, or a reply the gateway cannot parse
   after one re-prompt (`REPLY_ENVELOPE`) — is announced from the failing
   bot's account. The notice is
-  delivered through `WATERMARK` and never starts a turn in any mode. A
+  delivered through `WATERMARK` and starts no turn in any mode (the
+  plan-end notice to a bot requester is `CALLBACK`'s, not this one). A
   plan whose member failed marks it `failed` and advances.
 
 ### THREAD_STATE (S1)
@@ -512,7 +516,7 @@ only. A human post resets the rate limit before step 3.
 
 ### HINT (H1)
 
-- Injected into every turn: the thread's mode, the remaining posts before
+- Injected into every turn: the thread this turn replies in, its mode, the remaining posts before
   its pause, and "make your point; do not restate; answer `done` if you
   have nothing to add; `to` is who the post is for, not who it mentions;
   `all` only with a reason". Derived from `UNADDRESSED_MODE` and
