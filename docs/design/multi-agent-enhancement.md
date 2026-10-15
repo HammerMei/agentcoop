@@ -531,8 +531,51 @@ bots) before production (`#nest`, three bots, one human); Appendix A is
 the baseline. Each measurement records turns, posts, tokens and latency —
 fewer posts is not fewer tokens.
 
+### 8.1 The simulator comes first
+
+Before any gateway code, §5 is implemented as a standalone simulator
+(`tools/roomsim/`, outside the gateway) and the scenarios in §7 are run
+through it. Its purpose is to see the conversations this design produces
+— and the odd corners — before paying for an implementation.
+
+- **Mechanism**: a deterministic script implementing §5 as written —
+  thread state, the mention gate (tiers 1 and 2), modes, the rate limit,
+  the sweeper, plans in FIFO order, the reply envelope. It is not an LLM
+  tracing the rules: a trace by a model would hide whether a wrong step
+  was a hole in the spec or an error in the trace. The script is the
+  executable form of §5; where it and the text disagree, one of them is
+  wrong and the text is fixed or the script is.
+- **Members**: each agent turn is one `claude -p` (or OpenCode) call with
+  the bot's persona from the lab configuration; its context is exactly
+  the thread prefix the watermark delivers — nothing else. The
+  orchestrator is the same, loaded with its skill; its control words are
+  parsed by the script.
+- **Humans**: scripted lines in the scenario file, placed at a step; an
+  optional model playing the human is allowed and labelled as such.
+- **Output**: a transcript with the script's annotations before each
+  event — the turn, its thread and backlog size, the count, a plan's
+  member states at its end, every pause, every sweep — and a tally of
+  turns, posts, counted posts, tokens and context size per bot. The
+  transcript is reviewed by people for exchanges that read wrong; what
+  reads wrong is fixed in §5 and the scenario is run again.
+- **The classifier**: `ADDRESS_RESOLVER` and `LISTEN_GATE` run in the
+  simulator in shadow — every decision logged against the rule-based
+  one and hand labels — and, as a separate run, with effect, so that the
+  model's accuracy and its cost are known before task 8.
+- **Afterwards**: the mechanism tests in the table below are written
+  against the simulator first and carried to the gateway unchanged; a
+  scenario run through the gateway must produce the same annotation
+  sequence as the simulator.
+
+What the simulator cannot show: platform behaviour — threads, mention
+arrays, history paging, webhook identities — and session compaction;
+those belong to the lab tasks.
+
+### 8.2 Tasks
+
 | # | Task | Builds | Mechanism tests | Effect measurements |
 |---|---|---|---|---|
+| 0 | **Simulator.** §8.1: the script, the scenario files for every §7 row, persona files from the lab, the classifier in shadow and with effect. | — (reference) | the §6 traces reproduced by the script; each mechanism test below, run against the script. | Every §7 scenario's transcript reviewed; turns, posts, tokens per scenario; classifier agreement with hand labels and with the rule. |
 | 1 | **Deliver, do not drop.** Per-bot watermark; history fetch extended with ids, thread ids and paging; Layer 2 overflow and failure notices delivered at the next turn; the reply envelope (`text` / `done`) with plain-text fallback; the catch-up batch becomes per thread. | WATERMARK, FAILURE_NOTICE, REPLY_ENVELOPE, THREAD_STATE | on the success path a thread's backlog is delivered once, in order, and only that thread's; the watermark entry disappears when the backlog is empty and reappears at the next post; watermark survives restart; a failed fetch delivers the trigger alone and the next fetch re-delivers it; envelope parsing — `text`, `done`, no envelope → `text`, token-only → `done`, token inside text removed; messages from two threads arriving while the bot is busy yield one turn per thread, each replying in its own. | Lab: dropped posts 21 → 0 over a debate; the two misattributions in Appendix A absent on replay. Production: error-notice turns per failure 4 → 0. |
 | 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | token-only and failed turns count zero; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
@@ -542,7 +585,8 @@ fewer posts is not fewer tokens.
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 member turns, 5 counted posts, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
 | 8 | **Resolver.** Tier-3 addressing and mode recommendation in shadow; then `LISTEN_GATE` in shadow. | ADDRESS_RESOLVER, LISTEN_GATE | — | Agreement with hand labels per decision type before any of them is given effect. |
 
-Dependencies: 1, 2 and 3 are independent and can ship in any order; Layer 1
+Dependencies: 0 precedes everything and changes §5 before code does. 1, 2
+and 3 are independent and can ship in any order; Layer 1
 (self-termination) stays throughout, and task 1's `done` flag is its
 structured form. 4 needs 1. 5 needs 1, 2 and 3, and upgrades 3's boundary
 rule. 6 needs 4 and 5. 7 needs 5. 8 needs 5 and 6.
