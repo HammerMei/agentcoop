@@ -126,7 +126,7 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; mode `catch-up`; `post_limit`
 |---|---|
 | **post** | One message on the platform. |
 | **turn** | One run of a bot's backend, started by one trigger in one coordination thread. It produces zero or one post, in that thread. A turn whose reply is `done` produces none. |
-| **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, the username in the text, or — with the resolver (§5, `ADDRESS_RESOLVER`) — the bot's display name, an alias, or a description of what it does. In an agent post: a platform mention only; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
+| **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, the username in the text, or — with the resolver (§5, `ADDRESS_RESOLVER`) — the bot's display name, an alias, or a description of what it does. In an agent post: the platform's mention set or the room-wide mention only; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
 | **coordination thread** | The unit of mode, rate limit and orchestrator. A post inside a platform thread belongs to that thread; every top-level post in a room belongs to the room's own thread. A bot's reply inherits the thread of its trigger. |
 | **plan** | The dispatch of one post to the bots it addresses: one turn per member, in parallel (default) or in sequence. A single addressed bot is a one-member plan. A post that carries only control words creates no plan. |
 | **member**, **requester** | The bots a plan addresses; the sender of the post that created it. ("Owner" is reserved for the RBAC role.) |
@@ -170,7 +170,8 @@ only. A human post resets the rate limit before step 3.
   room-wide mention; the bot's username in the text (today's regex
   without the leading `@`); with `ADDRESS_RESOLVER` enabled, a display
   name, alias or description.
-- *Agent posts*: platform mentions only. The canonical form
+- *Agent posts*: the platform's mention set and the room-wide mention
+  only. The canonical form
   (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its
   envelope's `to`, so the gate reads them without guessing. A bare name
   in an agent post is text, never addressing — the canonical rewrite
@@ -292,7 +293,9 @@ only. A human post resets the rate limit before step 3.
 
 ### FAILURE_NOTICE (D3)
 
-- A failed turn is announced from the failing bot's account. The notice is
+- A failed turn — a backend failure, or a reply the gateway cannot parse
+  after one re-prompt (`REPLY_ENVELOPE`) — is announced from the failing
+  bot's account. The notice is
   delivered through `WATERMARK` and never starts a turn in any mode. A
   plan whose member failed marks it `failed` and advances.
 
@@ -400,6 +403,7 @@ only. A human post resets the rate limit before step 3.
   magic string or a prompt rule.
 - *Fields*: `to` — the recipients: usernames of humans or bots in the
   room, or `all`; required with `text`, non-empty, the sender excluded.
+  A `text` consisting only of control words needs no `to`.
   `text` — the post. `done` — nothing to post. One of `text` / `done`;
   `done` with `text` is `text`. The encoding — a fenced block, the whole
   reply, or a backend-native structured output — is decided in task 1
@@ -490,10 +494,10 @@ public posts, the thread's post count, callbacks.
 | 4 | Plan P1 (parallel, 4 members) runs; each member's backlog is whatever has arrived when its turn starts — usually just #1–#3; each replies `to: [chair]`, which starts no chair turn (`CALLBACK`) | 4 | 4 (a, b, c, d) | 4 | — |
 | 5 | P1 ends | 1 exempt (chair) | — | 4 | 1st |
 | 6 | `chair: <synthesis: positions, agreements, conflicts, open questions>` · `@a @b @c @d — read the synthesis and the others' replies; post only a substantive addition or objection, otherwise `done`.` | — | 1 (chair) | 4 | — |
-| 7 | Plan P2 runs; `a`, `b`, `c` answer `done`; `d` objects to one point | 4 | 1 (d) | 5 → **pause** | — |
+| 7 | Plan P2 runs; `a`, `b`, `c` answer `done`; `d` objects to one point, `to: [chair]` | 4 | 1 (d) | 5 → **pause** | — |
 | 8 | Gateway: `thread paused (5/5). extend: N, or a human post, to continue.` | — | 1 (gateway) | 5 | — |
 | 9 | P2 ends | 1 exempt (chair; runs while paused) | — | 5 | 2nd |
-| 10 | `chair: <close: decision, open items, who said what, d's objection recorded>` | — | 1 (chair) | 5 | — |
+| 10 | `chair: @H <close: decision, open items, who said what, d's objection recorded>` | — | 1 (chair) | 5 | — |
 
 Totals: 8 member turns, 3 exempt turns, 5 counted posts, 2 callbacks,
 11 posts in all (2 human, 3 chair, 5 members, 1 gateway). Today's lab debate: about 25 agent posts
