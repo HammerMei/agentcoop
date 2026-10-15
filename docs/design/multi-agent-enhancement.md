@@ -40,9 +40,9 @@ the room diverged by whatever its own counter had removed.
 
 1. **Consistent context.** No post is ever withheld from a bot's context by
    admission policy. A post that did not start a bot's turn reaches that
-   bot's session at its next admitted turn, fetched from the platform. Every
-   bot's context is therefore a prefix of the same room history, never a
-   history with holes. (A skill may give its orchestrator a fresh session
+   bot's session at its next admitted turn, fetched from the platform. For
+   every coordination thread, every bot's context is a prefix of that
+   thread's history, never a history with holes. (A skill may give its orchestrator a fresh session
    for one conversation; that is the skill's choice, not a gateway rule.)
 2. **A room is not bound to one scenario.** Mode, rate limit and
    orchestrator are runtime state of a coordination thread, settable by a
@@ -126,13 +126,13 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; mode `catch-up`; `post_limit`
 | **hop** | One member's turn inside a sequential plan. |
 | **plan boundary** | The moment a plan ends. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. Its control words are honoured and its turns are not rate-limited. |
-| **backlog** | The posts in a room past a bot's watermark: delivered to the platform, not yet delivered to that bot's session. |
+| **backlog** | The posts of one coordination thread past a bot's watermark for that thread: delivered to the platform, not yet delivered to that bot's session. |
 | **reply envelope** | The structured form of a turn's output: `text`, and an explicit `done` flag for "nothing to say" (`REPLY_ENVELOPE`). Plain text is accepted as `text`. |
 | **control word** | `mode:`, `limit:`, `extend:`, `parallel:`, `sequential:`, `timeout:`, `orchestrator:`, `stop:`. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. A control word inside a code block or a quotation is text. An unparseable value is ignored with a notice. |
 
 Parameters, per room with per-thread override: `post_limit` (per mode),
 `ttl_seconds`, `catch_up_post_threshold`, `catch_up_age_seconds`,
-`hop_timeout_seconds`.
+`hop_timeout_seconds`; per room: `thread_state_ttl`.
 
 ---
 
@@ -148,7 +148,7 @@ Every inbound post, for every bot the gateway runs in that room:
 4. **Plan** — the addressed bots form this post's plan; it runs when the thread's earlier plans have ended; each member gets one turn in the plan's mode, and a turn serves every queued plan on the thread that addresses that bot. (`PLAN`)
 5. **Unaddressed bots** — handled by the thread's mode. (`UNADDRESSED_MODE`)
 6. **Rate limit** — a turn starts only if the thread is not paused; a plan is admitted only if the thread is not paused. (`RATE_LIMIT`)
-7. **Context** — a bot that starts a turn first receives its backlog, then the trigger. (`WATERMARK`)
+7. **Context** — a bot that starts a turn first receives its backlog for that thread, then the trigger. (`WATERMARK`)
 8. **Reply** — the turn's output is parsed as a reply envelope; `text` is posted in the turn's thread and counts there; `done` posts nothing. (`REPLY_ENVELOPE`, `RATE_LIMIT`)
 
 A post that addresses nobody and carries no control word takes steps 5–7
@@ -209,9 +209,9 @@ only. A human post resets the rate limit before step 3.
 - *Defaults*: `post_limit` has a per-mode default; `listen` rooms need a
   higher one than `catch-up` rooms.
 - *State*: count, remaining budget and the time of the last reset are
-  persisted per thread in the room record, written on change, so a
-  restart resumes the thread where it was. (They cannot be rebuilt from
-  history: `extend:` and the TTL reset leave no post.)
+  persisted per thread (`THREAD_STATE`), so a restart resumes the thread
+  where it was. (They cannot be rebuilt from history: `extend:` and the
+  TTL reset leave no post.)
 
 ### AUTHORITY (G4)
 
@@ -223,57 +223,86 @@ only. A human post resets the rate limit before step 3.
 
 ### WATERMARK (D1)
 
-- *Scope*: one post id per bot per room — the end of the last range of
-  room history successfully delivered to that bot's session.
-- *Normal*: when a bot starts a turn, the gateway fetches the room's posts
-  after the watermark from the platform and delivers them as the turn's
-  context ahead of the trigger; once the backend has accepted the turn
-  the watermark advances to the last post delivered — the trigger, or a
-  later post that was part of the delivered range (a sequential hop's
-  earlier replies, for instance). The backlog may contain posts from
-  several coordination threads; the turn replies only in its own thread.
+- *Scope*: one post id per bot per coordination thread — the end of the
+  last range of that thread's history successfully delivered to the bot's
+  session. Context and replies are both bounded by the thread: a turn in
+  `T1` receives `T1`'s backlog and nothing of `T2`.
+- *Normal*: when a bot starts a turn in a thread, the gateway fetches that
+  thread's posts after the bot's watermark from the platform and delivers
+  them as the turn's context ahead of the trigger; once the backend has
+  accepted the turn the watermark advances to the last post delivered —
+  the trigger, or a later post that was part of the delivered range (a
+  sequential hop's earlier replies, for instance).
 - *Contract*: nothing is withheld by admission policy; a bot that is not
   woken has not seen its backlog yet, and sees it at its next admitted
-  turn. Delivered backlog is context only: control words and mentions in
-  it are not re-executed. On the success path a post is delivered once.
+  turn in that thread. Delivered backlog is context only: control words
+  and mentions in it are not re-executed. On the success path a post is
+  delivered once.
 - *Failure*: if the fetch fails the trigger is delivered alone and the
   watermark does not move; the next successful fetch re-delivers that
   trigger as part of the backlog. Bounded duplication after a failure is
   accepted; "delivered once" is a property of the success path.
 - *Interface*: reuses the connector history fetch
   (`Connector.fetch_room_history`, `gateway/core/connector.py:672`),
-  extended to return post ids and thread ids and to page past the first
-  page (Mattermost fetches one page today,
-  `gateway/connectors/mattermost/rest.py:402-409`).
-- *Restart*: the watermark is persisted with the room record; a gateway
-  restart changes nothing. A new session for a bot starts from the
-  existing watermark unless the operator resets it.
+  extended to return post ids and thread ids, to page past the first page
+  (Mattermost fetches one page today,
+  `gateway/connectors/mattermost/rest.py:402-409`), and to select one
+  thread — natively (Rocket.Chat `chat.getThreadMessages`, Mattermost
+  `/posts/{id}/thread`) or by filtering room history.
+- *Lifecycle*: the entry exists only while the bot has undelivered posts
+  in that thread (`THREAD_STATE`). A thread with no entry is fully
+  delivered; its next post starts a new backlog at that post. A gateway
+  restart changes nothing.
 
 ### SWEEPER (D2)
 
 - *Scope*: a periodic pass over every (bot, coordination thread) pair
-  whose thread is on `catch-up`.
-- *Qualifying*: a thread qualifies for a bot when that bot's backlog holds
-  ≥ `catch_up_post_threshold` posts of that thread, or its oldest
-  undelivered post of that thread is older than `catch_up_age_seconds`.
-  Posts in `snooze` or `listen` threads never qualify; a paused thread or
-  one with a running plan never qualifies.
+  that has a backlog entry and whose thread is on `catch-up`.
+- *Qualifying*: a thread qualifies for a bot when the bot's backlog for
+  it holds ≥ `catch_up_post_threshold` posts, or its oldest undelivered
+  post is older than `catch_up_age_seconds`; and the thread is not paused
+  and has no plan running (a running plan gives the bot its turn, as a
+  member or a later hop). Posts in `snooze` or `listen` threads never
+  qualify.
 - *Normal*: for each qualifying thread the bot gets one catch-up turn in
-  that thread, in the order of the threads' newest posts. A catch-up
-  turn's input is the bot's whole backlog (all threads, as context); it
-  replies in its own thread and the reply counts there. It has no trigger;
-  the watermark advances to the newest post delivered. A thread that
-  qualifies while the bot is already being given a turn in that thread
-  needs no sweep.
+  that thread, in the order of the threads' newest posts. The turn's
+  input is that thread's backlog; its reply is posted there and counts
+  there. It has no trigger; the watermark advances to the newest post
+  delivered. A thread that qualifies while the bot is already being given
+  a turn in it needs no sweep.
 - *Exceptions*: one catch-up turn per bot runs at a time; no turn is
   started when no thread qualifies.
-- Also posts the pause notice and acknowledges mode changes.
+- Also posts the pause notice, acknowledges mode changes, and removes
+  thread-state entries that have returned to their defaults
+  (`THREAD_STATE`).
 
 ### FAILURE_NOTICE (D3)
 
 - A failed turn is announced from the failing bot's account. The notice is
   delivered through `WATERMARK` and never starts a turn in any mode. A
   plan whose member failed marks it `failed` and advances.
+
+### THREAD_STATE (S1)
+
+- *Principle*: a coordination thread has state only while it is away from
+  its defaults. An entry is created when something first departs from the
+  default and removed when it returns; a room with hundreds of historical
+  threads holds entries for the handful that are active.
+- *Entries, per thread*:
+
+  | Entry | Created when | Removed when | Where |
+  |---|---|---|---|
+  | watermark, per bot | the first post the bot has not yet been delivered in that thread | the bot's backlog for the thread is fully delivered | room record |
+  | rate limit: count, remaining, last reset | the first agent post counted | a reset leaves the thread at its defaults — a human post with no extension outstanding, or `ttl_seconds` of silence | room record |
+  | mode override, orchestrator | set by a control word | `thread_state_ttl` of silence (days, not seconds), or the platform archives or deletes the thread; the room default applies again | room record |
+  | queued and running plans | a post creates a plan | the plan ends | memory |
+
+- *Garbage collection*: the sweeper removes entries that have returned to
+  their defaults on each pass. `coop room status` lists only threads with
+  entries.
+- *Bound*: entries scale with threads active within `thread_state_ttl`,
+  times the bots in the room for watermarks — kilobytes, not a per-thread
+  record forever.
 
 ### PLAN (P1)
 
@@ -320,8 +349,8 @@ only. A human post resets the rate limit before step 3.
 - *Restart*: plans live in memory. After a gateway restart no plan is
   running: members that had not run do not run; the requester is told the
   members' states, `replied` where a post is visible and `unknown`
-  otherwise. The rate-limit state and the watermark are on disk, so
-  nothing else needs recovery.
+  otherwise. The thread's rate-limit state and watermarks are on disk
+  (`THREAD_STATE`), so nothing else needs recovery.
 
 ### CALLBACK (P2)
 
@@ -458,11 +487,11 @@ whose backlog contains the notice.
 replied, `b` is running. On `T2`, `H: x, is the staging deploy green?`
 creates a one-member plan; `T2` has no running plan, so it starts now.
 
-- `x`'s `T2` turn: backlog includes `T1`'s posts so far (context); the
-  turn replies in `T2` only. Nothing about `T1` is asked of it, and it
-  cannot post there from this turn.
-- `b` replies on `T1`; `x`'s hop starts: backlog includes `a`'s and `b`'s
-  replies and `x`'s own `T2` post; it replies in `T1`.
+- `x`'s `T2` turn: its context is `T2`'s backlog and `H`'s post; nothing
+  of `T1` is delivered, `T1`'s backlog entry for `x` is untouched, and
+  the turn replies in `T2` only.
+- `b` replies on `T1`; `x`'s hop starts: its context is `T1`'s backlog —
+  `a`'s and `b`'s replies — and it replies in `T1`.
 - Had `H` posted `x, …` on `T1` instead, that plan would queue behind the
   sequential one and `x` would get its hop first, then a second turn for
   `H`'s post — unless the hop had not yet started, in which case the hop's
@@ -504,10 +533,10 @@ fewer posts is not fewer tokens.
 
 | # | Task | Builds | Mechanism tests | Effect measurements |
 |---|---|---|---|---|
-| 1 | **Deliver, do not drop.** Per-bot watermark; history fetch extended with ids, thread ids and paging; Layer 2 overflow and failure notices delivered at the next turn; the reply envelope (`text` / `done`) with plain-text fallback; the catch-up batch becomes per thread. | WATERMARK, FAILURE_NOTICE, REPLY_ENVELOPE | on the success path the backlog is delivered once, in order; watermark survives restart; a failed fetch delivers the trigger alone and the next fetch re-delivers it; envelope parsing — `text`, `done`, no envelope → `text`, token-only → `done`, token inside text removed; messages from two threads arriving while the bot is busy yield one turn per thread, each replying in its own. | Lab: dropped posts 21 → 0 over a debate; the two misattributions in Appendix A absent on replay. Production: error-notice turns per failure 4 → 0. |
+| 1 | **Deliver, do not drop.** Per-bot watermark; history fetch extended with ids, thread ids and paging; Layer 2 overflow and failure notices delivered at the next turn; the reply envelope (`text` / `done`) with plain-text fallback; the catch-up batch becomes per thread. | WATERMARK, FAILURE_NOTICE, REPLY_ENVELOPE, THREAD_STATE | on the success path a thread's backlog is delivered once, in order, and only that thread's; the watermark entry disappears when the backlog is empty and reappears at the next post; watermark survives restart; a failed fetch delivers the trigger alone and the next fetch re-delivers it; envelope parsing — `text`, `done`, no envelope → `text`, token-only → `done`, token inside text removed; messages from two threads arriving while the bot is busy yield one turn per thread, each replying in its own. | Lab: dropped posts 21 → 0 over a debate; the two misattributions in Appendix A absent on replay. Production: error-notice turns per failure 4 → 0. |
 | 2 | **Mention gate for agents.** Agent senders pass the same gate; username without `@` counts. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post naming nobody starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post with no mention hand-checked for whether a reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | token-only and failed turns count zero; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
-| 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS | mode change applies to the next post; a thread qualifies on threshold and on age, never when paused; one catch-up turn per qualifying thread, in newest-post order, each replying in its own thread; no turn when nothing qualifies; two threads in one room on different modes. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
+| 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status; thread-state GC. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS, THREAD_STATE | mode change applies to the next post; a thread qualifies on threshold and on age, never when paused or under a running plan; one catch-up turn per qualifying thread, in newest-post order, each delivering and replying in its own thread; no turn when nothing qualifies; two threads in one room on different modes; rate-limit and override entries vanish at their reset or `thread_state_ttl`. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
 | 5 | **Plans.** One plan at a time per thread, parallel and sequential members, a turn serving every waiting plan, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`, restart notice. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | plans on a thread run in posting order, one at a time; a sequential hop sees earlier replies; a run of posts to one bot is one turn; an unreached hop is never served early; after a restart the requester is told `replied` / `unknown` per member; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
 | 6 | **Listen mode.** Serial listen turns; wait for a running plan. | UNADDRESSED_MODE (listen) | order follows the roster; listen turns suspended during a plan; the three-scenario day and the three-scenario thread (§7 rows 1–2) as end-to-end tests. | Lab debugging rehearsal: a planted wrong claim corrected on the next turn; turns per post. |
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 member turns, 5 counted posts, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
@@ -529,13 +558,14 @@ that settles it.
   a backend-native structured output where one exists. The contract is
   the two fields; the encoding is chosen when the parser is written.
 - **Per-mode `post_limit`, `catch_up_post_threshold`,
-  `catch_up_age_seconds`** (task 4). Measured in the lab before defaults
+  `catch_up_age_seconds`, and `thread_state_ttl`** (task 4). Measured in the lab before defaults
   are fixed.
 - **Webhook sender identity** (task 2). Which username a webhook post
   carries on each platform, so that allow-listing a CI account as a guest
   is known to work there.
 - **Glossary** (on acceptance). "Orchestrator", "mode", "watermark",
-  "sweeper", "control word", "coordination thread", "reply envelope" go
+  "sweeper", "control word", "coordination thread", "reply envelope",
+  "thread state" go
   into `CONTEXT.md` with the synonyms to avoid (moderator, judge, router,
   queue, topic).
 
