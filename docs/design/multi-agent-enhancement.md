@@ -326,7 +326,10 @@ only. A human post resets the rate limit before step 3.
   bot's account. The notice is
   delivered through `WATERMARK` and starts no turn in any mode (the
   plan-end notice to a bot requester is `CALLBACK`'s, not this one). A
-  plan whose member failed marks it `failed` and advances.
+  plan whose member failed ends as it does on a timeout (`PLAN`): the
+  member is `failed`, members not yet started are `cancelled`, and the
+  requester is told. Whether the rest depended on the failed member is
+  the requester's to judge, not the gateway's.
 
 ### THREAD_STATE (S1)
 
@@ -603,8 +606,9 @@ client` with `sequential:` — a three-hop plan requested by `H`.
 
 Same plan, no stop, but `b`'s backend fails: a failure notice is posted
 from `b`'s account and delivered to `a` and `c` through their backlogs;
-nobody's turn starts because of it; `b` is `failed`; hop 3 starts for `c`,
-whose backlog contains the notice.
+nobody's turn starts because of it. The plan ends — `a: replied, b:
+failed, c: cancelled` — and `H` decides whether the client restart still
+makes sense without the server's.
 
 ---
 
@@ -721,7 +725,7 @@ compaction; those belong to the lab tasks.
 | 2 | **Mention gate for agents.** Agent senders pass the same gate, read from their canonical mentions; username without `@` counts in human posts only. Unaddressed bots are `snooze` until task 4, so this task stays lab-only until task 4 lands. | MENTION_GATE | an agent post addressed only to humans starts no turn; naming one bot starts one. | Lab: posts per human prompt; self-termination rate; every agent post addressed only to humans hand-checked for whether a bot's reply was wanted. |
 | 3 | **Rate limit per thread.** Replaces per-pair counters: pause, notice, human reset, `extend:`, `limit:`, TTL; hint. Plans do not exist yet, so the boundary rule is "the current turn finishes". | RATE_LIMIT, AUTHORITY (humans), HINT | token-only and failed turns count zero; pause refuses new turns and keeps delivering; each reset path; guest control words are text. | Lab: where pauses land relative to conclusions (observed, not guaranteed). Production: pauses per week against the two drops; notices read by the human. |
 | 4 | **Modes and the sweeper.** `mode:` per room and thread at runtime, persisted; `catch-up` default; `snooze`; status; thread-state GC. | UNADDRESSED_MODE (snooze, catch-up), SWEEPER, STATUS, THREAD_STATE | mode change applies to the next post; a thread qualifies on threshold and on age, never when paused or under a running plan; one catch-up turn per qualifying thread, in newest-post order, each replying in its own thread; no turn when nothing qualifies; two threads in one room on different modes; rate-limit and override entries vanish at their reset or `thread_state_ttl`. | Lab: backlog age at delivery; production `#nest` on `catch-up`: correction latency. |
-| 5 | **Plans.** One plan at a time per thread, parallel and sequential members, a turn serving every waiting plan, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`, restart notice. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | plans on a thread run in posting order, one at a time; a sequential hop sees earlier replies; a run of posts to one bot is one turn; an unreached hop is never served early; after a restart the requester is told `replied` / `unknown` per member; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported for running and queued plans; a queued plan fully served by earlier turns ends before reaching the head; a bot runs one turn at a time per room; `timeout:` runs from the attempt to start the member, waiting included, never from the post; a timeout ends the plan with the rest `cancelled` and a notice to the requester; a bot requester gets a turn on an abnormal end; a coalesced turn whose `to` omits a served requester is re-prompted once, then that member is `failed`; after a restart `replied` only from a later post by the member addressing the requester; plan records survive restart and are removed after the end is reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
+| 5 | **Plans.** One plan at a time per thread, parallel and sequential members, a turn serving every waiting plan, admission and overshoot, member states, `timeout:`, `orchestrator:`, callback, `stop:`, restart notice. The rate-limit boundary becomes the plan boundary. | PLAN, CALLBACK, STOP, AUTHORITY (bot) | plans on a thread run in posting order, one at a time; a sequential hop sees earlier replies; a run of posts to one bot is one turn; an unreached hop is never served early; after a restart the requester is told `replied` / `unknown` per member; callback exactly once and only to the orchestrator; a plan refused while paused; overshoot ≤ members − 1; `stop:` states reported for running and queued plans; a queued plan fully served by earlier turns ends before reaching the head; a bot runs one turn at a time per room; `timeout:` runs from the attempt to start the member, waiting included, never from the post; a timeout or a failure ends the plan with the rest `cancelled` and a notice to the requester; a bot requester gets a turn on an abnormal end; a coalesced turn whose `to` omits a served requester is re-prompted once, then that member is `failed`; after a restart `replied` only from a later post by the member addressing the requester; plan records survive restart and are removed after the end is reported. | Lab: sequential vs parallel self-termination on the same prompt; anchoring (a later bot reversing after reading an earlier one). |
 | 6 | **Listen mode.** Serial listen turns; wait for a running plan. | UNADDRESSED_MODE (listen) | order follows the roster; listen turns suspended during a plan; the three-scenario day and the three-scenario thread (§7 rows 1–2) as end-to-end tests. | Lab debugging rehearsal: a planted wrong claim corrected on the next turn; turns per post. |
 | 7 | **Brainstorm skill.** §6.1 end to end. | — (policy) | the trace in §6.1 reproduced: 8 member turns, 5 counted posts, 2 callbacks, 11 posts. | Lab: Appendix A prompts replayed: turns, posts, tokens, human re-entry time, objections caught. |
 | 8 | **Resolver.** Tier-3 addressing, mode and timeout-class recommendation in shadow; then `LISTEN_GATE` in shadow. | ADDRESS_RESOLVER, LISTEN_GATE | — | Agreement with hand labels per decision type before any of them is given effect. |
@@ -792,6 +796,15 @@ Known, deliberately not built now; each names what would reopen it.
   rewrite whether a reply needs to address the asker at all, to save the
   asker's `done` turn. Both are guesses about intent. Reopened when the
   lab shows what share of turns are those `done` turns.
+- **Asynchronous members** — a bot that answers at once ("on it"), hands
+  the work to a background process, and posts the result later from its
+  own account. Some production tasks already run this way. It keeps every
+  turn short and makes the plan timeout rare, but a hop that ends at "on
+  it" ends before the work does, so a chain of dependent steps can no
+  longer be a sequential plan — the completion post has to address the
+  next bot — and a background job that dies is invisible to the gateway,
+  which sees only turns. Both need their own design. Reopened once the
+  synchronous case in this document runs in the lab and in production.
 - **Rooms spanning gateways**, **hidden information**, and **convergence
   by the gateway** — non-goals (§2).
 
