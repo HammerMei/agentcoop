@@ -64,9 +64,8 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `window_posts` 6 per
 
 1. `H: a, can you check the nginx log? When it's done, b, restart the
    backend.` — `a` is named: a turn. `b` is named too, so `b` gets a turn
-   as well; its hint says the thread also holds `a`'s pending work, and
-   `b` answers `done` — "waiting for a" — and sets itself a 20-minute
-   reminder (`FOLLOW_UP`). `c` is not named; its classifier reads the
+   as well; it reads "when it's done" in `H`'s post, answers `done` —
+   "waiting for a" — and sets itself a 20-minute reminder (`FOLLOW_UP`). `c` is not named; its classifier reads the
    post: not for `c`. No turn; the post is past `c`'s cursor.
 2. `a` replies `to: [H, b]`: `@H @b 502 burst at 09:12, log is clean now
    — b, go ahead.` — `b` is named: a turn; it receives `H`'s post and
@@ -95,7 +94,7 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `window_posts` 6 per
 | Term | Meaning |
 |---|---|
 | **post** | One message on the platform. |
-| **turn** | One run of a bot's backend in one coordination thread, started by a post that names the bot, by the classifier, or by the sweeper. It produces zero or one post, in that thread. |
+| **turn** | One run of a bot's backend in one coordination thread, started by a post that names the bot, by the classifier, by the sweeper, or by a scheduled wake the bot set for itself (`FOLLOW_UP`). It produces zero or one post, in that thread. |
 | **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, or the username in the text. In an agent post: the platform's mention set or the room-wide mention; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
 | **coordination thread** | The unit of the silence switch, the window and the orchestrator. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. A reply inherits the thread of its trigger. |
 | **classifier** | A small model asked, per bot and per unaddressed post, whether that bot should speak now (`SPEAK_NOW`). It never writes text and never overrides a mention. |
@@ -108,7 +107,8 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `window_posts` 6 per
 
 Parameters, per room with per-thread override: `window_posts`,
 `window_seconds`, `cooldown_seconds`, `settle_seconds`,
-`catch_up_post_threshold`, `catch_up_age_seconds`.
+`catch_up_post_threshold`, `catch_up_age_seconds`; per room:
+`control_horizon_posts`, `classifier_posts`.
 
 ---
 
@@ -136,7 +136,9 @@ Every inbound post, for every bot the gateway runs in that room:
 8. **Reply** — the envelope is parsed; `text` is posted in canonical form
    in the turn's thread; `done` posts nothing. (`REPLY_ENVELOPE`)
 
-The sweeper (`CATCH_UP`) runs apart from this, on time.
+The sweeper (`CATCH_UP`) runs apart from this, on time; so does a
+scheduled wake (`FOLLOW_UP`), which starts a turn regardless of the
+window.
 
 ### GATE (G1)
 
@@ -193,9 +195,10 @@ The sweeper (`CATCH_UP`) runs apart from this, on time.
   backlog; the sweeper returns to it when the window has drained.
 - *Bypass*: a turn started by a **human's** mention always starts — the
   human is the one who intervenes and cannot be shut out by noisy bots.
-  The orchestrator's turns always start and its posts do not count.
-  Human-class posts (humans, allow-listed integration accounts) never
-  count.
+  The orchestrator's turns always start and its posts do not count. A
+  scheduled wake (`FOLLOW_UP`) starts regardless of the window — a status
+  check the bot set for itself — and its post counts. Human-class posts
+  (humans, allow-listed integration accounts) never count.
 - *No notice*: being throttled is silence, as it is for a person who
   cannot get a word in. `STATUS` shows it; `HINT` tells a bot that is
   allowed to speak how much room is left.
@@ -213,6 +216,13 @@ The sweeper (`CATCH_UP`) runs apart from this, on time.
   From anyone else they are text. A thread has one orchestrator;
   `orchestrator:` again replaces it. The same bot may be the orchestrator
   of several threads and is an ordinary bot elsewhere.
+- *Control state*: a thread's current mode, orchestrator and `limit:` are
+  the last control word of each kind in the thread's history. The
+  gateway holds them in memory and rebuilds them at startup by reading
+  the thread back `control_horizon_posts`; nothing is persisted. They
+  never expire on their own: a thread snoozed a month ago is snoozed
+  until a post changes it, where the plan-based design's
+  `thread_state_ttl` would have let it lapse.
 - Roles are server-injected (`CLAUDE.md`, connector prompt prefix).
 
 ### SERIAL (G5)
@@ -379,7 +389,8 @@ what a meeting is.
 
 Three agent posts, four `done` turns, one classifier call per post for
 `c`. Had `a` posted "migration done" to `H` alone, `b`'s classifier would
-have read "b, when a is done" in `b`'s backlog and answered `speak`; had
+have read "b, when a is done" in the thread's history and answered
+`speak`; had
 `a` said nothing for 30 minutes, `b`'s reminder would have fired and `b`
 would have asked `a` for status.
 
@@ -397,9 +408,10 @@ usage pricing?` on a thread.
 | 5 | `d`'s reply names `chair` → chair turn: closes | 1 | 1 (chair) |
 | 6 | `chair: mode: open` | — | 1 |
 
-Eight member turns, five chair turns (three `done`), five counted posts.
-The plan-based design does the same meeting with two callbacks instead
-of five chair turns; this one keeps no record of the round.
+Eight member turns, five chair turns after the chair's first post (three
+`done`), five counted posts. The plan-based design does the same meeting
+with two callbacks after the chair's first post instead of five turns;
+this one keeps no record of the round.
 
 ### 6.3 Two gateways, one room
 
