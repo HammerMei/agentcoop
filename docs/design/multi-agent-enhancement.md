@@ -159,7 +159,7 @@ Every inbound post, for every bot the gateway runs in that room:
 3. **Addressing** — which bots does the post address? A human post by mention, name or resolver; an agent post by its mentions, which the canonical form makes equal to the sender's `to`. (`MENTION_GATE`, `ADDRESS_RESOLVER`)
 4. **Plan** — the addressed bots form this post's plan; it runs when the thread's earlier plans have ended; each member gets one turn in the plan's mode, and a turn serves every queued plan on the thread that addresses that bot. (`PLAN`)
 5. **Unaddressed bots** — handled by the thread's mode. (`UNADDRESSED_MODE`)
-6. **Rate limit** — a turn starts only if the thread is not paused; a plan is admitted only if the thread is not paused. (`RATE_LIMIT`)
+6. **Rate limit** — a turn starts only if the thread is not paused; a plan is admitted when it reaches the head of the thread's queue, and only if the thread is not paused then. (`RATE_LIMIT`)
 7. **Context** — a bot that starts a turn first receives its backlog for that thread, then the trigger. (`WATERMARK`)
 8. **Reply** — the turn's output is parsed as a reply envelope; a valid `text` is rewritten to canonical form, posted in the turn's thread and counts there; `done` posts nothing; an invalid envelope is re-prompted once, then the turn fails. (`REPLY_ENVELOPE`, `RATE_LIMIT`, `FAILURE_NOTICE`)
 
@@ -217,10 +217,15 @@ only. A human post resets the rate limit before step 3.
 - *Normal*: after `post_limit` agent posts since the last reset the thread
   **pauses**: no agent turn starts, posts are still delivered to backlogs,
   one notice is posted naming the thread, the count, and how to resume.
-- *Plans*: a plan is admitted while `remaining ≥ 1`. An admitted plan runs
-  to its boundary even if that exceeds the limit (overshoot ≤ members − 1).
-  The pause lands at the boundary. A plan is refused while paused, with a
-  notice to the requester.
+- *Plans*: a plan is admitted when it reaches the head of the thread's
+  queue, if `remaining ≥ 1` then; until then it is only queued, and the
+  budget at the time of its post means nothing. An admitted plan runs to
+  its boundary even if that exceeds the limit (overshoot ≤ members − 1).
+  The pause lands at the boundary. A plan reaching the head while paused
+  is refused — it does not wait for the reset — with a notice to the
+  requester naming each member and its state (`a: replied` where an
+  earlier turn served it, `b: not started`), so the requester knows what
+  to repeat after the reset.
 - *Resets*: a human post on the thread resets the count to zero; `extend: N`
   adds N to the remaining budget; `ttl_seconds` of silence resets the count.
   A reset never starts a turn by itself.
