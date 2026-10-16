@@ -646,6 +646,22 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 - **A per-bot classifier** — one call per bot with its own backlog as
   input. Reopened if the room-level classifier's labels show it cannot
   judge for bots with different attention policies.
+- **Ordering within one gateway** — bots named by one post start in
+  parallel, and two may answer the same question. Two mechanisms were
+  considered and not built: a *stagger* (the next named bot starts when
+  the previous turn ends or after `stagger_seconds`, whichever first) and
+  a *collision check* (a turn whose thread received another agent's post
+  while it ran is shown that post before its reply is posted, and may
+  revise or answer `done`). Production turn lengths in a three-bot room
+  (615 turns over eleven days): `done` turns median 3 s, 82% within 5 s,
+  96% within 15 s; text turns median 10 s, 21% within 5 s, 66% within
+  15 s — so a 15-second stagger would let a later bot see the earlier
+  reply about two times in three, and a 5-second one would mostly only
+  tell it the earlier bot had nothing to say. A conversation among people
+  is not turn-taking either; it only looks so because people type at
+  different speeds, and a busy bot gives the same effect for free.
+  Reopened when the simulator's duplicate rate says the noise is worth a
+  mechanism; true sequencing is an orchestrator's job.
 - **Ordering across gateways** — two gateways naming bots for one post
   cannot confer; duplicates are accepted. Reopened only with a protocol
   between gateways.
