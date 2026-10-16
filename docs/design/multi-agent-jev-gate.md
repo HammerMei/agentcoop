@@ -133,9 +133,9 @@ Every inbound post, for every bot the gateway runs in that room:
 3. **Silenced?** — if not named and the thread is on `snooze`, or the bot
    is muted there, it does not speak; the post waits in its backlog.
    (`SILENCE`)
-4. **Who speaks?** — if not named and the thread is open, the classifier
-   is asked once for the post; a bot it names speaks. Others wait.
-   (`WHO_SPEAKS`)
+4. **Who speaks?** — in an open thread the classifier is asked once per
+   post about the bots the post does not name; a bot it names speaks.
+   Others wait. A post naming every bot asks nothing. (`WHO_SPEAKS`)
 5. **Allowed now?** — a turn does not start while the thread's window is
    full or the bot's cooldown is running, unless the sender is a human
    or the orchestrator, or the turn is the orchestrator's or a scheduled
@@ -172,8 +172,10 @@ apart from this, on time.
   thread's recent posts, and the new post: which bots should speak now?
   Answer: a set of usernames, possibly empty, with one line of reason
   each.
-- *Scope*: one call per unaddressed post in an open thread, per gateway.
-  Every bot's connector receives its own copy of the post; the gateway
+- *Scope*: one call per post in an open thread, per gateway, about the
+  bots the post does not name; a post that names every bot, or a DM,
+  asks nothing. Every bot's connector receives its own copy of the post;
+  the gateway
   keeps an ephemeral set of post ids it has already asked about, so the
   question is asked once and the answer applied to each of its bots.
   This is the only coordination between bots, it is not persisted, and
@@ -359,7 +361,8 @@ apart from this, on time.
   addressing (`multi-agent-enhancement.md` `REPLY_ENVELOPE`).
 - *Posting*: a reply is posted when its thread is open to the bot — not
   `snooze` unless the bot was named there, not muted — and the thread's
-  window has room; it counts in that thread. A reply that fails the
+  window has room (the orchestrator is outside the window here too); it
+  counts in that thread. A reply that fails the
   check is **not posted and not held**: the next turn's `HINT` says which
   reply was not posted and why, and the bot decides whether to say it
   again. The triggering thread's reply always posts: the turn was
@@ -463,7 +466,9 @@ apart from this, on time.
 
 No plans, no member states, no callbacks, no `stop:`, no timeouts, no
 persisted shared state between bots — only an ephemeral set of post ids
-the classifier has been asked about — no persisted copy of the backlog,
+the classifier has been asked about, and per bot an in-memory note of
+replies its last turn could not post, both lost on restart — no
+persisted copy of the backlog,
 no per-thread records beyond the control snapshot, no ordering of the
 bots the classifier names, no agent bypass of the mention gate, no
 knowledge of what a meeting is.
@@ -484,8 +489,8 @@ knowledge of what a meeting is.
 | 3 | `b: @H @a deployed, green.` | named → turn → `done` | — | classifier: nobody → wait |
 | 4 | sweeper: `c` has 3 undelivered posts | — | — | catch-up turn → `done` |
 
-Three agent posts, four `done` turns, one classifier call per unaddressed
-post. Had `a` posted "migration done" to `H` alone, the classifier would
+Three agent posts, four `done` turns, one classifier call per post about
+the bots it did not name. Had `a` posted "migration done" to `H` alone, the classifier would
 have read "b, when a is done" in the thread and named `b`; had `a` said
 nothing for 30 minutes, `b`'s reminder would have fired and `b` would
 have asked `a` for status.
@@ -501,11 +506,11 @@ usage pricing?` on a thread.
 | 2 | four members, each named by the orchestrator → four turns in parallel, none throttled; a member that starts later may see an earlier reply in its backlog — no isolation | 4 | 4 |
 | 3 | each reply names `chair` → a chair turn per reply; the skill answers `done` three times and synthesises on the fourth | 4 (3 `done`) | 1 (chair) |
 | 4 | `chair: @a @b @c @d — objections only, otherwise done.` | 4 | 1 (`d`) |
-| 5 | `d` keeps objecting after the chair closed the point: `chair: mute: @d` | — | 1 (chair) |
+| 5 | `a` and `d` start trading replies about the point — each names the other, so the turns open under `snooze`, throttled: `chair: mute: @d` | 2 | 2 + 1 (chair) |
 | 6 | `chair: @H <close>` · `mode: open` · `unmute: @d` | — | 1 |
 
-Eight member turns, five chair turns after the chair's first post (three
-`done`), five counted posts. The plan-based design does the same meeting
+Ten member turns, five chair turns after the chair's first post (three
+`done`), seven counted posts. The plan-based design does the same meeting
 with two callbacks after the chair's first post instead of five turns;
 this one keeps no record of the round.
 
@@ -607,7 +612,7 @@ the measure of the classifier; nothing observed later is.
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the control snapshot's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, CONTROL_STATE | delivered once on the success path; crash re-delivers; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; mentions equal `to`; snapshot survives restart and lapses at `control_ttl_days` |
 | 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | an agent post naming nobody starts no turn; a muted bot runs only on a human's mention; `snooze` read from the snapshot after restart |
 | 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; roster validation. | THROTTLE, ORCHESTRATOR, AGENT_ROSTER, HINT | counts match across two gateway processes on one room with equal rosters, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
-| 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread; stale classifier turns dropped. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a waited classifier turn is dropped when another agent has answered |
+| 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread; stale non-mention turns dropped. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a waited non-mention turn is dropped when another agent has answered (exercised with the classifier in task 6) |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a wake runs in its thread; a failed wake is retried and not lost; the cap posts a notice; a wake starts during a full window |
 | 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one call per post per gateway; bounded input; timeout → nobody, degraded result shown; shadow agreement with blind labels before effect |
 | 7 | **Skills.** The brainstorm chair; a PM skill for fan-out with follow-ups. | — (policy) | §6.1 and §6.2 reproduced |
