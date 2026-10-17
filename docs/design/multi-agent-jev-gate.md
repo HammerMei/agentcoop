@@ -662,9 +662,12 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
   different speeds, and a busy bot gives the same effect for free.
   Reopened when the simulator's duplicate rate says the noise is worth a
   mechanism; true sequencing is an orchestrator's job.
-- **Ordering across gateways** — two gateways naming bots for one post
-  cannot confer; duplicates are accepted. Reopened only with a protocol
-  between gateways.
+- **Coordination across gateways** — two gateways in one room cannot
+  confer, so for one post both may name a bot of their own (two
+  replies), or each may name a bot the other runs (no reply at all).
+  Both outcomes are accepted: coordination across gateways is best
+  effort in this version, and a human's mention always reaches its bot.
+  Reopened only with a protocol between gateways.
 - **Anonymous votes, hidden information** — the room is the unit of
   visibility.
 
