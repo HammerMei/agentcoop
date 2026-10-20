@@ -189,7 +189,8 @@ apart from this, on time.
   from `a`", "only when asked", "anything about the build") — the
   thread's recent posts, and the new post: which bots should speak now?
   Answer: a set of usernames, possibly empty, with one line of reason
-  each.
+  each. This document assumes each bot's profile reaches the classifier;
+  where the profile lives and how it is kept consistent is open (§9).
 - *Scope*: one call per post in an open thread, per gateway, about the
   bots the post does not name; a post that names every bot, or a DM,
   asks nothing. Every bot's connector receives its own copy of the post;
@@ -688,6 +689,17 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 - **Catch-up frequency** relative to the plan-based design, from the
   not-named → catch-up-with-text rate.
 - **Envelope encoding**: as in the other document.
+- **Where a bot's profile lives.** The classifier needs, per bot, more
+  than a username: what the bot does and when it wants to be asked —
+  "how's the market today?" names nobody, and only a profile tells the
+  classifier that one bot gives the daily stock update. The roster
+  configured today is a list of usernames
+  (`gateway/connectors/rocketchat/config.py:97`). Candidates: a
+  description per agent in each gateway's configuration, which two
+  gateways must then keep in step; or the platform's own user profile
+  fields, which every gateway reads from the same place. Decided before
+  task 6; the design assumes the profile is provided and says nothing
+  about how.
 
 ## 10. Out of scope for this version
 
