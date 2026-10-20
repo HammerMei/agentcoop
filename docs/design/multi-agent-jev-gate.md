@@ -69,9 +69,11 @@ from dropped posts, not from the exchanges themselves.
   noise when it does not.
 - **Exceptions inside `snooze`.** `snooze` is the one instrument an
   orchestrator has for a rigid structure, so its effect is one rule with
-  no override: in a snoozed thread a turn starts only from a human's or
-  the orchestrator's mention. Nothing else — not another bot's mention,
-  not the classifier, not the sweeper — opens a turn there.
+  no override: in a snoozed thread the orchestrator gets a turn from any
+  mention, everyone else only from a human's or the orchestrator's
+  mention, and the only other source of a turn is a bot's own scheduled
+  wake (`FOLLOW_UP`). Not another bot's mention, not the classifier, not
+  the sweeper.
 
 ---
 
@@ -141,9 +143,9 @@ Every inbound post, for every bot the gateway runs in that room:
    `orchestrator:`, `mute:`, `unmute:` to the thread. (`AUTHORITY`,
    `CONTROL_STATE`)
 2. **Named?** — if the post names the bot, the bot speaks — unless the
-   thread is on `snooze` and the sender is neither a human nor the
-   orchestrator, or the bot is muted and the sender is not a human.
-   (`GATE`, `SILENCE`)
+   thread is on `snooze`, the bot is not the orchestrator and the sender
+   is neither a human nor the orchestrator; or the bot is muted and the
+   sender is not a human. (`GATE`, `SILENCE`)
 3. **Silenced?** — if not named and the thread is on `snooze`, or the bot
    is muted there, it does not speak; the post waits in its backlog.
    (`SILENCE`)
@@ -173,8 +175,9 @@ apart from this, on time.
   room-wide mention, or the bare username; an agent post names a bot by
   its canonical mentions only. A named bot gets a turn, subject to
   `THROTTLE` when the sender is a bot other than the orchestrator, to
-  `snooze` when the sender is neither a human nor the orchestrator, and
-  to `mute:` when the sender is not a human. A 1:1 DM names its bot by
+  `snooze` when the named bot is not the orchestrator and the sender is
+  neither a human nor the orchestrator, and to `mute:` when the sender
+  is not a human. A 1:1 DM names its bot by
   definition.
 - *Not named*: `SILENCE`, then `WHO_SPEAKS`, decide.
 - *Agent senders* pass the same gate as humans; no bypass.
@@ -225,14 +228,17 @@ apart from this, on time.
 
 ### SILENCE (G2)
 
-- `mode: snooze` on a thread: a turn starts only from a **human's** or
-  the **orchestrator's** mention. Another bot's mention, the classifier
-  and the sweeper open nothing there; posts are delivered as context by
-  whichever turn comes next. `mode: open` (the default) restores all
-  three. This is the instrument an orchestrator uses to impose a
-  structure — who speaks is exactly who it names, and a member that
-  addresses another member starts nothing — so it is one rule with no
-  exceptions; a skill can rely on it.
+- `mode: snooze` on a thread: the **orchestrator** gets a turn from any
+  mention — that is how members report to it; every other bot gets a
+  turn only from a **human's** or the **orchestrator's** mention. A
+  bot's mention of another bot, the classifier and the sweeper open
+  nothing there; a bot's own scheduled wake still runs (`FOLLOW_UP`);
+  posts are delivered as context by whichever turn comes next.
+  `mode: open` (the default) restores the classifier, the sweeper and
+  bot-to-bot mentions. This is the instrument an orchestrator uses to
+  impose a structure — who speaks is exactly who it names, and a member
+  that addresses another member starts nothing — so it is one rule with
+  no exceptions; a skill can rely on it.
 - `mute: @x` on a thread: `x` gets a turn there only from a **human's**
   mention; the classifier does not name it, the sweeper skips it, other
   bots' mentions of it wait. `unmute: @x` lifts it. This is how an
@@ -395,7 +401,8 @@ apart from this, on time.
   post's mentions are exactly its `to` and every gateway reads the same
   addressing (`multi-agent-enhancement.md` `REPLY_ENVELOPE`).
 - *Posting*: a reply is posted when its thread is open to the bot — not
-  `snooze` unless the bot was named there, not muted — and the thread's
+  `snooze` unless a human or the orchestrator named the bot there, or
+  the bot is the orchestrator; not muted — and the thread's
   window has room (the orchestrator is outside the window here too); it
   counts in that thread. The reply in the triggering thread inherits
   whatever admitted the turn — a human's or the orchestrator's mention,
@@ -552,11 +559,11 @@ usage pricing?` on a thread.
 | 2 | four members, each named by the orchestrator → four turns in parallel, none throttled; a member that starts later may see an earlier reply in its backlog — no isolation. "Address only me" is enforced by `snooze`, not by the prompt: a member that names another member starts nothing | 4 | 4 |
 | 3 | each reply names `chair` → a chair turn per reply; the skill answers `done` three times and synthesises on the fourth | 4 (3 `done`) | 1 (chair) |
 | 4 | `chair: @a @b @c @d — objections only, otherwise done.` | 4 | 1 (`d`) |
-| 5 | `a` and `d` start trading replies about the point — each names the other, so the turns open under `snooze`, throttled: `chair: mute: @d` | 2 | 2 + 1 (chair) |
+| 5 | `d`'s objection in row 4 also named `a`; that opened nothing for `a` (`snooze`). `d` has answered every round at length and off the point, so the chair runs the last round without it: `chair: mute: @d` · `@a @b @c — last round: anything to add?` → three turns, three `done` | 3 | 1 (chair) |
 | 6 | `chair: @H <close>` · `mode: open` · `unmute: @d` | — | 1 |
 
-Ten member turns, five chair turns after the chair's first post (three
-`done`), seven counted posts. The plan-based design does the same meeting
+Eleven member turns, five chair turns after the chair's first post
+(three `done`), five counted posts. The plan-based design does the same meeting
 with two callbacks after the chair's first post instead of five turns;
 this one keeps no record of the round.
 
@@ -657,7 +664,7 @@ the measure of the classifier; nothing observed later is.
 |---|---|---|---|
 | 0 | **Simulator**, shared with the other design. | — | the §6 tables reproduced |
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the control snapshot's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, CONTROL_STATE | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; a turn admitted by a human's mention posts in a full window; mentions equal `to`; snapshot survives restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's snapshot |
-| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing and a human's or the orchestrator's starts a turn; a muted bot runs only on a human's mention; `snooze` read from the snapshot after restart |
+| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention; `snooze` read from the snapshot after restart |
 | 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; roster validation. | THROTTLE, ORCHESTRATOR, AGENT_ROSTER, HINT | counts match across two gateway processes on one room with equal rosters, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
 | 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a turn that waited runs with the meanwhile posts in its backlog; a throttled bot-to-bot mention in an open thread is answered at the next qualifying turn |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a wake runs in its thread; a failed wake is retried and not lost; the cap posts a notice; a wake starts during a full window; a muted bot's wake waits and ends silently at expiry — mute before fire, mute during retry, unmute before expiry, expiry while muted |
@@ -737,5 +744,5 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 | Classifier | optional, for addressing by name and mode recommendation | required, once per unaddressed post |
 | Dropped here | — | `UNADDRESSED_MODE` (three modes), `PLAN`, `CALLBACK`, `STOP`, `THREAD_STATE` (shared record, room events, plan records), `LISTEN_GATE`, the `extend:` / `parallel:` / `sequential:` / `timeout:` / `stop:` control words |
 | Added here | — | `WHO_SPEAKS` once per post, `mute:` / `unmute:`, a window computed from history, replies to several threads, `FOLLOW_UP` with a scheduler contract, a configured and checked roster |
-| Rules a reader must hold | plan lifecycle (admission, coalescing, early completion, timeout classes, restart), three modes with switching, pause and its three resets | one question, two switches, one window, one cursor |
+| Rules a reader must hold | plan lifecycle (admission, coalescing, early completion, timeout classes, restart), three modes with switching, pause and its three resets | one question, two switches, one window, one cursor and the switches' snapshot |
 | What it gives up | simplicity; cross-gateway rooms | deadlines and reports for unattended work; aggregation for a chair; determinism of the gate |
