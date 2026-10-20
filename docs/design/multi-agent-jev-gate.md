@@ -227,6 +227,13 @@ apart from this, on time.
   backlog, is delivered at its next turn, and `CATCH_UP` gives the bot
   its own look later. The classifier is asked to name few: one bot that
   can answer, not everyone who could.
+- *A result that arrives late*: a decision is applied per bot against
+  the bot's cursor. If a turn admitted meanwhile — a human's mention in
+  a later post, say — has already delivered the post and committed past
+  it, the selection starts nothing and creates no pending trigger; it is
+  recorded as served. No mechanism starts a turn for a post the bot has
+  already received through a committing turn; the sweeper's rule that an
+  empty backlog never qualifies is the same invariant.
 - *A veto it does not get*: when the classifier's answer would leave out
   a bot the post names, the named bot speaks anyway and the disagreement
   is recorded — post, named bot, the classifier's reason. Whether the
@@ -356,7 +363,11 @@ apart from this, on time.
   every post in the thread, not only by control words.
 - *Order*: control words apply in the server's order of their posts,
   not in arrival order, so a replayed older control never overwrites a
-  newer one. The window is computed with the thread's *current*
+  newer one. For this the snapshot keeps, per control kind, the event
+  key of the last control applied, and keeps it after the value returns
+  to its default — a few bytes that outlive the value, so `snooze` then
+  `open` followed by a replay of the `snooze` leaves the thread open.
+  The window is computed with the thread's *current*
   orchestrator: re-designating the orchestrator changes which past posts
   count, and that is accepted over recording a role per post.
 - Two gateways in one room each keep their own snapshot from the same
@@ -465,8 +476,12 @@ apart from this, on time.
   the bot is the orchestrator; not muted — and the thread's
   window has room (the orchestrator is outside the window here too); it
   counts in that thread. The reply in the triggering thread inherits
-  whatever admitted the turn — a human's or the orchestrator's mention,
-  a scheduled wake — and posts regardless of the window. A reply that
+  every exception that admitted the turn: a human's mention carries it
+  past the window and past a mute — the one way a muted bot answers; the
+  orchestrator's mention past the window and `snooze`; a scheduled wake
+  past the window and cooldown, and past `snooze` only for the terminal
+  report at expiry (`FOLLOW_UP`). Replies to other delivered threads pass
+  those threads' own checks. A reply that
   fails the check is **not posted and not held**: the next turn's `HINT`
   says which reply was not posted and why, and the bot decides whether
   to say it again.
@@ -543,9 +558,11 @@ apart from this, on time.
   reply its turn makes counts in its thread. Discharge of an occurrence
   and the cursor commit are two saves, so across a crash an occurrence
   is at-least-once: the skill tolerates a repeated wake. In a snoozed
-  thread `HINT` tells the bot to post only if the thread named it or the
-  commitment has expired, and to reschedule otherwise; opening the
-  thread releases the next check, not every missed one. A **muted** bot's
+  thread the wake's reply may post only once, as the terminal report
+  when the commitment has expired; before that the bot answers `done`
+  and reschedules (`HINT` says so, `REPLY_ENVELOPE` enforces it), and
+  opening the thread releases the next check, not every missed one. A
+  **muted** bot's
   wake does not start in that thread: the occurrence stays pending with
   its backoff until the bot is unmuted or the expiry passes, and at the
   expiry it ends without a post, recorded in `STATUS`.
@@ -751,12 +768,12 @@ the measure of the classifier; nothing observed later is.
 | # | Task | Builds | Mechanism tests |
 |---|---|---|---|
 | 0 | **Simulator**, shared with the other design. | — | the §6 tables reproduced |
-| 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the control snapshot's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, CONTROL_STATE | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; a turn admitted by a human's mention posts in a full window; mentions equal `to`; snapshot survives restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's snapshot |
-| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention; `snooze` read from the snapshot after restart |
+| 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the control snapshot's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, CONTROL_STATE | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; a turn admitted by a human's mention posts in a full window; mentions equal `to`; snapshot survives restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's snapshot; a replayed older control arriving after the value returned to its default is ignored |
+| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention and its reply to that human posts despite the mute; `snooze` read from the snapshot after restart |
 | 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; roster validation. | THROTTLE, ORCHESTRATOR, AGENT_ROSTER, HINT | counts match across two gateway processes on one room with equal rosters, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
 | 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a turn that waited runs with the meanwhile posts in its backlog; a throttled bot-to-bot mention in an open thread starts when the window has room, or is served by an earlier turn that delivered it and then does not run again |
-| 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a wake runs in its thread; a failed wake is retried and not lost; the cap posts a notice; a wake starts during a full window; a muted bot's wake waits and ends silently at expiry — mute before fire, mute during retry, unmute before expiry, expiry while muted |
-| 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one platform post arriving on three local connector streams at once → one classifier call and the same decision for each local bot; a named bot speaks even when the answer omits it, and the omission is recorded; bounded input, remote bots' counts `not-local`; timeout → retries → the configured fallback, degraded result shown; shadow agreement with blind labels before effect |
+| 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a wake runs in its thread; a failed wake is retried and not lost; the cap posts a notice; a wake starts during a full window; in a snoozed thread a wake before expiry posts nothing and reschedules, and the wake at expiry posts its one report; a muted bot's wake waits and ends silently at expiry — mute before fire, mute during retry, unmute before expiry, expiry while muted |
+| 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one platform post arriving on three local connector streams at once → one classifier call and the same decision for each local bot; a named bot speaks even when the answer omits it, and the omission is recorded; a result arriving after a bypass turn delivered the post starts nothing and is recorded as served; bounded input, remote bots' counts `not-local`; timeout → retries → the configured fallback, degraded result shown; shadow agreement with blind labels before effect |
 | 7 | **Skills.** The brainstorm chair; a PM skill for fan-out with follow-ups. | — (policy) | §6.1 and §6.2 reproduced |
 
 Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
