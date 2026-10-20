@@ -227,18 +227,14 @@ apart from this, on time.
   backlog, is delivered at its next turn, and `CATCH_UP` gives the bot
   its own look later. The classifier is asked to name few: one bot that
   can answer, not everyone who could.
-- *A result that arrives late*: a decision is applied per bot against
-  the bot's cursor. If a turn admitted meanwhile — a human's mention in
-  a later post, say — has already delivered the post and committed past
-  it, the selection starts nothing and creates no pending trigger; it is
-  recorded as served. No mechanism starts a turn for a post the bot has
-  already received through a committing turn; the sweeper's rule that an
-  empty backlog never qualifies is the same invariant.
-- *A veto it does not get*: when the classifier's answer would leave out
-  a bot the post names, the named bot speaks anyway and the disagreement
-  is recorded — post, named bot, the classifier's reason. Whether the
-  classifier should be allowed to override a mention is decided from
-  that record after simulation (§8.1), not assumed either way.
+- *A result that arrives late*: a decision is applied per bot only if
+  the bot's backlog is not empty. An empty backlog means a turn admitted
+  meanwhile — a human's mention in a later post, say — has already
+  delivered the post and committed past it; the selection starts
+  nothing. If newer posts have arrived since, the turn runs and delivers
+  them, which is no more than an early catch-up. One invariant covers
+  this and the sweeper: **no turn starts for a bot whose backlog is
+  empty**, a scheduled wake excepted, since it has no post of its own.
 - *Failure*: the call has `classifier_timeout_seconds` and is retried up
   to `classifier_retries`; after that the post is handled by
   `classifier_fallback` — `nobody` (named bots only; everyone else waits
@@ -773,7 +769,7 @@ the measure of the classifier; nothing observed later is.
 | 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; roster validation. | THROTTLE, ORCHESTRATOR, AGENT_ROSTER, HINT | counts match across two gateway processes on one room with equal rosters, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
 | 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a turn that waited runs with the meanwhile posts in its backlog; a throttled bot-to-bot mention in an open thread starts when the window has room, or is served by an earlier turn that delivered it and then does not run again |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a wake runs in its thread; a failed wake is retried and not lost; the cap posts a notice; a wake starts during a full window; in a snoozed thread a wake before expiry posts nothing and reschedules, and the wake at expiry posts its one report; a muted bot's wake waits and ends silently at expiry — mute before fire, mute during retry, unmute before expiry, expiry while muted |
-| 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one platform post arriving on three local connector streams at once → one classifier call and the same decision for each local bot; a named bot speaks even when the answer omits it, and the omission is recorded; a result arriving after a bypass turn delivered the post starts nothing and is recorded as served; bounded input, remote bots' counts `not-local`; timeout → retries → the configured fallback, degraded result shown; shadow agreement with blind labels before effect |
+| 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one platform post arriving on three local connector streams at once → one classifier call and the same decision for each local bot; a named bot speaks even when the answer omits it, and the omission is recorded; a result arriving after a bypass turn emptied the bot's backlog starts nothing; bounded input, remote bots' counts `not-local`; timeout → retries → the configured fallback, degraded result shown; shadow agreement with blind labels before effect |
 | 7 | **Skills.** The brainstorm chair; a PM skill for fan-out with follow-ups. | — (policy) | §6.1 and §6.2 reproduced |
 
 Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
