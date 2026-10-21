@@ -787,3 +787,156 @@ Notes:
 
 **Status: settled for this PR** — the confirming round found nothing on round 1's
 fixes and nothing that contradicts a promise.
+
+## 2026-10-12 — PR #198 round 1 (docs/design/multi-agent-enhancement.md, a proposal; no code)
+
+**Chain detector:** 9 findings, 1 round, `--`, no chain (single commit).
+**Control finding:** #181 r9 F1 (`settled: implemented`), presented as a code
+finding F10. Rater 2 decided it DROP-as-stale with "had it been live: FILE,
+owned by the loader" — the settled answer — but **disclosed** it had seen the
+ledger row while verifying, so the control is contaminated and this round's
+agreement is **uncorroborated**. Rater 1 (author) did not score F10.
+**Gates for a doc:** `cheap` = ≤10 doc lines, no new named design concept;
+`silent` = a rule an implementer would follow without noticing it is wrong.
+**Cost:** ~40 min, 1 round, 2 raters.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** moderator authority undefined for a room whose bots span gateways (P1) | true — prod is multi-host; the guarantee "one count per topic per sender" is unscoped. Not `cheap`: needs an ownership decision → owner | true; `cheap` as a scope statement ("one moderator per room, in one gateway; cross-gateway rooms keep today's behaviour") + §7; the protocol Codex asks for is not the cheapest correct fix; `silent` | **FIX** as scope statement (§3.1, §3.6, §7); cross-gateway design left to the owner |
+| **F2** moderator returns one topic id; §3.2 lets a message close one and open another (P1) | true, output shape; `cheap` | true, internal inconsistency; `cheap`; `silent` | **FIX** — list of (topic, action) |
+| **F3** "end of the conversation" undefined (P2) | true; `cheap` | mostly true (ceiling is one terminal event); `cheap` | **FIX** — last open topic closes or a human says so; §7 marks it provisional |
+| **F4** `parallel:` override not restricted to humans (P2) | true; 2 lines | true; role is server-injected so no new concept; `silent` | **FIX** |
+| **F5** late reply after hop timeout starts a second plan on the same topic (P2) | true; ranked above Codex — defeats sequential ordering, not one duplicate | true; §5's residual covers a different consequence | **FIX** — late reply joins the running sequence; one plan per topic |
+| **F6** `done` can skip an explicitly mentioned bot (P2) | true, table vs prose contradiction | true; mostly loud to the human | **FIX** — mentioned bots are required participants |
+| **F7** objection always opens a topic with a fresh budget (P1) | true, bypasses §3.2's own retag guard | true; fix is "tag and validate like any post", not a round cap (new concept) | **FIX** — objection retagged to its topic, runs under remaining budget |
+| **F8** one topic's ceiling triggers the conversation-level round (P2) | true, wrong layer | true; `silent` | **FIX** — ceiling closes that topic only |
+| **F9** step 2 shadows tags only, step 7 grants four decision types (P1) | true; the §8 claim "accuracy known before authority" is false as written | true; wrong rationale is the consequence to price | **FIX** — step 2 shadows every message-only decision, step 5 shadows `next`/`done`, step 7 switches on one type at a time |
+
+Notes:
+- Adoption: 9 of 9. The skill says a rate near 100% usually means triage is not
+  running; recorded as a flag, not excused. The counter-reading: a proposal's first
+  external read, where every finding is a gap in a model that has no code yet and no
+  fix touches a function. The next round is the test — if it also adopts everything,
+  the triage is rubber-stamping.
+- Severity re-ranked by both: F1 > F9 > F7 top three (agree); rater 1 F5 fourth, rater
+  2 F8 fourth (F5 sixth). Both demote F2 from P1 (a table row out of sync with its
+  section) and rater 2 promotes F7/F8 above it. Differences are in ordering, not
+  verdict.
+- Only disagreement: F1's gate — rater 1 sent it to the owner, rater 2 gated it
+  `cheap` as a scope statement. Rater 1 conceded on the method's own rule ("judge
+  against the cheapest correct fix, not the one the finding proposes"): the
+  scope statement is correct for a status-proposal doc, and the owner still decides
+  whether to design cross-gateway moderation (§7). Converged, not escalated.
+- Pattern (rater 2): three roots, not nine findings — (a) topic vs conversation
+  conflated (F2, F3, F8); (b) "the moderator" assumed singular, co-located and
+  pre-validated (F1, F9); (c) rule rows whose wording drops a constraint the prose
+  asserts — which sender, which topic, one plan, mentioned bots reply (F4, F5, F6,
+  F7). The fixes were applied as that sweep: every rule row re-read for sender,
+  topic and scope. §3.1's "a conversation that has exhausted its budget" was
+  caught by the sweep and was not a finding.
+
+**Status: open.** Settles with the confirming round.
+
+## 2026-10-12 — PR #198 round 2 (on `18b8761`)
+
+**Chain detector:** 18 findings over 2 rounds; round 2 fires once — 5 of 9 on the
+round-1 fixes, **streak 1**. Once is noise by the rule; a second consecutive fire
+is the stop signal, so round 3 decides whether this PR patches or re-reads the
+increment.
+**Control finding:** #181 r9 F1 again as G10, to a fresh rater told not to open
+this log. Rater 2 DROPped it as `cannot-occur` with the code chain
+(`config_base_dir()` → `RUNTIME_DIR`, ADR 0003, PR #186) — the settled answer
+reached from the code, uncontaminated. **First corroborated round.**
+**Cost:** ~45 min, 1 round, 2 raters.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **G1** human post in the gap resets per-topic budgets; repeated interjections bypass them (P1) | true as a leftover rule; fix differs from Codex's — keep the reset (human presence is the designed reset, as today and PR #195) but scope it to the topics the post touches; extends not returned | partly true: the "bypass" is by the human, who already holds `extend_limit`; the doc must *choose* a rule; `silent` | **FIX** — scoped reset, stated as deliberate (§3.3) |
+| **G2** one closed topic suppresses a whole multi-topic reply (P1) | true; suffix only when every selected topic is closed | true on wording; consequence overstated (context stays complete, one turn's contribution lost) | **FIX** — mixed case runs with a note; moderator charges the closed part (§3.5) |
+| **G3** `decided`/`discussed` never shadowed (P2) | true | true, low stakes (a misclassified topic still gets the conversation-end round) | **FIX** — step 2 shadow list |
+| **G4** step 7 activates cross-gateway notices the scope forbids (P2) | true, own round-1 inconsistency | true, loud (implementer finds no input) | **FIX** — clause removed (§3.3, §8) |
+| **G5** `close` authoritative in 7, closing round in 8 (P1) | true; proposed moving the per-topic round into step 7 | half: "strands" is wrong — queues are delivered at next turn/flush and step 6 ships first, so strictly better than today's drop; the measurement confound is real; one line, no reorder | **FIX** as rater 2's one line — rater 1 conceded on §3.5's queue delivery and step order: the cheaper fix is correct; step 7's measurement marked provisional until 8 |
+| **G6** TTL is lazy, no timer; "ends by TTL alone" has no event (P1) | true — verified `_gc` has one caller, `check_and_increment` | true; `silent`; doc must choose timer (new concept → scored) or lazy-with-stated-cost | **FIX** — lazy, stated: closed at next inbound, round runs before the new conversation; a silent room has nothing waiting (§3.4) |
+| **G7** fallback starts with empty/stale per-sender counters (P1) | true; consequence bounded to one budget window, degraded+logged — state it and accept (§14.3) | true; scored: `hours_per_hit` 0.3 · `hits_per_year` 0.6–9 (outages 2–10 × 3 operators × P(chain active) 0.1–0.3) · discount 1.0 · one sentence 0.1 h vs dual-write 4 h + 1 h/yr tax → sentence FIX, dual-write FILE at best | **FIX** — one sentence: the per-sender store keeps counting under moderation, fallback starts from live counts (§3.6). Codex's P1 demoted by both |
+| **G8** `@all` replies each start a competing sequential plan (P1) | true, the round's biggest; same root as r1 F5 | true; `silent`; "followed literally it reproduces today's fan-out, squared" | **FIX** — structural: "attribution before dispatch" paragraph (§3.3) |
+| **G9** queue of a bot the relevance filter excluded survives the boundary (P2) | true; deliver, never clear | true; "clear" contradicts "nothing is dropped" — only deliver is correct | **FIX** — every queue drained at every boundary (§3.5) |
+
+Notes:
+- Adoption: 9 of 9 again (18 of 18 over two rounds). Flagged in round 1 as the
+  rubber-stamp signal; this round's test was whether the raters would *disagree
+  with Codex's fixes*, and they did on G1 (direction), G5 (reorder not needed),
+  G6 (no timer), G7 (no dual-write) and G9 ("clear" rejected). The verdicts are
+  FIX; the fixes are not Codex's.
+- Severity re-ranked by both: G8 first; rater 1 G5 > G6, rater 2 G6 > G2 > G1 > G5.
+  Codex's six P1s hold for three (G8, G6, G2/G5 by one rater each); G7 demoted
+  by both to a one-line statement.
+- One concession, with evidence: rater 1 dropped the step-7 reorder for G5 on
+  §3.5's queue-delivery rule and the step order (6 before 7) — the "strands"
+  half of the finding is false, which leaves only the measurement confound.
+- Pattern (rater 2, taken): two roots. (1) *Attribution before dispatch was never
+  stated* — G1, G2, G8, G9 and r1 F5 are one paragraph: every post is attributed
+  to topics, then to a running plan, before any dispatch; replies made under a
+  plan join it; a plan ends when its selected bots have replied, timed out or
+  self-terminated. Written into §3.3; the late-reply and human-gap paragraphs are
+  now cases of it. (2) *§8 did not enumerate the §3.1 decision table* — G3, G4,
+  G5 are one missing cross-check; a table mapping each decision to its shadow
+  step, activation step and measurement is now in §8 (the doc equivalent of the
+  "test that enumerates the surface").
+- Two rounds, two patterns, both structural: a sign the proposal was written
+  rule-by-rule and the invariants were implicit. If round 3 fires the chain, the
+  response is to re-read §2's principles for a third implicit invariant, not to
+  patch.
+
+**Status: open.** Settles with round 3.
+
+## 2026-10-12 — PR #198 round 3 (on `65d98b4`) — chain stop
+
+**Chain detector:** 28 findings over 3 rounds; round 3 fires again — 6 of 10 on
+the round-2 fixes, **streak 2 — STOP**. Per the rule, no patch round: the
+increment was re-read and the owner chose how to end.
+**Control finding:** none convened — no second rater this round, because the
+stop rule replaces triage-and-fix with a decision about the chain itself.
+**Cost:** ~25 min, 1 round, 1 rater + owner decision.
+
+**What the chain is.** Not out-of-scope work: every finding is inside the doc.
+It is a proposal being specified by review — round 2 added a plan lifecycle in
+prose, round 3 enumerated the states the prose missed (`failed`, a busy bot in
+parallel mode, a mid-hop human post, a reopened decided topic). A round 4 would
+enumerate what the state table misses. The increment is "a design proposal";
+the specification of each mechanism belongs to its §8 step's PR, where it can
+be tested instead of argued.
+
+**Owner's decision (option A):** one structural close-out, no further Codex
+round, then merge. Three wrong statements fixed (wrong rationale outranks a
+small gap — CLAUDE.md); the plan lifecycle written once as a participant-state
+table so the states are enumerated rather than implied; implementation-level
+findings recorded in §7 with a default answer and the step that owns them.
+
+| | author | outcome |
+|---|---|---|
+| **H8** "suppressed by the same path as self-termination" — the token path posts surrounding text (P1) | true, verified `agent_turn_runner.py:151-160`; a wrong rationale in the doc | **FIX** — forced-suppression result, token path explicitly not reused (§3.5) |
+| **H9** "nothing before step 7 changes what a bot sees" (P2) | true, false claim; steps 3–6 all change it | **FIX** — invariant restated: moderator non-authoritative before 7; each step measured against the previous (§8) |
+| **H10** shadow `next` metric is counterfactual (P1) | true; the rule-selected bot speaks first and changes the state | **FIX** — hand labels on replayed snapshots (§8 step 5, coverage table) |
+| **H5** failed turn is not a terminal plan state (P1) | true | **FIX** — `failed` row in the participant-state table (§3.3) |
+| **H6** a busy bot in a parallel plan later sees peers' replies (P2) | true, contradicts §3.3's own independence rationale | **FIX** — parallel participants receive the triggering post only; busy bot gets the same snapshot (§3.3) |
+| **H1** mid-hop human post vs the one-plan invariant (P1) | true; the gap rule was the only interrupt | **FIX** — `interrupted` row: a human post on the topic ends the plan at any point (§3.3) |
+| **H7** decided topic corrected in its closing round has no reopen (P1) | true | **FIX** — substantive closing-round reply reopens the topic, sequential dispatch (§3.4) |
+| **H3** only a human post opens the next conversation; agent-only rooms have none (P2) | true, one phrase | **FIX** — any post attributed to no running plan (§3.4) |
+| **H2** context-only delivery primitive does not exist (P2) | true (`send`/`stream` both run a turn; handoff uses `send`); step 3's concern | **§7 open question** with default: costed as a suppressed turn until a second consumer appears |
+| **H4** moderator recovery after fallback undefined (P1) | true; the owner added that an in-memory queue has the same problem on restart — one question, two triggers | **§7 open question** with default: reset, not reconciliation; queues rebuilt from room history (the platform is durable); step 7 decides against an observed outage |
+
+Notes:
+- Adoption: 8 FIX + 2 recorded with defaults; nothing dropped. Codex's six P1s:
+  H8 holds; H1/H5/H7 are table rows; H4/H10 are design-level but belong to a
+  step's PR. H6 (P2) ranked above several P1s — it contradicts the doc's own
+  stated reason for parallel mode.
+- Third structural root, as predicted in round 2: *the plan's states were
+  implied, not enumerated.* The table in §3.3 now says "where a rule below and
+  the table disagree, the table is wrong and should be fixed" — one place to
+  look, which is what an enumerating test gives code.
+- The chain's lesson for the next design doc: write the state tables first and
+  the prose as their cases; prose rules invite a reviewer to find the state
+  the prose skipped, one per round, indefinitely.
+
+**Status: settled for this PR** — closed by the stop rule and an owner decision,
+not by a clean round. The ten findings are decided; none is open.
