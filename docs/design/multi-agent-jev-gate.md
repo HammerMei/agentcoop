@@ -370,11 +370,11 @@ apart from this, on time.
 
 - A thread's current control words — mode, orchestrator, `limit:`, the
   muted bots — are the last control word of each kind posted in it. The
-  gateway keeps them as a **thread settings** per thread, persisted
-  with the cursors, written when a control word arrives. A thread gets
+  gateway keeps them as the thread's **settings**, persisted with the
+  cursors, written when a control word arrives. A thread gets
   settings at its first control word; each value in it carries the
   post it came from.
-- *Expiry*: a settings are removed after `control_ttl_days` of silence in
+- *Expiry*: settings are removed after `control_ttl_days` of silence in
   its thread (days, not seconds), or when the platform archives or
   deletes the thread; the defaults apply again. Silence is read from the
   room's history — the age of the thread's newest post — not kept in the
