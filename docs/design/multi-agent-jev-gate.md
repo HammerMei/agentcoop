@@ -30,9 +30,10 @@ from dropped posts, not from the exchanges themselves.
 | Term | Meaning |
 |---|---|
 | **post** | One message on the platform, written by a human or by a bot. |
-| **coordination thread** | The unit the switches and the window apply to. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. "Thread" below means this. |
+| **bot** | An agent's presence on a chat server, as `CONTEXT.md` defines it. Inside the gateway a bot in a room is a *watcher*; the cursor and backlog below are per watcher. |
+| **thread** | A platform thread, or the room's top-level posts taken together as one thread. The unit the switches and the window apply to. |
 | **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, or the username in the text. In an agent post: the platform's mention set or the room-wide mention; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
-| **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). |
+| **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). Not the connector's per-room replay watermark, which marks what the connector has handed on, not what a session has seen. |
 | **backlog** | The posts of a room past a bot's cursor: on the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
 | **classifier** | A small model asked once per post in an open thread which bots in the room should speak now (`WHO_SPEAKS`). It may add bots to those the post names; it never removes one, never writes text. |
 | **window** | The thread's recent agent posts: those within `window_seconds`. The gate compares their count with `window_posts` and holds a bot's turn while the window is full (`THROTTLE`). |
@@ -43,8 +44,8 @@ from dropped posts, not from the exchanges themselves.
 | **muted** | A bot named by `mute: @bot` on a thread: it gets a turn there only from a human's mention. |
 | **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
 | **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
-| **control snapshot** | A thread's current control words, each with the post it came from, persisted from the thread's first control word until the snapshot expires (`CONTROL_STATE`). |
-| **agent roster** | The usernames the gateway treats as agents, from configuration (`AGENT_ROSTER`). |
+| **settings** | A thread's current control words — mode, orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
+| **agent list** | The usernames the gateway treats as agents — `agent_usernames` in configuration — with each one's profile (`AGENT_LIST`). |
 
 Parameters, per room with per-thread override: `window_posts`,
 `window_seconds`, `cooldown_seconds`, `catch_up_post_threshold`,
@@ -57,7 +58,7 @@ Parameters, per room with per-thread override: `window_posts`,
 ## 3. Principles
 
 1. **Who speaks is read from the room, the way a person reads it.** For
-   every post, a classifier reads the thread and the roster and names
+   every post, a classifier reads the thread and the agent list and names
    the bots that should speak now — the ones the post names, and any it
    adds; none, one or several. There
    is no plan, no mode beyond a silence switch, and no coordinator in the
@@ -148,7 +149,7 @@ Every inbound post, for every bot the gateway runs in that room:
 
 1. **Control words** — from an authorised sender, apply `mode:`, `limit:`,
    `orchestrator:`, `mute:`, `unmute:` to the thread. (`AUTHORITY`,
-   `CONTROL_STATE`)
+   `SETTINGS`)
 2. **Named?** — if the post names the bot, the admission table in
    `GATE` says, from who named it and the thread's state, whether the
    bot speaks. (`GATE`, `SILENCE`)
@@ -208,9 +209,10 @@ apart from this, on time.
 
 ### WHO_SPEAKS (J1) — the room classifier
 
-- *Question*: given the room's roster — each bot's username, persona,
-  description and **attention policy** (free text: "answers every post
-  from `a`", "only when asked", "anything about the build") — the
+- *Question*: given the room's agent list — each bot's username and **profile**:
+  who it is, what it does, and when it wants to be asked (free text:
+  "answers every post from `a`", "only when asked", "anything about
+  the build") — the
   thread's recent posts, and the new post: which bots should speak now?
   Answer: a set of usernames, possibly empty, with one line of reason
   each. This document assumes each bot's profile reaches the classifier;
@@ -239,7 +241,7 @@ apart from this, on time.
   persisted, and it concerns only the bots this gateway runs; another
   gateway asks its own classifier and may answer differently.
 - *Input is bounded*: the last `classifier_posts` posts of the thread,
-  newest first, within a token budget; the roster, with the named bots
+  newest first, within a token budget; the agent list, with the named bots
   marked; and, per bot the gateway runs, the count of its undelivered
   posts in other threads — a number, not the posts; for a bot another
   gateway runs the count is `not-local`, never a guess. What does not
@@ -298,7 +300,7 @@ apart from this, on time.
   orchestrator or a human stops one bot that is flooding a thread without
   silencing the rest.
 - Both are posts, so every gateway in the room reads them, and both live
-  in the thread's control snapshot (`CONTROL_STATE`). This is all the
+  in the thread's thread settings (`SETTINGS`). This is all the
   silence a meeting, a role-play or a human who wants quiet needs.
 
 ### THROTTLE (G3)
@@ -306,7 +308,7 @@ apart from this, on time.
 - *Computed, not stored*: from the thread's history, the gateway counts
   agent posts within `window_seconds` and reads the time of the bot's
   own last post. Every gateway in the room computes from the same history
-  with the same roster; the result converges, best effort — paging
+  with the same agent list; the result converges, best effort — paging
   limits, API lag, edits and fetch failures can make two gateways differ
   for a while. `STATUS` shows the current count, the oldest post fetched
   and fetch failures.
@@ -364,39 +366,39 @@ apart from this, on time.
   of several threads and is an ordinary bot elsewhere.
 - Roles are server-injected (`CLAUDE.md`, connector prompt prefix).
 
-### CONTROL_STATE (S1)
+### SETTINGS (S1)
 
 - A thread's current control words — mode, orchestrator, `limit:`, the
   muted bots — are the last control word of each kind posted in it. The
-  gateway keeps them as a **control snapshot** per thread, persisted
+  gateway keeps them as a **thread settings** per thread, persisted
   with the cursors, written when a control word arrives. A thread gets
-  a snapshot at its first control word; each value in it carries the
+  settings at its first control word; each value in it carries the
   post it came from.
-- *Expiry*: a snapshot is removed after `control_ttl_days` of silence in
+- *Expiry*: a settings are removed after `control_ttl_days` of silence in
   its thread (days, not seconds), or when the platform archives or
   deletes the thread; the defaults apply again. Silence is read from the
   room's history — the age of the thread's newest post — not kept in the
-  snapshot. A thread snoozed and then abandoned reopens on its own; a
-  mute lapses with it. `STATUS` lists the threads that hold a snapshot
+  settings. A thread snoozed and then abandoned reopens on its own; a
+  mute lapses with it. `STATUS` lists the threads that hold settings
   and their age.
 - *Order*: control words apply in the server's order of their posts,
   not in arrival order: a control is applied only if its post is newer
   than the one the current value came from. A value that returns to its
-  default stays in the snapshot with its post, so `snooze` then `open`
+  default stays in the settings with its post, so `snooze` then `open`
   followed by a replay of the `snooze` leaves the thread open.
   The window is computed with the thread's *current*
   orchestrator: re-designating the orchestrator changes which past posts
   count, and that is accepted over recording a role per post.
-- Two gateways in one room each keep their own snapshot from the same
+- Two gateways in one room each keep their own settings from the same
   posts; they agree because the posts are the same, not because they
   talk to each other.
 - *A gateway's own control posts*: a connector drops its own account's
   messages (`gateway/connectors/rocketchat/normalize.py:156-158`), so a
   control word an orchestrator posts would never come back to the
   gateway that posted it. After a successful outbound post the gateway
-  applies the control word to its snapshot through the same inbound
+  applies the control word to its settings through the same inbound
   transition — same authority check, same parser — not a shortcut. A
-  crash between the platform accepting that post and the snapshot being
+  crash between the platform accepting that post and the settings being
   saved leaves this gateway behind the others until the next control
   post; accepted as best effort.
 
@@ -579,7 +581,7 @@ apart from this, on time.
   to estimate a task's duration is the one doing or awaiting it, which is
   why there is no plan timeout.
 - *Scheduler contract* (changes to the existing scheduler): a job
-  persists the connector, room, **coordination thread**, the commitment
+  persists the connector, room, **thread**, the commitment
   text, its expiry, and its retry state; today a job carries a room and a
   message and is injected without a thread
   (`SessionManager.inject_message(room_id, text)`,
@@ -614,26 +616,25 @@ apart from this, on time.
 ### STATUS (O2)
 
 - `coop room status <handle>`: per thread — mode, orchestrator, muted
-  bots, snapshot age, agent posts in the window / `window_posts`, the
+  bots, settings age, agent posts in the window / `window_posts`, the
   orchestrator's posts in the window; per bot — backlog size and age per
   thread, computed on request, cooldown remaining; the last classifier
   decisions with reasons and any degraded results; which bypass started
-  each recent turn; roster entries, and bot-like room members not on the
-  roster.
+  each recent turn; the agent list, and bot-like room members not on it.
 
-### AGENT_ROSTER (C1)
+### AGENT_LIST (C1)
 
 - The gateway knows which usernames are agents from configuration
   (`agent_usernames`, `gateway/connectors/rocketchat/config.py:97`),
   which must list every agent in the room, including those run by other
   gateways. A sender on no list at all is rejected by the connector
   today (`gateway/connectors/rocketchat/normalize.py:168`), so an agent
-  missing from the roster is not "treated as a human" — it is not heard.
-  At startup the gateway checks the roster against the room's members
+  missing from the agent list is not "treated as a human" — it is not heard.
+  At startup the gateway checks the agent list against the room's members
   where the platform allows, logs a missing or unknown agent loudly, and
-  shows both in `STATUS`. Two gateways whose rosters differ for one room
+  shows both in `STATUS`. Two gateways whose agent lists differ for one room
   do not converge on the window or the classifier, and the status says
-  so. Synchronising rosters between gateways is later work (§10).
+  so. Synchronising agent lists between gateways is later work (§10).
 
 ### What the gateway does not have
 
@@ -644,7 +645,7 @@ note of replies its last turn could not post, both lost on restart — no
 list of pending or waiting turns, since a turn's eligibility is read
 from the backlog each time — no
 persisted copy of the backlog,
-no per-thread records beyond the control snapshot, no ordering of the
+no per-thread records beyond the thread settings, no ordering of the
 bots the classifier names, no agent bypass of the mention gate, no
 knowledge of what a meeting is.
 
@@ -706,7 +707,7 @@ before it. Later `H` posts in `B`: `@x is staging green?`
 
 ### 6.4 Two gateways, one room
 
-`a` runs on gateway 1, `b` on gateway 2, both rosters list both. `H:
+`a` runs on gateway 1, `b` on gateway 2, both agent lists hold both. `H:
 anyone know why the build is red?`
 
 - Each gateway asks its classifier once and acts on its own bot only.
@@ -717,7 +718,7 @@ anyone know why the build is red?`
 - `a: @b your change touched the build file — did you bump the version?`
   — `b` is named: a turn on gateway 2. `b` replies `to: [a, H]`. Gateway
   1's window counts both posts from the history; so does gateway 2's.
-- `H: mode: snooze` — both gateways write the same snapshot; only
+- `H: mode: snooze` — both gateways write the same settings; only
   mentions open turns in the thread from here.
 
 ---
@@ -735,11 +736,11 @@ anyone know why the build is red?`
 | Debugging session | `open`, `limit: 20` | Most posts are for everyone; the classifier names the bot or two best placed; the rest see the exchange through catch-up and reply when they have something. | yes |
 | Divide and collaborate | H or PM skill; `open` | `@a @b` both named; dependencies by addressing; each bot tracks its own task (`FOLLOW_UP`). No deadline and no report to `H`; `H` reads the room. | yes, without the report |
 | 1:1 DM | — | Named by definition; window counts the bot's own posts. | unchanged |
-| Single-bot channel | per `require_mention` | Mentioned → turn; a listen-all room is configured as attention policy "always". | unchanged, by configuration |
+| Single-bot channel | per `require_mention` | Mentioned → turn; a listen-all room is given the profile "answer every post". | unchanged, by configuration |
 | Support / triage channel | `open` | The answering bot addresses a specialist. | yes |
 | Scheduled or agent-only room | `open` or `snooze` | No human: the window and cooldown slow an exchange and nothing ends it but `done`, `mute:` or `snooze`. | yes — needs a cap or `snooze`, as any design |
 | Code review room | `open` | Reviewer addresses the test bot. | yes |
-| Critic or pairing | `open`; critic's attention policy "every post from `a`" | The classifier names the critic on every post from `a`. | yes — per-bot policy |
+| Critic or pairing | `open`; critic's profile says "answer every post from `a`" | The classifier names the critic on every post from `a`. | yes — per-bot policy |
 | Unattended overnight task | `open` | Handoffs by addressing; each bot's `FOLLOW_UP` checks on what it waits for. | yes — guarantees are the skill's |
 | Role-play with a game master | GM skill; `snooze` | Players speak when named; the GM narrates after each. | yes, except hidden information |
 | Monitor room (CI, webhooks) | `open` | The integration account is human-class: its mention starts a bot, other bots by classifier, nothing it posts counts. | yes |
@@ -767,7 +768,7 @@ both measured against the same conversations:
 It records two kinds of thing, kept apart:
 
 **Decision quality** — people label the classifier's exact input
-snapshots, blind: given this thread and roster at this moment, who should
+snapshots, blind: given this thread and agent list at this moment, who should
 have spoken? Agreement with those labels, per model and history size, is
 the measure of the classifier; nothing observed later is.
 
@@ -802,9 +803,9 @@ the measure of the classifier; nothing observed later is.
 | # | Task | Builds | Mechanism tests |
 |---|---|---|---|
 | 0 | **Simulator**, shared with the other design. | — | the §6 tables reproduced |
-| 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the control snapshot's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, CONTROL_STATE | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; the triggering thread's reply posts in a full window, a second-thread reply does not; mentions equal `to`; snapshot survives restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's snapshot; a replayed older control arriving after the value returned to its default is ignored |
-| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | with the classifier off and the `nobody` fallback, an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention and its reply to that human posts despite the mute; `snooze` read from the snapshot after restart |
-| 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; roster validation. | THROTTLE, ORCHESTRATOR, AGENT_ROSTER, HINT | counts match across two gateway processes on one room with equal rosters, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
+| 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the thread settings's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; the triggering thread's reply posts in a full window, a second-thread reply does not; mentions equal `to`; settings survive restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's settings; a replayed older control arriving after the value returned to its default is ignored |
+| 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | with the classifier off and the `nobody` fallback, an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention and its reply to that human posts despite the mute; `snooze` read from the settings after restart |
+| 3 | **Throttle.** Window and cooldown from history; human and orchestrator bypass; agent list validation. | THROTTLE, ORCHESTRATOR, AGENT_LIST, HINT | counts match across two gateway processes on one room with equal agent lists, and status says so when they differ; a human mention starts during a full window; a bot the orchestrator names starts during a full window |
 | 4 | **Catch-up, one turn, status.** Threshold and age; one turn per thread. | CATCH_UP, ONE_TURN, STATUS | qualifying set once per pass; ordering by eligibility; a turn that waited runs with the meanwhile posts in its backlog; a throttled bot-to-bot mention in an open thread starts at the next pass with room in the window, and not at all if an earlier turn delivered it; a bot becoming free starts nothing without a pass; a mention that arrived before `snooze` opens nothing after it; a cached classifier choice starts the held bot at a later pass, and lapses to catch-up past its TTL; two qualifying threads yield one catch-up turn when the first delivers both; a sweeper turn delivers through its high-water mark and a post arriving after it waits |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; discharge on completion; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP | a job fires in its thread; a failed firing is retried and not lost; the cap posts a notice; a job fires during a full window; in a snoozed thread a firing is deferred until the thread opens or the commitment expires, and the one that runs posts; a muted bot's job waits and ends silently at expiry — mute before fire, mute during retry, unmute before expiry, expiry while muted |
 | 6 | **Classifier in shadow**, then with effect. | WHO_SPEAKS | one platform post arriving on three local connector streams at once → one classifier call and the same decision for each local bot; a named bot speaks even when the answer omits it, and the omission is recorded; a result arriving after a bypass turn delivered its post starts nothing even when newer unrelated posts are in the backlog; bounded input, remote bots' counts `not-local`; timeout → retries → the configured fallback, degraded result shown; shadow agreement with blind labels before effect |
@@ -841,7 +842,7 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 - **Where a bot's profile lives.** The classifier needs, per bot, more
   than a username: what the bot does and when it wants to be asked —
   "how's the market today?" names nobody, and only a profile tells the
-  classifier that one bot gives the daily stock update. The roster
+  classifier that one bot gives the daily stock update. The agent list
   configured today is a list of usernames
   (`gateway/connectors/rocketchat/config.py:97`). Candidates: a
   description per agent in each gateway's configuration, which two
@@ -855,7 +856,7 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 - **Plans, timeouts and reports** — the plan-based design's `PLAN`,
   `CALLBACK`, `STOP`. Reopened if the simulator shows unattended handoffs
   stalling silently at a rate `FOLLOW_UP` does not recover.
-- **Roster synchronisation between gateways** — rosters are configured
+- **Agent-list synchronisation between gateways** — agent lists are configured
   by hand and checked at startup. Reopened when two gateways share rooms
   in production.
 - **Skipping the classifier for named posts** — not asking when a post
@@ -864,7 +865,7 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
   such posts; the mechanism is defined as asking every time.
 - **A per-bot classifier** — one call per bot with its own backlog as
   input. Reopened if the room-level classifier's labels show it cannot
-  judge for bots with different attention policies.
+  judge for bots with different profiles.
 - **Ordering within one gateway** — bots named by one post start in
   parallel, and two may answer the same question. Two mechanisms were
   considered and not built: a *stagger* (the next named bot starts when
@@ -903,11 +904,11 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 | A bad actor | the thread pauses for everyone | `mute: @x` by the chair or a human |
 | Who is told what happened | plan-end notices, callbacks, `stop:` reports | nobody; the room is the record |
 | Replies | one thread per turn | any thread the turn was delivered |
-| Persisted state | cursor, rate limit, mode, orchestrator, plan records in a shared room state keyed by (chat server, room id); posts deduplicated into room events | the cursor and a control snapshot per thread with a value, lapsing after `control_ttl_days` |
-| Several gateways in one room | non-goal | best effort, with rosters configured and checked: a post may draw two answers or none |
+| Persisted state | cursor, rate limit, mode, orchestrator, plan records in a shared room state keyed by (chat server, room id); posts deduplicated into room events | the cursor and a thread settings per thread with a value, lapsing after `control_ttl_days` |
+| Several gateways in one room | non-goal | best effort, with agent lists configured and checked: a post may draw two answers or none |
 | Multiple bots answering one post | `listen` serial | the classifier names few; the rest is noise |
 | Classifier | optional, for addressing by name and mode recommendation | required, once per post in an open thread; may add speakers, never remove a named one |
 | Dropped here | — | `UNADDRESSED_MODE` (three modes), `PLAN`, `CALLBACK`, `STOP`, `THREAD_STATE` (shared record, room events, plan records), `LISTEN_GATE`, the `extend:` / `parallel:` / `sequential:` / `timeout:` / `stop:` control words |
-| Added here | — | `WHO_SPEAKS` once per post, `mute:` / `unmute:`, a window computed from history, replies to several threads, `FOLLOW_UP` with a scheduler contract, a configured and checked roster |
-| Rules a reader must hold | plan lifecycle (admission, coalescing, early completion, timeout classes, restart), three modes with switching, pause and its three resets | one question, two switches, one window, one cursor and the switches' snapshot |
+| Added here | — | `WHO_SPEAKS` once per post, `mute:` / `unmute:`, a window computed from history, replies to several threads, `FOLLOW_UP` with a scheduler contract, a configured and checked agent list |
+| Rules a reader must hold | plan lifecycle (admission, coalescing, early completion, timeout classes, restart), three modes with switching, pause and its three resets | one question, two switches, one window, one cursor and the threads' settings |
 | What it gives up | simplicity; cross-gateway rooms | deadlines and reports for unattended work; aggregation for a chair; determinism of the gate |
