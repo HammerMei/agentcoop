@@ -25,7 +25,33 @@ from dropped posts, not from the exchanges themselves.
 
 ---
 
-## 2. Principles
+## 2. Terms
+
+| Term | Meaning |
+|---|---|
+| **post** | One message on the platform. |
+| **turn** | One run of a bot's backend, started by a post that names the bot, by the classifier, by the sweeper, or by a scheduled wake the bot set for itself (`FOLLOW_UP`). It is told which thread triggered it and may reply in any thread it was delivered. |
+| **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, or the username in the text. In an agent post: the platform's mention set or the room-wide mention; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
+| **coordination thread** | The unit of the control words and the window. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. |
+| **classifier** | A small model asked once per post in an open thread which bots in the room should speak now (`WHO_SPEAKS`). It may add bots to those the post names; it never removes one, never writes text. |
+| **window** | The thread's recent agent posts: those within `window_seconds`. The gate compares their count with `window_posts` (`THROTTLE`). |
+| **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. Nothing about the window applies to it or to the bots it names, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
+| **muted** | A bot named by `mute: @bot` on a thread: it gets a turn there only from a human's mention. |
+| **backlog** | The posts of a room past a bot's cursor: delivered to the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
+| **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
+| **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:`. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
+| **control snapshot** | A thread's current control words, each with the post it came from, persisted from the thread's first control word until the snapshot expires (`CONTROL_STATE`). |
+| **agent roster** | The usernames the gateway treats as agents, from configuration (`AGENT_ROSTER`). |
+
+Parameters, per room with per-thread override: `window_posts`,
+`window_seconds`, `cooldown_seconds`, `catch_up_post_threshold`,
+`catch_up_age_seconds`; per room: `control_ttl_days`, `classifier_posts`,
+`classifier_timeout_seconds`, `classifier_retries`, `classifier_fallback`
+(`nobody` | `everyone` | `rule`), `classifier_decision_ttl_seconds`.
+
+---
+
+## 3. Principles
 
 1. **Who speaks is read from the room, the way a person reads it.** For
    every post, a classifier reads the thread and the roster and names
@@ -80,7 +106,7 @@ from dropped posts, not from the exchanges themselves.
 
 ---
 
-## 3. A short example
+## 4. A short example
 
 Room `#team`: bots `a`, `b`, `c`; human `H`; `window_posts` 6 per
 `window_seconds` 300 per thread.
@@ -108,32 +134,6 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `window_posts` 6 per
    count, and the classifier names nobody. Five minutes later the window
    has drained and the sweeper gives `b` a catch-up turn; `b` reads the
    room and answers `done`.
-
----
-
-## 4. Terms
-
-| Term | Meaning |
-|---|---|
-| **post** | One message on the platform. |
-| **turn** | One run of a bot's backend, started by a post that names the bot, by the classifier, by the sweeper, or by a scheduled wake the bot set for itself (`FOLLOW_UP`). It is told which thread triggered it and may reply in any thread it was delivered. |
-| **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, or the username in the text. In an agent post: the platform's mention set or the room-wide mention; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
-| **coordination thread** | The unit of the control words and the window. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. |
-| **classifier** | A small model asked once per post in an open thread which bots in the room should speak now (`WHO_SPEAKS`). It may add bots to those the post names; it never removes one, never writes text. |
-| **window** | The thread's recent agent posts: those within `window_seconds`. The gate compares their count with `window_posts` (`THROTTLE`). |
-| **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. Nothing about the window applies to it or to the bots it names, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
-| **muted** | A bot named by `mute: @bot` on a thread: it gets a turn there only from a human's mention. |
-| **backlog** | The posts of a room past a bot's cursor: delivered to the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
-| **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
-| **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:`. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
-| **control snapshot** | A thread's current control words, each with the post it came from, persisted from the thread's first control word until the snapshot expires (`CONTROL_STATE`). |
-| **agent roster** | The usernames the gateway treats as agents, from configuration (`AGENT_ROSTER`). |
-
-Parameters, per room with per-thread override: `window_posts`,
-`window_seconds`, `cooldown_seconds`, `catch_up_post_threshold`,
-`catch_up_age_seconds`; per room: `control_ttl_days`, `classifier_posts`,
-`classifier_timeout_seconds`, `classifier_retries`, `classifier_fallback`
-(`nobody` | `everyone` | `rule`), `classifier_decision_ttl_seconds`.
 
 ---
 
