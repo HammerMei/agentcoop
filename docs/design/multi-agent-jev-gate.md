@@ -29,17 +29,20 @@ from dropped posts, not from the exchanges themselves.
 
 | Term | Meaning |
 |---|---|
-| **post** | One message on the platform. |
-| **turn** | One run of a bot's backend, started by a post that names the bot, by the classifier, by the sweeper, or by a scheduled wake the bot set for itself (`FOLLOW_UP`). It is told which thread triggered it and may reply in any thread it was delivered. |
+| **post** | One message on the platform, written by a human or by a bot. |
+| **coordination thread** | The unit the switches and the window apply to. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. "Thread" below means this. |
 | **addressed** | A post names a bot. In a human post: a platform mention, `@all` or a room-wide mention, or the username in the text. In an agent post: the platform's mention set or the room-wide mention; the canonical form (`REPLY_ENVELOPE`) makes an agent post's mentions exactly its envelope's `to`. |
-| **coordination thread** | The unit of the control words and the window. A post inside a platform thread belongs to that thread; every top-level post belongs to the room's own thread. |
+| **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). |
+| **backlog** | The posts of a room past a bot's cursor: on the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
 | **classifier** | A small model asked once per post in an open thread which bots in the room should speak now (`WHO_SPEAKS`). It may add bots to those the post names; it never removes one, never writes text. |
-| **window** | The thread's recent agent posts: those within `window_seconds`. The gate compares their count with `window_posts` (`THROTTLE`). |
+| **window** | The thread's recent agent posts: those within `window_seconds`. The gate compares their count with `window_posts` and holds a bot's turn while the window is full (`THROTTLE`). |
+| **sweeper** | A periodic pass, per bot, over the bot's backlog: it starts the turns the window or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
+| **scheduled wake** | A reminder a bot sets for itself through the gateway's scheduler — "check on a's report in 30 minutes" — which at the set time starts a turn for that bot with no post behind it (`FOLLOW_UP`). |
+| **turn** | One run of a bot's backend. It is started by a post that names the bot, by the classifier, by the sweeper, or by a scheduled wake; it is told which thread triggered it, receives its backlog, and may reply in any thread it was delivered. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. Nothing about the window applies to it or to the bots it names, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot named by `mute: @bot` on a thread: it gets a turn there only from a human's mention. |
-| **backlog** | The posts of a room past a bot's cursor: delivered to the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
 | **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
-| **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:`. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
+| **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
 | **control snapshot** | A thread's current control words, each with the post it came from, persisted from the thread's first control word until the snapshot expires (`CONTROL_STATE`). |
 | **agent roster** | The usernames the gateway treats as agents, from configuration (`AGENT_ROSTER`). |
 
