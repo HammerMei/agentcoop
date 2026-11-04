@@ -73,6 +73,7 @@ Each term uses only the terms above it.
 | **post** | One message on the platform, written by a human or by a bot. |
 | **bot** | An agent's presence on a chat server, as `CONTEXT.md` defines it. Inside the gateway, a bot's presence in one room is a *watcher*; the cursor and backlog below are per bot per room. |
 | **thread** | A platform thread, or the room's top-level posts taken together as one thread. The settings and the rate limit apply per thread. |
+| **mode** | Per thread, one of two: `open` (the default) — every source in the admission table may start a turn; `snooze` — only a human's or the orchestrator's mention starts a turn, so that an orchestrator can run a meeting with exactly the speakers it chooses (`SILENCE`). Set with `mode: snooze` / `mode: open`. |
 | **addressed** | A post is addressed to a bot — it mentions it. In a human's post: a platform mention, `@all` or a room-wide mention, or the bot's username in the text. In a bot's post: only the mentions the platform records for its canonical form (`REPLY_ENVELOPE`). |
 | **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). Not the connector's own `watermark`, which records what the connector has passed on, not what a session has seen. |
 | **backlog** | The posts of a room after a bot's cursor: on the platform, not yet delivered to that bot's session. Grouped by thread where a thread's size or age matters. |
@@ -106,11 +107,14 @@ No other parameter is set per thread.
 
 1. **Who speaks is read from the room, the way a person reads it.** For
    every post, the classifier reads the thread and the agent list and
-   picks the bots that should speak now — the ones the post addresses, and
-   any it adds; none, one or several. There is no plan and no third
-   mode: a thread is `open` (the default) or on `snooze`. Sequencing —
-   "a does X, then b does Y" — is read out of the conversation when the
-   first bot reports, not held in a gateway record.
+   picks the bots that should speak now — the ones the post addresses,
+   plus any it adds; none, one or several. The gateway keeps no plan of
+   who should answer whom, in what order. When a human writes "a does X,
+   then b does Y", nothing is scheduled: `b` reads the request and waits,
+   and speaks when `a` reports that X is done — because `a`'s report
+   addresses `b`, or because the classifier reads the thread and picks
+   `b`. A thread has two modes, `open` and `snooze` (§2); there is no
+   third.
 2. **A mention is a request to speak.**
    - A human's mention always gives the bot a turn, rate-limited or
      muted or not.
