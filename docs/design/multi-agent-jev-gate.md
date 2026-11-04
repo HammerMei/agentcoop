@@ -83,7 +83,7 @@ Each term uses only the terms above it.
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
-| **muted** | A bot addressed by `mute: @bot` on a thread: it gets a turn there only from a human's mention. |
+| **muted** | One bot silenced in one thread by `mute: @bot`: it gets a turn there only from a human's mention. Not the same as `snooze`, which is the thread's mode and silences every bot except for a human's or the orchestrator's mention; mute is for one bot that will not stop. |
 | **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
 | **control word** | `mode:`, `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
 | **settings** | A thread's current control words — mode, orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
@@ -108,13 +108,11 @@ No other parameter is set per thread.
 1. **Who speaks is read from the room, the way a person reads it.** For
    every post, the classifier reads the thread and the agent list and
    picks the bots that should speak now — the ones the post addresses,
-   plus any it adds; none, one or several. The gateway keeps no plan of
-   who should answer whom, in what order. When a human writes "a does X,
-   then b does Y", nothing is scheduled: `b` reads the request and waits,
-   and speaks when `a` reports that X is done — because `a`'s report
-   addresses `b`, or because the classifier reads the thread and picks
-   `b`. A thread has two modes, `open` and `snooze` (§2); there is no
-   third.
+   plus any it adds; none, one or several. When a human writes "a does
+   X, then b does Y", nothing is scheduled: `b` reads the request and
+   waits, and speaks when `a` reports that X is done — because `a`'s
+   report addresses `b`, or because the classifier reads the thread and
+   picks `b`.
 2. **A mention is a request to speak.**
    - A human's mention always gives the bot a turn, rate-limited or
      muted or not.
@@ -138,8 +136,12 @@ No other parameter is set per thread.
    two answers or none (§10). The gateway persists three kinds of state
    per room: a cursor per bot, the threads' settings, and the scheduled
    jobs.
-5. **Mechanism is separate from policy.** The gateway provides the
-   mechanisms in §5; meetings, follow-ups and deadlines are skills.
+5. **The gateway knows nothing about collaboration.** It delivers posts,
+   decides who gets a turn, limits the pace, and posts replies — the
+   mechanisms in §5 — and keeps no plan, no record of who owes whom an
+   answer, and no notion of a meeting. How bots collaborate — a
+   brainstorm, a handoff, a follow-up, a deadline — is a skill running
+   inside a bot, using those mechanisms.
 
 ### Non-goals
 
