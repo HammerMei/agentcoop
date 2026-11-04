@@ -74,7 +74,7 @@ Each term uses only the terms above it.
 | **bot** | An agent's presence on a chat server, as `CONTEXT.md` defines it. Inside the gateway, a bot's presence in one room is a *watcher*; the cursor and backlog below are per bot per room. |
 | **thread** | A platform thread, or the room's top-level posts taken together as one thread. The settings and the rate limit apply per thread. |
 | **classifier** | A small model asked once per post which bots in the room should speak now (`WHO_SPEAKS`). It can add bots to those the post addresses; it never removes one, and never writes text. |
-| **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** — those within `rate_limit_seconds` — number `rate_limit_posts` or more (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
+| **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** — those bots wrote after the thread's newest human post, within `rate_limit_seconds` — number `rate_limit_posts` or more, or total `rate_limit_words` words or more; a limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
@@ -89,7 +89,7 @@ Parameters:
 
 | Parameter | Scope | Defined in |
 |---|---|---|
-| `rate_limit_posts`, `rate_limit_seconds`, `cooldown_seconds` | room; `limit:` sets `rate_limit_posts` per thread | `RATE_LIMIT` |
+| `rate_limit_posts`, `rate_limit_words`, `rate_limit_seconds`, `cooldown_seconds` | room; `limit:` sets `rate_limit_posts` and `rate_limit_words` per thread | `RATE_LIMIT` |
 | `catch_up_post_threshold`, `catch_up_age_seconds` | room | `CATCH_UP` |
 | `control_ttl_days` | room | `SETTINGS` |
 | `classifier_posts`, `classifier_timeout_seconds`, `classifier_retries`, `classifier_fallback`, `classifier_decision_ttl_seconds` | room | `WHO_SPEAKS` |
@@ -172,8 +172,9 @@ No other parameter is set per thread.
 
 ## 4. A short example
 
-Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 per
-`rate_limit_seconds` 300 per thread.
+Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 and
+`rate_limit_words` 600 per `rate_limit_seconds` 300, per thread. Every
+reply below is a line or two, so the post count is what binds.
 
 1. `H: @a, can you check the nginx log? When it's done, @b, restart the
    backend.` — `a` and `b` are addressed: a turn each, started at once.
@@ -196,10 +197,12 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 per
    posts.
 6. `a` and `b` exchange one more pair: six posts — the rate limit is
    reached. `b`'s next turn does not start; its post waits in the
-   backlog. `H: enough, thanks` addresses nobody and is a human post: it does
-   not count, and the classifier picks nobody. Five minutes later the
-   rate limit has cleared and the sweeper gives `b` a catch-up turn; `b`
-   reads the room and answers `done`.
+   backlog. `H: enough, thanks` addresses nobody and the classifier
+   picks nobody; but it is a human post, so only agent posts after it
+   count now: zero. At the next sweeper pass `b`'s held turn starts; `b`
+   reads "enough, thanks" and answers `done`. Had `H` said nothing, the
+   turn would have waited until enough of the six posts were older than
+   300 s.
 
 ---
 
@@ -366,22 +369,36 @@ their own timing, outside this order.
 ### RATE_LIMIT
 
 - *Computed, not stored*: from the thread's history, the gateway counts
-  the posts written by bots within `rate_limit_seconds` — the recent
-  agent posts — and reads the time of the bot's own last post. Every
+  the posts written by bots after the thread's newest human post and
+  within `rate_limit_seconds` — the recent agent posts — and their
+  words, and reads the time of the bot's own last post. Every
   gateway in the room computes from the same history with the same agent
   list; the result converges, best effort — paging limits, API lag,
   edits and fetch failures can make two gateways differ for a while.
   `STATUS` shows the current count, the oldest post fetched and fetch
   failures.
 - *Rule*: a turn does not start while the recent agent posts number
-  ≥ `rate_limit_posts`, or the bot posted within `cooldown_seconds`. The
-  rate limit gates the *start* of a turn only: a started turn always
-  posts its reply in its own thread, so the count can go over
-  `rate_limit_posts` by the number of turns already running there —
-  bounded by the room's bots, and by one more per gateway across
-  gateways. A reply to another thread (`REPLY_ENVELOPE`) checks that
-  thread's rate limit at posting time, serialised per thread within one
-  gateway.
+  ≥ `rate_limit_posts`, or their words total ≥ `rate_limit_words`, or
+  the bot posted within `cooldown_seconds`. Either limit binds on its
+  own; a limit set to 0 is off, and with both at 0 only the cooldown
+  remains. The rate limit gates the *start* of a turn only: a started
+  turn always posts its reply in its own thread, so the count can go
+  over by the number of turns already running there — bounded by the
+  room's bots, and by one more per gateway across gateways — and the
+  words by what those turns write. A reply to another thread
+  (`REPLY_ENVELOPE`) checks that thread's rate limit at posting time,
+  serialised per thread within one gateway.
+- *Words*: the limit is for the people reading the thread, and a
+  one-line acknowledgement costs a reader seconds where a thousand-word
+  analysis costs minutes; the post count alone cannot tell them apart.
+  A word is a run of non-whitespace characters, except that each CJK
+  character counts as one word; nothing else is special, so every
+  gateway counts the same.
+- *A human's post resets it*: only agent posts after the thread's
+  newest human post count. A human who writes in the thread has read
+  it; the bots held by the limit start at the next sweeper pass. With
+  `rate_limit_seconds` set very large the limit becomes a stop that
+  only a human's post clears.
 - *Exemptions*, by the turn's source — not by who wrote the post: a bot
   the classifier chose for a human's unaddressed post waits like any
   other.
@@ -399,12 +416,15 @@ their own timing, outside this order.
 - *No notice*: being rate-limited is silence, as it is for a person who
   cannot get a word in. `STATUS` shows it; `HINT` tells a bot that is
   allowed to speak how much room is left.
-- *Loops*: two bots trading replies are slowed to `rate_limit_posts` per
-  `rate_limit_seconds` and `cooldown_seconds` apart, not stopped. They
+- *Loops*: two bots trading replies are slowed to `rate_limit_posts`
+  posts or `rate_limit_words` words per `rate_limit_seconds`, and
+  `cooldown_seconds` apart, not stopped. They
   stop when one answers `done`, when someone mutes one of them, or when
   a human tells them to. The measured rate at which
   bots stop on their own (§1) is what this relies on.
-- `limit: N` sets `rate_limit_posts` for the thread.
+- `limit: N posts`, `limit: N words`, or both in one post, set the
+  thread's `rate_limit_posts` and `rate_limit_words`; `limit: 0 posts 0
+  words` turns the rate limit off in the thread.
 
 ### AUTHORITY
 
@@ -618,7 +638,7 @@ Injected into every turn:
 
 - the thread that started the turn, and the other threads delivered;
 - whether the bot is muted in each thread;
-- how many posts each thread's rate limit has left;
+- how many posts and words each thread's rate limit has left;
 - replies from the last turn that could not be posted — one to another
   thread that thread did not allow, or one the platform refused — and
   why;
@@ -672,7 +692,8 @@ Injected into every turn:
 shows:
 
 - per thread — orchestrator, muted bots, settings age, recent
-  agent posts / `rate_limit_posts`, the orchestrator's recent posts;
+  agent posts / `rate_limit_posts` and their words / `rate_limit_words`,
+  the orchestrator's recent posts;
 - per bot — backlog size and age per thread, computed on request;
   cooldown remaining;
 - the last classifier decisions with reasons, and any fallback
@@ -702,7 +723,7 @@ shows:
 ### 6.1 A handoff read from the room
 
 `H: @a run the migration; b, when a is done, deploy.` Thread `T`,
-`rate_limit_posts` 6.
+`rate_limit_posts` 6, `rate_limit_words` 600.
 
 | # | Event | `a` | `b` | `c` |
 |---|---|---|---|---|
@@ -777,7 +798,7 @@ anyone know why the build is red?`
 | Casual conversation (production `#nest`) | — | Addressed bots speak; the classifier adds a bot when the post is for it; corrections arrive through catch-up or as a second reply from a turn in another thread. | yes — catch-up tuned higher |
 | Brainstorm (test room, five bots) | orchestrator skill; `mute: @all` | §6.2. | yes — more orchestrator turns, no record |
 | Status / decision / roadmap meeting | orchestrator skill; `mute: @all` | The orchestrator addresses one bot at a time for reports, all at once for a vote by `done`; mutes a bot that will not stop. | yes |
-| Debugging session | `limit: 20` | Most posts are for everyone; the classifier picks the bot or two best placed; the rest see the exchange through catch-up and reply when they have something. | yes |
+| Debugging session | `limit: 20 posts` | Most posts are for everyone; the classifier picks the bot or two best placed; the rest see the exchange through catch-up and reply when they have something. | yes |
 | Divide and collaborate | H or a PM skill | `@a @b` both addressed; dependencies by addressing; each bot tracks its own task (`FOLLOW_UP`). No deadline and no report to `H`; `H` reads the room. | yes, without the report |
 | Support / triage channel | — | The answering bot addresses a specialist. | yes |
 | Scheduled or agent-only room | — | No human: the rate limit and cooldown slow an exchange and nothing ends it but `done` or a `mute:`. | yes — needs a cap or a mute, as any design |
@@ -817,7 +838,7 @@ corners — before paying for an implementation.
   model playing the human is allowed and labelled as such.
 - **Output**: a transcript with the script's annotations before each
   event — the turn, its thread and backlog, the recent-post count, every
-  classifier decision, every sweep — and a tally of turns, posts, tokens
+  classifier decision, every sweep — and a tally of turns, posts, words, tokens
   and context size per bot. People review the transcript for exchanges
   that read wrong; what reads wrong is fixed in §5 and the scenario is
   run again.
@@ -921,7 +942,10 @@ Mechanism tests, by task — written against the simulator first:
   turn that could not start runs at a later pass with the meanwhile
   posts in its backlog; a rate-limited bot-to-bot mention in an open
   thread starts at the next pass once under the rate limit, and not at
-  all if an earlier turn delivered it; a bot becoming free starts nothing
+  all if an earlier turn delivered it; a thread under its post limit
+  but over its word limit holds a turn; a limit of 0 holds nothing; a
+  human's post clears the count and the held turn starts at the next
+  pass; a bot becoming free starts nothing
   without a pass; a mention that arrived before a `mute:` opens nothing
   after it; a cached classifier choice starts the held bot at a later
   pass, and lapses to catch-up past its TTL; two qualifying threads yield
@@ -945,8 +969,15 @@ Mechanism tests, by task — written against the simulator first:
 
 ## 9. Undecided
 
-- **Rate-limit defaults** (`rate_limit_posts`, `rate_limit_seconds`,
-  `cooldown_seconds`) and `control_ttl_days`: measured in the lab.
+- **Rate-limit defaults** (`rate_limit_posts`, `rate_limit_words`,
+  `rate_limit_seconds`, `cooldown_seconds`) and `control_ttl_days`:
+  measured in the lab. A reader manages roughly 200–250 English words a
+  minute, which puts `rate_limit_words` somewhere in the hundreds per
+  five minutes.
+- **Which limit binds**: the simulator's tally has posts and words per
+  turn; the bad cases people mark in the transcripts — a thread that
+  reads as noise, a loop that ran too long — say which of the two
+  limits, at what value, would have caught them.
 - **Classifier model, history size, timeout, retries and fallback**
   (`classifier_posts`, `classifier_timeout_seconds`,
   `classifier_retries`, `classifier_fallback`): the simulator's forced
@@ -1063,7 +1094,7 @@ The two are run through the same simulator before either is built.
 |---|---|---|
 | Who decides an unaddressed turn | a per-thread mode: silent, answer every post, or catch up later | the room classifier, once per post; `mute:` as the only control |
 | Sequencing and dependencies | a plan per request: members, parallel or sequential, membership, timeouts, member states | read from the room when a reply arrives; `FOLLOW_UP` for waiting |
-| Rate limit | count per thread since the last human post, persisted; pause with notice; an extend command | a rolling count of recent agent posts and a cooldown, computed from history; no notice; humans and the orchestrator exempt |
+| Rate limit | count per thread since the last human post, persisted; pause with notice; an extend command | a rolling count of agent posts and words since the last human post, and a cooldown, computed from history; no notice; humans and the orchestrator exempt |
 | Loops | paused at a plan boundary until a human, an extension or a timeout | slowed, not stopped; ended by `done`, `mute:` or a human |
 | A bad actor | the thread pauses for everyone | `mute: @x` by the orchestrator or a human |
 | Who is told what happened | plan-end notices, callbacks, stop reports | nobody; the room is the record |
