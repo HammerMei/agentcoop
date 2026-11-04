@@ -175,12 +175,13 @@ No other parameter is set per thread.
 Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 per
 `rate_limit_seconds` 300 per thread.
 
-1. `H: a, can you check the nginx log? When it's done, b, restart the
-   backend.` — `a` and `b` are addressed: a turn each. `b` reads "when it's
-   done", finds nothing to say yet (`done`, which posts nothing), and
-   sets itself a scheduled job for 20 minutes' time (`FOLLOW_UP`). `c`
-   is not addressed, and the classifier adds nobody. No turn for `c`; the
-   post is now in `c`'s backlog.
+1. `H: @a, can you check the nginx log? When it's done, @b, restart the
+   backend.` — `a` and `b` are addressed: a turn each, started at once.
+   The classifier is asked about the post at the same time and adds
+   nobody, so `c` gets no turn; the post is now in `c`'s backlog. `b`
+   reads "when it's done", finds nothing to say yet (`done`, which posts
+   nothing), and sets itself a scheduled job for 20 minutes' time
+   (`FOLLOW_UP`).
 2. `a` replies `to: [H, b]`: `@H @b 502 burst at 09:12, log is clean now
    — b, go ahead.` — `b` is addressed: a turn; it receives `H`'s post and
    `a`'s. `b` restarts the backend and replies `to: [H, a]`.
@@ -242,10 +243,13 @@ their own timing, outside this order.
 
 - *Scope*: every post, every bot, human and bot senders alike; no
   exception for bot senders.
-- *Addressed*: a human's post addresses a bot by platform mention, `@all` or
-  room-wide mention, or the bare username; a bot's post addresses a bot only
+- *Addressed*: a human's post addresses a bot by platform mention (`@a`),
+  `@all` or room-wide mention; a bot's post addresses a bot only
   through the mentions the platform records for its canonical form
-  (`REPLY_ENVELOPE`). A 1:1 DM addresses its bot by definition.
+  (`REPLY_ENVELOPE`). A 1:1 DM addresses its bot by definition. The
+  gateway matches only the `@` form; a bot named without it — "a, can you
+  check?" — is not addressed, and it is the classifier's to notice
+  (`WHO_SPEAKS`).
 - *Not addressed*: `MUTE`, then `WHO_SPEAKS`, decide. Addressing a bot puts
   it among the speakers for sure; the classifier can add other bots but
   cannot remove an addressed one.
@@ -280,16 +284,20 @@ their own timing, outside this order.
   open (§9).
 - *Speakers*: the classifier's answer plus the bots the post addresses. It
   may add bots ("@bob, how is the market?" may add the bot that gives the
-  market update); it cannot remove an addressed one. When its answer leaves
+  market update; "a, can you check?" may add `a`, named without its `@`);
+  it cannot remove an addressed one. When its answer leaves
   out a bot the post addresses, that bot speaks anyway and the disagreement
   is recorded — post, bot, reason — for the measurement in §8.
+- *Addressed bots do not wait*: a turn for a bot the post addresses
+  starts as soon as the post arrives; the classifier runs alongside, and
+  the bots it adds start when its answer lands.
 - *One call per post*, per gateway, about the bots that are not muted
   in the thread; a DM, a control-only post, or a thread where every bot
   is muted asks nothing. Every bot's connector receives its own
   copy of the post; the gateway keeps an in-memory map `(connector, room,
-  post id) → decision in flight | decision`, and every local copy awaits
-  or reads the same entry, so the question is asked once and each local
-  bot gets the same answer. An entry lives `classifier_decision_ttl_seconds`
+  post id) → decision in flight | decision`, and every local copy reads
+  the same entry — waiting for it only if the bot is not addressed — so
+  the question is asked once and each local bot gets the same answer. An entry lives `classifier_decision_ttl_seconds`
   and is the only memory of the choice: a chosen bot whose turn the rate
   limit or its own busyness held is started from this entry at a later
   sweeper pass (`CATCH_UP`), so the TTL is several `rate_limit_seconds`;
@@ -297,7 +305,9 @@ their own timing, outside this order.
   everything. Another gateway asks its own classifier and may answer
   differently.
 - *Bounded input*: the last `classifier_posts` posts of the thread,
-  newest first, within a token budget; the agent list; and, for each bot
+  newest first, within a token budget; the agent list, each bot with its
+  username, display name and nickname so a bot named in prose is
+  recognised; and, for each bot
   this gateway runs, the count of its undelivered posts in other threads
   — a number, not the posts; for a bot another gateway runs the count is
   `not-local`, never a guess. What does not fit is omitted with a count,
@@ -674,7 +684,8 @@ shows:
 
 - The gateway knows which usernames are agents from configuration
   (`agent_usernames`), which must list every agent in the room, including
-  those run by other gateways. A sender on none of the connector's user
+  those run by other gateways. For the classifier it adds each bot's
+  display name and nickname, read from the platform's user record. A sender on none of the connector's user
   lists is rejected by the connector today, so an agent missing from the
   agent list is not "treated as a human": its posts are rejected by the
   connector and never reach the gate. At startup the gateway checks the
