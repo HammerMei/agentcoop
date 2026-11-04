@@ -75,6 +75,7 @@ Each term uses only the terms above it.
 | **thread** | A platform thread, or the room's top-level posts taken together as one thread. The settings and the rate limit apply per thread. |
 | **classifier** | A small model asked once per post which bots in the room should speak now (`WHO_SPEAKS`). It can add bots to those the post addresses; it never removes one, and never writes text. |
 | **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** — those bots wrote after the thread's newest human post, within `rate_limit_seconds` — number `rate_limit_posts` or more, or total `rate_limit_words` words or more; a limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
+| **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread; a turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
@@ -87,15 +88,23 @@ Each term uses only the terms above it.
 
 Parameters:
 
-| Parameter | Scope | Defined in |
-|---|---|---|
-| `rate_limit_posts`, `rate_limit_words`, `rate_limit_seconds`, `cooldown_seconds` | room; `limit:` sets `rate_limit_posts` and `rate_limit_words` per thread | `RATE_LIMIT` |
-| `catch_up_post_threshold`, `catch_up_age_seconds` | room | `CATCH_UP` |
-| `control_ttl_days` | room | `SETTINGS` |
-| `classifier_posts`, `classifier_timeout_seconds`, `classifier_retries`, `classifier_fallback`, `classifier_decision_ttl_seconds` | room | `WHO_SPEAKS` |
-| `follow_up_retry_cap` | room | `FOLLOW_UP` |
+Each is set per room; the two marked can also be set per thread with `limit:`. A count or duration set to 0 is off.
 
-No other parameter is set per thread.
+| Parameter | Meaning | Defined in |
+|---|---|---|
+| `rate_limit_posts` | Recent agent posts at which the thread is rate-limited. Per thread with `limit: N posts`. | `RATE_LIMIT` |
+| `rate_limit_words` | Words in the recent agent posts at which the thread is rate-limited. Per thread with `limit: N words`. | `RATE_LIMIT` |
+| `rate_limit_seconds` | How far back a post counts as recent. | `RATE_LIMIT` |
+| `cooldown_seconds` | Least gap between one bot's own posts in a thread. | `RATE_LIMIT` |
+| `catch_up_post_threshold` | Undelivered posts in a thread at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
+| `catch_up_age_seconds` | Age of the oldest undelivered post at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
+| `control_ttl_days` | Days of silence in a thread after which its settings are dropped. | `SETTINGS` |
+| `classifier_posts` | Most recent posts of the thread shown to the classifier. | `WHO_SPEAKS` |
+| `classifier_timeout_seconds` | How long one classifier call may take. | `WHO_SPEAKS` |
+| `classifier_retries` | Classifier calls retried after a timeout or error before the fallback applies. | `WHO_SPEAKS` |
+| `classifier_fallback` | What happens when the classifier fails: `nobody`, `everyone` or `rule`. | `WHO_SPEAKS` |
+| `classifier_decision_ttl_seconds` | How long a classifier decision is kept for a bot whose turn was held. | `WHO_SPEAKS` |
+| `follow_up_retry_cap` | Retries of a failed scheduled-job turn before a notice is posted and the job stops. | `FOLLOW_UP` |
 
 ---
 
