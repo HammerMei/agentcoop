@@ -118,7 +118,7 @@ No other parameter is set per thread.
 
 ### Non-goals
 
-- **Guarantees about work.** No plan timeouts, no per-member reports, no
+- **Guarantees about work.** No plan timeouts, no per-bot reports, no
   "who did what" notice. The room is the report; a bot that is waiting on
   another bot tracks that itself (`FOLLOW_UP`).
 - **Hidden information.** The room is the unit of visibility.
@@ -210,7 +210,7 @@ their own timing, outside this order.
 ### GATE
 
 - *Scope*: every post, every bot, human and bot senders alike; no
-  bypass for bot senders.
+  exception for bot senders.
 - *Named*: a human's post names a bot by platform mention, `@all` or
   room-wide mention, or the bare username; a bot's post names a bot only
   through the mentions the platform records for its canonical form
