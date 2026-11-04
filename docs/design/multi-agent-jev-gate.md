@@ -130,12 +130,28 @@ No other parameter is set per thread.
    two answers or none (§10). The gateway persists three kinds of state
    per room: a cursor per bot, the threads' settings, and the scheduled
    jobs.
-5. **The gateway knows nothing about collaboration.** It delivers posts,
-   decides who gets a turn, limits the pace, and posts replies — the
-   mechanisms in §5 — and keeps no plan, no record of who owes whom an
-   answer, and no notion of a meeting. How bots collaborate — a
-   brainstorm, a handoff, a follow-up, a deadline — is a skill running
-   inside a bot, using those mechanisms.
+5. **The gateway knows nothing about collaboration; it enforces a few
+   basic rules and nothing else.** The rules it enforces — mechanically,
+   with no model involved, so no bot can ignore them:
+   - *Delivery*: every post reaches every bot's session, in order, with
+     nothing dropped (`CURSOR`, `CATCH_UP`).
+   - *Admission*: a bot gets a turn only as the admission table allows —
+     addressed, or picked by the classifier, and not muted (`GATE`,
+     `MUTE`, `WHO_SPEAKS`).
+   - *Pace*: a turn does not start while the thread is rate-limited or
+     the bot is in cooldown, with the listed exemptions; one turn per bot
+     at a time (`RATE_LIMIT`, `ONE_TURN`).
+   - *Authority*: a control word takes effect only from an owner-role
+     human or the thread's orchestrator (`AUTHORITY`, `SETTINGS`).
+   - *Replies*: a reply is posted in canonical form, only in a thread it
+     may post in, with the recipients it declares (`REPLY_ENVELOPE`).
+   - *Scheduled jobs*: a job fires in its thread and is cleared only when
+     its turn ends normally (`FOLLOW_UP`).
+
+   It keeps no plan, no record of who owes whom an answer, and no notion
+   of a meeting; it never judges what a bot says. How bots collaborate —
+   a brainstorm, a handoff, a follow-up, a deadline — is a skill running
+   inside a bot, using those rules.
 
 ### Non-goals
 
@@ -340,11 +356,9 @@ their own timing, outside this order.
   the way a human stops a flooding bot without silencing the rest. A
   mute is one rule with no exceptions beyond the admission table; a skill
   can rely on it.
-- A mute is enforced by the gateway, as an admission rule, not by the
-  muted bot: the bot's backend is not run, so it cannot ignore it. Who
-  may post a `mute:` is `AUTHORITY`'s rule. Mutes are posts, so every
-  gateway in the room reads them and enforces them for the bots it runs;
-  they live in the thread's settings (`SETTINGS`).
+- Mutes are posts, so every gateway in the room reads them and enforces
+  them for the bots it runs (§3, principle 5); they live in the thread's
+  settings (`SETTINGS`).
 
 ### RATE_LIMIT
 
