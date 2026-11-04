@@ -11,8 +11,10 @@ collected in Appendix C.
 
 ## 1. Problem
 
-Today a room with several bots is protected from runaway exchanges by
-three layers:
+### 1.1 Current behaviour
+
+A room with several bots is protected from runaway exchanges by three
+layers:
 
 - an agent may answer with the token `<end-of-agent-chain>`, and then
   nothing is posted;
@@ -20,26 +22,45 @@ three layers:
   drops every post past `max_turns` from that sender;
 - those counters clear after `ttl_seconds` of silence.
 
-Below those, the `require_mention` setting makes a bot answer only humans
-who mention it; posts written by other bots are not checked and reach
-every bot in the room. And a bot's `to:` field lists every @-mention in a
-post, so a reply that quotes a peer — "@H, I agree with @b's point" — also
-lists `b`. The rule that an agent mentions only its intended recipients
-exists in the agent prompt alone.
+Below those layers:
 
-Two rooms were measured (Appendix A). Bots stop on their own in half to
-two thirds of their turns. The damage comes from the drops: every
-recoverable dropped post carried substance, the drops fell on the
-convergence phase of a debate, and two mutual "corrections" between bots
-traced to posts the counter had removed from the correcting bot's context
-(issue #190). A `@all` prompt produced four near-identical replies in
-seven seconds; each human prompt in the test room produced about 25 bot
-posts.
+- the `require_mention` setting makes a bot answer only humans who
+  mention it; posts written by other bots are not checked and reach every
+  bot in the room;
+- a bot's `to:` field lists every @-mention in a post;
+- the rule that an agent mentions only its intended recipients exists in
+  the agent prompt alone.
 
-The counter is a rate limiter that was being used as a convergence
-mechanism. It cannot tell a loop from a conclusion, so it cut where the
-conversation was ending; and because it drops rather than delivers, each
-bot's view of the room diverged by whatever its own counter had removed.
+Two rooms were measured (Appendix A): a test room with five bots over
+one afternoon, and a production room with three bots and one human over
+one week.
+
+### 1.2 The problems
+
+1. **Dropped posts carry substance.** Every recoverable post the counter
+   dropped carried substance, and the drops fell on the convergence phase
+   of a debate — the counter cannot tell a loop from a conclusion, so it
+   cut where the conversation was ending.
+2. **Each bot sees a different room.** The counter drops rather than
+   delivers, so each bot's view of the room diverges by whatever its own
+   counter removed. Two mutual "corrections" between bots traced to posts
+   the counter had removed from the correcting bot's context (issue
+   #190).
+3. **Every bot answers every bot.** A post written by a bot bypasses the
+   mention gate, so it reaches every bot in the room whether or not it
+   names them; each human prompt in the test room produced about 25 bot
+   posts.
+4. **Mentioning is not addressing.** A reply that quotes a peer — "@H, I
+   agree with @b's point" — lists `b` in `to:` as well as `H`, and `b`
+   gets a turn it was not asked for. Nothing enforces the prompt rule
+   that an agent mentions only its intended recipients.
+5. **`@all` fans out blindly.** A `@all` prompt produced four
+   near-identical replies in seven seconds; no bot saw the others'
+   answers before writing its own.
+6. **The counter is the wrong tool.** It is a rate limiter being used as
+   a convergence mechanism. Bots already stop on their own in half to two
+   thirds of their turns; what the room lacks is delivery without holes
+   and a way to decide who should speak, not a harder stop.
 
 ---
 
