@@ -1,27 +1,48 @@
 # Rooms with several agents — the classifier gate
 
-A second design for the same problem as `multi-agent-enhancement.md`. It
-keeps that document's problem statement, evidence (its Appendix A) and
-reply envelope, and replaces its coordination machinery — modes, plans,
-callbacks, a shared room state — with one question asked of a small
-classifier once per post: *who in this room should speak now?* Everything
-a gateway needs to answer the question is in the room's history, so the
-gateway persists two small things per room — one delivery cursor per bot
-and the current control words per thread — and shares no persisted
-state between bots; the one thing its local bots share is an ephemeral
-per-post classifier decision.
+A design for rooms where several AgentCoop bots talk with people and
+with each other. Instead of modes, plans or a shared record of who owes
+whom an answer, the gateway asks a small classifier one question about
+every post — *who in this room should speak now?* — and otherwise
+delivers every post to every bot, in order, with nothing dropped.
+Everything the gateway needs is in the room's history, so it persists two
+small things per room — one delivery cursor per bot and the current
+control words per thread — and shares no persisted state between bots;
+the one thing its local bots share is an ephemeral per-post classifier
+decision. A plan-based alternative is compared in Appendix B.
 
 ---
 
 ## 1. Problem
 
-Unchanged from `multi-agent-enhancement.md` §1: agent senders bypass the
-mention gate, so every agent post is dispatched to every bot; a per-pair
-counter drops posts past a budget, and the drops fall on the convergence
-phase of a debate and split each bot's view of the room. The two
-observations this design builds on are from the same measurements: agents
-converge on their own in half to two thirds of turns, and the damage comes
-from dropped posts, not from the exchanges themselves.
+Loop protection today is three layers (`docs/agent-chain.md`): an agent
+may answer with `<end-of-agent-chain>` and nothing is posted; each
+receiving bot counts posts per sender per room and drops everything past
+`max_turns`; the counters clear after `ttl_seconds`. Underneath them, the
+`require_mention` gate applies to human senders only — a post from another
+agent is dispatched to every bot in the room whether or not it names them
+(`gateway/connectors/rocketchat/normalize.py:197, 213`;
+`gateway/connectors/mattermost/normalize.py:222`). The addressing a bot
+reads (`to:`) is computed from every mention in a post, so a reply that
+quotes a peer — "@H, I agree with @b's point" — addresses `b` as well as
+`H` (`gateway/connectors/rocketchat/connector.py:1841`,
+`gateway/connectors/mattermost/connector.py:828`); the rule that an agent
+mentions only its intended recipients exists in the agent prompt alone
+(`gateway/contexts/rc-gateway-context.md:56`).
+
+Two rooms were measured (Appendix A). Agents stop on their own in half to
+two thirds of their turns. The damage comes from the drops: every
+recoverable dropped post carried substance, the drops fell on the
+convergence phase of a debate, and two mutual "corrections" between
+agents traced to posts the counter had removed from the correcting agent's
+context (issue #190). A `@all` prompt produced four near-identical replies
+in seven seconds; each human prompt in the lab produced about 25 agent
+posts.
+
+The counter is a rate limiter that was being used as a convergence
+mechanism. It cannot tell a loop from a conclusion, so it cut where the
+conversation was ending; and because it drops rather than delivers, each
+bot's view of the room diverged by whatever its own counter had removed.
 
 ---
 
@@ -506,10 +527,14 @@ apart from this, on time.
   excluded; not needed for a control-only `text`) and `text`. A single
   reply may be written as top-level `to` / `text`. `done` — nothing to
   post. One of `replies` / `done`.
-- *Canonical form*: each reply is posted in its thread with recipients
-  prepended, non-recipient `@name` demoted and `all` mapped, so the
-  post's mentions are exactly its `to` and every gateway reads the same
-  addressing (`multi-agent-enhancement.md` `REPLY_ENVELOPE`).
+- *Canonical form*: the gateway rewrites each reply's `text` before
+  posting so that the post's mentions are exactly its `to`: a recipient
+  not mentioned in the text is prepended as `@name`; an `@name` in the
+  text that is not a recipient loses its `@`; `all` becomes the
+  platform's room-wide mention. A human reads the recipients at the head
+  of the post, and every gateway's gate reads the platform's mentions and
+  reaches the same set — after a restart and from a history fetch alike.
+  Every post is parsed one way, from the platform, whoever wrote it.
 - *Posting*: the reply in the triggering thread **always posts** — the
   turn was admitted there, and that admission is the only check; a
   `mute:` or `snooze` that lands mid-turn does not stop it. A reply to
@@ -552,8 +577,8 @@ apart from this, on time.
   in platform metadata where the platform has it and recognised by the
   connector before `GATE`; every gateway in the room treats it as
   context only and executes nothing from it. In the simulator the event
-  kind is explicit in the scenario; each platform's representation is a
-  lab item (§8.1 of the other document).
+  kind is explicit in the scenario; how each platform carries it is
+  settled in the lab, not here (§8.1).
 
 ### HINT (H1)
 
@@ -685,9 +710,8 @@ usage pricing?` on a thread.
 | 6 | `chair: @H <close>` · `mode: open` · `unmute: @d` | — | 1 |
 
 Eleven member turns, five chair turns after the chair's first post
-(three `done`), five counted posts. The plan-based design does the same meeting
-with two callbacks after the chair's first post instead of five turns;
-this one keeps no record of the round.
+(three `done`), five counted posts. The gateway keeps no record of the
+round; the chair's skill does.
 
 ### 6.3 One turn, two threads
 
@@ -749,12 +773,48 @@ anyone know why the build is red?`
 
 ## 8. Validation and sequence
 
-### 8.1 What the simulator measures
+### 8.1 The simulator comes first
 
-The simulator of `multi-agent-enhancement.md` §8.1 runs both designs over
-the same scenario files. For this one it runs each scenario in three
-configurations, so that the classifier's value and its failure cost are
-both measured against the same conversations:
+Before any gateway code, §5 is implemented as a standalone simulator
+(`tools/roomsim/`, outside the gateway) and the scenarios in §7 are run
+through it, to see the conversations this design produces — and the odd
+corners — before paying for an implementation.
+
+- **Mechanism**: a deterministic script implementing §5 as written —
+  the admission table, the rate limit, the sweeper, the cursor, the reply
+  envelope. It is not a language model tracing the rules: a model's
+  trace would hide whether a wrong step was a hole in the spec or an
+  error in the trace. Where the script and the text disagree, one of
+  them is wrong and is fixed.
+- **Members**: each bot turn is one real `claude -p` (or OpenCode) call
+  with the bot's persona from the lab configuration, in one session per
+  bot per room as the gateway keeps it; each turn appends what the cursor
+  delivers — everything undelivered in the room, labelled by thread — and
+  nothing else is injected. An orchestrator is the same, loaded with its
+  skill; its control words are parsed by the script.
+- **Humans**: scripted lines in the scenario file, placed at a step; a
+  model playing the human is allowed and labelled as such.
+- **Output**: a transcript with the script's annotations before each
+  event — the turn, its thread and backlog, the recent-post count, every
+  classifier decision, every sweep — and a tally of turns, posts, tokens
+  and context size per bot. People review the transcript for exchanges
+  that read wrong; what reads wrong is fixed in §5 and the scenario is
+  run again.
+- **Two kinds of run**: a run with live models is for behaviour — what
+  the agents do with the rules, over several runs, read by people; it is
+  not expected to repeat. A run's inbound events and agent outputs can
+  be saved as a replay fixture, and replaying it is deterministic; the
+  mechanism tests in §8.2 are written against the simulator first and
+  carried to the gateway unchanged, and on a replay fixture the gateway
+  must produce the same annotation sequence as the simulator.
+- **What it cannot show**: platform behaviour — threads, the mention
+  array each platform computes from a canonical post, history paging,
+  webhook identities, how a failure notice is carried — and session
+  compaction. Those belong to the lab.
+
+Each scenario runs in three configurations, so that the classifier's
+value and its failure cost are both measured against the same
+conversations:
 
 - **classifier on every post**, with `classifier_retries` and a forced
   failure rate injected, recording the raw failure rate, how often a
@@ -792,8 +852,7 @@ the measure of the classifier; nothing observed later is.
   later;
 - silent stalls: handoffs where the next bot never spoke, and whether a
   `FOLLOW_UP` reminder recovered them;
-- chair turns per meeting round, against the two callbacks of the
-  plan-based design;
+- chair turns per meeting round;
 - rate-limited turns, bypass sources, degraded classifier results;
 - posts per human prompt, latency per post, classifier calls and tokens
   per post.
@@ -802,7 +861,7 @@ the measure of the classifier; nothing observed later is.
 
 | # | Task | Builds | Mechanism tests |
 |---|---|---|---|
-| 0 | **Simulator**, shared with the other design. | — | the §6 tables reproduced |
+| 0 | **Simulator.** §8.1: the script, a scenario file for every §7 row, persona files from the lab, the classifier in shadow and with effect. | — | the §6 tables reproduced |
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the thread settings's persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS | the cursor commits at each committing end and not at a non-committing one, with a failure injected at every boundary; a two-thread turn posts in both, each counted in its own; a reply to a closed thread is not posted and is reported next turn; a two-reply envelope whose second post the platform refuses keeps the first, reports the second, commits; the triggering thread's reply posts in a rate-limited thread, a second-thread reply does not; mentions equal `to`; settings survive restart and lapses at `control_ttl_days`; an orchestrator's own outbound control word updates its gateway's settings; a replayed older control arriving after the value returned to its default is ignored |
 | 2 | **Gate for agents, silence, mute.** Agent senders through the gate; `mode:`, `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, SILENCE, AUTHORITY | with the classifier off and the `nobody` fallback, an agent post naming nobody starts no turn; in a snoozed thread a bot's mention of a bot starts nothing, a human's or the orchestrator's starts a turn, and a member's mention of the orchestrator starts the orchestrator's turn; a muted bot runs only on a human's mention and its reply to that human posts despite the mute; `snooze` read from the settings after restart |
 | 3 | **Rate limit.** Recent-post count and cooldown from history; human and orchestrator bypass; agent list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT | counts match across two gateway processes on one room with equal agent lists, and status says so when they differ; a human mention starts in a rate-limited thread; a bot the orchestrator names starts in a rate-limited thread |
@@ -836,9 +895,11 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 - **Whether the orchestrator's reply-turns go through the classifier**
   so that a chair collects a round in one turn; costs the "mention is
   always honoured" rule for one bot.
-- **Catch-up frequency** relative to the plan-based design, from the
-  not-named → catch-up-with-text rate.
-- **Envelope encoding**: as in the other document.
+- **Catch-up frequency**, from the not-named → catch-up-with-text rate.
+- **Envelope encoding** (task 1): a fenced JSON block, the whole reply,
+  or a backend-native structured output where one exists (`claude
+  --json-schema`; the OpenCode HTTP backend has none). The contract is
+  the fields; the encoding is chosen when the parser is written.
 - **Where a bot's profile lives.** The classifier needs, per bot, more
   than a username: what the bot does and when it wants to be asked —
   "how's the market today?" names nobody, and only a profile tells the
@@ -853,9 +914,11 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 
 ## 10. Out of scope for this version
 
-- **Plans, timeouts and reports** — the plan-based design's `PLAN`,
-  `CALLBACK`, `STOP`. Reopened if the simulator shows unattended handoffs
-  stalling silently at a rate `FOLLOW_UP` does not recover.
+- **Plans, timeouts and reports** — a gateway record of who was asked
+  to do what, with a deadline per step, a cancel command, and a notice to
+  the requester saying who answered and who did not (the plan-based
+  alternative, Appendix B). Reopened if the simulator shows unattended
+  handoffs stalling silently at a rate `FOLLOW_UP` does not recover.
 - **Agent-list synchronisation between gateways** — agent lists are configured
   by hand and checked at startup. Reopened when two gateways share rooms
   in production.
@@ -893,9 +956,44 @@ Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 
 ---
 
-## Appendix — Against the plan-based design
+## Appendix A — Evidence from gateway logs
 
-| | `multi-agent-enhancement.md` | this document |
+Lab: `#product-idea`, five agents (three `claude`, two `opencode`),
+`max_turns: 5`, one afternoon. Production: `#nest`, three agents and one
+human, `max_turns: 2`, one week.
+
+| | Lab | Production |
+|---|---|---|
+| Agent turns | 207 | 544 |
+| Ended by the agent itself (token only) | 127 (61%) | 259 (48%) |
+| Posts dropped by the counter | 74 events on 21 posts | 2 |
+| Dropped posts with substance | 18 of 18 recoverable (3 not recoverable) | 2 of 2 |
+| Agent posts per human prompt (debate windows) | 31 / 18 / 23 | — |
+
+Half the lab drops came from a counter-reset bug since fixed (PR #195);
+the rest are genuine overflows on roughly ten posts, all in the
+convergence phase of the debate. Two misattributions — an agent denying
+a peer had given a figure, an agent accusing a peer of two inconsistent
+figures — each trace to a post the counter had removed from the accuser's
+context (issue #190). The TTL never acted as the reset in either
+deployment; a human post always came first.
+
+A closing-round rehearsal in the lab (n=1): the human posted a six-point
+summary to `@all` with the rule "agree: token only; object: name the
+point". Four of five bots answered with the token alone; one objected to
+one point, which started two further chains of mostly token-only turns.
+Thirteen turns, two posts.
+
+Turn lengths in `#nest` over eleven days (615 turns): token-only turns
+median 3 s, 82% within 5 s; turns with text median 10 s, 66% within 15 s.
+
+## Appendix B — Compared with the plan-based alternative
+
+`multi-agent-enhancement.md` solves the same problem with per-thread
+modes, a plan record per request, callbacks and a shared room state.
+The two are run through the same simulator before either is built.
+
+| | plan-based | this document |
 |---|---|---|
 | Who decides an unaddressed turn | mode (`snooze` / `listen` / `catch-up`) per thread | the room classifier, once per post; `snooze` and `mute:` as the only controls |
 | Sequencing and dependencies | `PLAN`: FIFO per thread, parallel / sequential, admission, two timeout classes, member states, early completion | read from the room when a reply arrives; `FOLLOW_UP` for waiting |
