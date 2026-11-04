@@ -88,23 +88,25 @@ Each term uses only the terms above it.
 
 Parameters:
 
-Each is set per room; the two marked can also be set per thread with `limit:`. A count or duration set to 0 is off.
+A count or duration set to 0 is off.
 
-| Parameter | Meaning | Defined in |
-|---|---|---|
-| `rate_limit_posts` | Recent agent posts at which the thread is rate-limited. Per thread with `limit: N posts`. | `RATE_LIMIT` |
-| `rate_limit_words` | Words in the recent agent posts at which the thread is rate-limited. Per thread with `limit: N words`. | `RATE_LIMIT` |
-| `rate_limit_seconds` | How far back a post counts as recent. | `RATE_LIMIT` |
-| `cooldown_seconds` | Least gap between one bot's own posts in a thread. | `RATE_LIMIT` |
-| `catch_up_post_threshold` | Undelivered posts in a thread at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
-| `catch_up_age_seconds` | Age of the oldest undelivered post at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
-| `control_ttl_days` | Days of silence in a thread after which its settings are dropped. | `SETTINGS` |
-| `classifier_posts` | Most recent posts of the thread shown to the classifier. | `WHO_SPEAKS` |
-| `classifier_timeout_seconds` | How long one classifier call may take. | `WHO_SPEAKS` |
-| `classifier_retries` | Classifier calls retried after a timeout or error before the fallback applies. | `WHO_SPEAKS` |
-| `classifier_fallback` | What happens when the classifier fails: `nobody`, `everyone` or `rule`. | `WHO_SPEAKS` |
-| `classifier_decision_ttl_seconds` | How long a classifier decision is kept for a bot whose turn was held. | `WHO_SPEAKS` |
-| `follow_up_retry_cap` | Retries of a failed scheduled-job turn before a notice is posted and the job stops. | `FOLLOW_UP` |
+| Parameter | Scope | Meaning | Defined in |
+|---|---|---|---|
+| `rate_limit_posts` | room; per thread with `limit: N posts` | Recent agent posts at which the thread is rate-limited. | `RATE_LIMIT` |
+| `rate_limit_words` | room; per thread with `limit: N words` | Words in the recent agent posts at which the thread is rate-limited. | `RATE_LIMIT` |
+| `rate_limit_seconds` | room | How far back a post counts as recent. | `RATE_LIMIT` |
+| `cooldown_seconds` | room | Least gap between one bot's own posts in a thread. | `RATE_LIMIT` |
+| `catch_up_post_threshold` | room | Undelivered posts in a thread at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
+| `catch_up_age_seconds` | room | Age of the oldest undelivered post at which the sweeper gives the bot a catch-up turn. | `CATCH_UP` |
+| `control_ttl_days` | room | Days of silence in a thread after which its settings are dropped. | `SETTINGS` |
+| `classifier_posts` | room | Most recent posts of the thread shown to the classifier. | `WHO_SPEAKS` |
+| `classifier_timeout_seconds` | room | How long one classifier call may take. | `WHO_SPEAKS` |
+| `classifier_retries` | room | Classifier calls retried after a timeout or error before the fallback applies. | `WHO_SPEAKS` |
+| `classifier_fallback` | room | What happens when the classifier fails: `nobody`, `everyone` or `rule`. | `WHO_SPEAKS` |
+| `classifier_decision_ttl_seconds` | room | How long a classifier decision is kept for a bot whose turn was held. | `WHO_SPEAKS` |
+| `follow_up_retry_cap` | room | Retries of a failed scheduled-job turn before a notice is posted and the job stops. | `FOLLOW_UP` |
+
+No other parameter is set per thread.
 
 ---
 
