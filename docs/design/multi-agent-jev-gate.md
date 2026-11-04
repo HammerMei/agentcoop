@@ -119,8 +119,8 @@ No other parameter is set per thread.
    - The classifier's answer is never used to drop a bot the post addresses.
 3. **Every bot eventually sees everything.** One cursor per bot per
    room; a turn is given everything after the cursor, from every thread,
-   and may reply in any thread it was given. Nothing is dropped by
-   admission.
+   and may reply in any thread it was given. A turn that is held back
+   drops nothing: the posts wait in the backlog.
 4. **The platform is the only shared medium** — apart from the in-memory
    classifier decisions one gateway holds for its own bots. Rate limiting
    is computed from the room's history; control words are posts in the
@@ -131,22 +131,19 @@ No other parameter is set per thread.
    per room: a cursor per bot, the threads' settings, and the scheduled
    jobs.
 5. **The gateway knows nothing about collaboration; it enforces a few
-   basic rules and nothing else.** The rules it enforces — mechanically,
-   with no model involved, so no bot can ignore them:
-   - *Delivery*: every post reaches every bot's session, in order, with
-     nothing dropped (`CURSOR`, `CATCH_UP`).
-   - *Admission*: a bot gets a turn only as the admission table allows —
-     addressed, or picked by the classifier, and not muted (`GATE`,
-     `MUTE`, `WHO_SPEAKS`).
-   - *Pace*: a turn does not start while the thread is rate-limited or
-     the bot is in cooldown, with the listed exemptions; one turn per bot
-     at a time (`RATE_LIMIT`, `ONE_TURN`).
-   - *Authority*: a control word takes effect only from an owner-role
-     human or the thread's orchestrator (`AUTHORITY`, `SETTINGS`).
-   - *Replies*: a reply is posted in canonical form, only in a thread it
-     may post in, with the recipients it declares (`REPLY_ENVELOPE`).
-   - *Scheduled jobs*: a job fires in its thread and is cleared only when
-     its turn ends normally (`FOLLOW_UP`).
+   basic rules and nothing else.** Mechanically, with no model involved,
+   so no bot can get around them, the gateway:
+   - delivers every post to every bot, in order, dropping nothing
+     (`CURSOR`, `CATCH_UP`);
+   - starts a bot's turn only when the table in `GATE` allows it, and
+     holds the turn while the thread is rate-limited, the bot is in
+     cooldown, or the bot already has a turn running (`GATE`, `MUTE`,
+     `RATE_LIMIT`, `ONE_TURN`);
+   - accepts a control word only from a human with the owner role or
+     from the thread's orchestrator (`AUTHORITY`, `SETTINGS`);
+   - posts a reply only in a thread the turn may post in, rewritten so
+     that its mentions are exactly its recipients (`REPLY_ENVELOPE`);
+   - fires a scheduled job at its time, in its thread (`FOLLOW_UP`).
 
    It keeps no plan, no record of who owes whom an answer, and no notion
    of a meeting; it never judges what a bot says. How bots collaborate —
@@ -170,7 +167,7 @@ No other parameter is set per thread.
   judges whether there is still something to say. Duplicate answers are
   the classifier's to avoid by picking fewer bots, and are noise when it
   does not.
-- **Overrides of a mute.** A mute is one rule, the admission table in
+- **Overrides of a mute.** A mute is one rule, the table in
   `GATE`; a skill can rely on it.
 
 ---
@@ -216,7 +213,7 @@ Every inbound post, for every bot the gateway runs in that room:
 1. **Control words** — from an authorised sender (`AUTHORITY`), apply
    `limit:`, `orchestrator:`, `mute:`, `unmute:` to the thread's
    settings. A post that is only control words goes no further.
-2. **Addressed?** — if the post addresses the bot, the admission table in `GATE`
+2. **Addressed?** — if the post addresses the bot, the table in `GATE`
    says, from who addressed it and the thread's state, whether the bot
    speaks.
 3. **Muted?** — if not addressed and the bot is muted in the thread, it
@@ -225,7 +222,7 @@ Every inbound post, for every bot the gateway runs in that room:
    bots that are not muted, told which bots the post addresses; the bots
    it adds speak too. Others wait. (`WHO_SPEAKS`)
 5. **Allowed now?** — a turn waits while its thread is rate-limited or
-   the bot is in cooldown; the exemptions are in the admission table and
+   the bot is in cooldown; the exemptions are in the table in `GATE` and
    `RATE_LIMIT`. A turn that cannot start now leaves its post in the
    bot's backlog; a classifier choice also stays in the decision cache.
    The sweeper's next pass asks again. (`RATE_LIMIT`, `CATCH_UP`)
@@ -237,7 +234,7 @@ Every inbound post, for every bot the gateway runs in that room:
    through a high-water mark instead. (`CURSOR`)
 8. **Reply** — the envelope is parsed; the reply in the thread that
    started the turn is posted in canonical form; a reply to another
-   delivered thread is posted if that thread admits it; `done` posts
+   delivered thread is posted if that thread allows it; `done` posts
    nothing. (`REPLY_ENVELOPE`)
 
 The sweeper (`CATCH_UP`) and scheduled jobs (`FOLLOW_UP`) start turns on
@@ -254,9 +251,9 @@ their own timing, outside this order.
 - *Not addressed*: `MUTE`, then `WHO_SPEAKS`, decide. Addressing a bot puts
   it among the speakers for sure; the classifier can add other bots but
   cannot remove an addressed one.
-- *Admission*: whether a turn's source — who or what started it — may
-  open a turn for a bot depends only on whether the bot is muted in the
-  thread. This table is the only rule; "under the rate limit" means the
+- *Who gets a turn*: whether a turn's source — who or what started it —
+  may start a turn for a bot depends only on whether the bot is muted in
+  the thread. This table is the only rule; "under the rate limit" means the
   turn also waits for `RATE_LIMIT`.
 
   | source of the turn | bot not muted | bot muted there |
@@ -315,7 +312,7 @@ their own timing, outside this order.
 - *A decision belongs to its post*: it makes a bot eligible only while
   that post is still in the bot's backlog — checked when the result
   lands and again when the sweeper reads the cache. A result that
-  arrives after a turn admitted meanwhile has delivered the post starts
+  arrives after a turn started meanwhile has delivered the post starts
   nothing, whatever else the backlog holds; it is recorded with its
   reason.
 - *Failure*: the call has `classifier_timeout_seconds` and is retried up
@@ -354,7 +351,7 @@ their own timing, outside this order.
   an orchestrator uses to impose a structure — who speaks is exactly who
   it addresses, and a bot that addresses another bot starts nothing — and
   the way a human stops a flooding bot without silencing the rest. A
-  mute is one rule with no exceptions beyond the admission table; a skill
+  mute is one rule with no exceptions beyond the table in `GATE`; a skill
   can rely on it.
 - Mutes are posts, so every gateway in the room reads them and enforces
   them for the bots it runs (§3, principle 5); they live in the thread's
@@ -459,7 +456,7 @@ their own timing, outside this order.
   backlog and, for a classifier choice, the cached decision. A bot that
   becomes free starts nothing by itself; it and a turn that ends each
   ask the sweeper for a pass on that bot, and the pass reconstructs
-  eligibility from the backlog, the admission table and the cache
+  eligibility from the backlog, the table in `GATE` and the cache
   (`CATCH_UP`). The turn that then runs is not second-guessed: it has
   everything posted meanwhile in its backlog, and the bot judges whether
   there is still something to say. A reply someone else already gave, or
@@ -487,7 +484,7 @@ their own timing, outside this order.
   (`REPLY_ENVELOPE`). It is not written, and the same posts are
   delivered again, when the backend fails or the reply is still invalid
   after the one re-prompt (`FAILURE_NOTICE`).
-- *Contract*: nothing is withheld by admission. A turn that ends
+- *Contract*: nothing is withheld by `GATE`. A turn that ends
   normally is not delivered again. A fetch failure, a failed turn, or a
   crash before the cursor is saved re-delivers the same posts, and a
   reply already posted before such a crash may be posted again; there is
@@ -516,7 +513,7 @@ their own timing, outside this order.
   empty turn runs — which with one room cursor usually means one turn
   serves several threads.
 - *Addressed or picked posts first*: a post in the bot's backlog that the
-  admission table admits now — one that addresses the bot, or whose
+  table in `GATE` allows now — one that addresses the bot, or whose
   classifier decision, not yet expired, picked the bot and whose post is
   still in the backlog — starts a turn as soon as the rate limit, the
   cooldown and the bot allow, with the oldest such post taken as the
@@ -560,9 +557,9 @@ their own timing, outside this order.
   alike. Every post is parsed one way, from the platform, whoever wrote
   it.
 - *The reply check*: the reply in the thread that started the turn
-  **always posts** — the turn was admitted there, and that admission is
-  the only check; a `mute:` that lands mid-turn does not stop it. A reply to another delivered thread posts only if that thread
-  admits it:
+  **always posts** — the turn was started there, and that is the only
+  check; a `mute:` that lands mid-turn does not stop it. A reply to
+  another delivered thread posts only if that thread allows it:
 
   | that thread | posts? |
   |---|---|
@@ -617,7 +614,7 @@ Injected into every turn:
 - whether the bot is muted in each thread;
 - how many posts each thread's rate limit has left;
 - replies from the last turn that could not be posted — one to another
-  thread that thread did not admit, or one the platform refused — and
+  thread that thread did not allow, or one the platform refused — and
   why;
 - the instruction: "make your point; do not restate; answer `done` if
   you have nothing to add; `to` is who the post is for, not who it
@@ -645,7 +642,7 @@ Injected into every turn:
   and stops. Clearing an occurrence and saving the cursor are two saves,
   so across a crash an occurrence is at-least-once: the skill tolerates
   a repeated firing.
-- *Under the gate*: see the admission table in `GATE`, row "the bot's
+- *Under the gate*: see the table in `GATE`, row "the bot's
   own scheduled job". The firing itself is not a post and counts
   nothing; the reply its turn makes counts in its thread. While the bot
   is muted in the thread the firing is deferred; if the expiry passes
@@ -653,7 +650,7 @@ Injected into every turn:
 
 ### ORCHESTRATOR
 
-- `orchestrator: @bot` on a thread: the admission table and `RATE_LIMIT`
+- `orchestrator: @bot` on a thread: the table in `GATE` and `RATE_LIMIT`
   give the bot and the bots it addresses their exemptions, and `AUTHORITY`
   honours its control words, including `mute:` of other bots. Policy for
   its turns lives in its skill.
@@ -799,7 +796,7 @@ through it, to see the conversations this design produces — and the odd
 corners — before paying for an implementation.
 
 - **Mechanism**: a deterministic script implementing §5 as written —
-  the admission table, the rate limit, the sweeper, the cursor, the reply
+  the table in `GATE`, the rate limit, the sweeper, the cursor, the reply
   envelope. It is not a language model tracing the rules: a model's
   trace would hide whether a wrong step was a hole in the spec or an
   error in the trace. Where the script and the text disagree, one of
@@ -894,7 +891,7 @@ Mechanism tests, by task — written against the simulator first:
 - **0**: the §6 tables reproduced.
 - **1**: the cursor is saved at each normal end and not at a failed one,
   with a failure injected at every boundary; a two-thread turn posts in
-  both, each counted in its own; a reply to a thread that does not admit
+  both, each counted in its own; a reply to a thread that does not allow
   it is not posted and is reported next turn; a two-reply envelope whose
   second post the platform refuses keeps the first, reports the second,
   saves the cursor; the reply in the starting thread posts in a
@@ -1058,7 +1055,7 @@ The two are run through the same simulator before either is built.
 | | plan-based | this document |
 |---|---|---|
 | Who decides an unaddressed turn | a per-thread mode: silent, answer every post, or catch up later | the room classifier, once per post; `mute:` as the only control |
-| Sequencing and dependencies | a plan per request: members, parallel or sequential, admission, timeouts, member states | read from the room when a reply arrives; `FOLLOW_UP` for waiting |
+| Sequencing and dependencies | a plan per request: members, parallel or sequential, membership, timeouts, member states | read from the room when a reply arrives; `FOLLOW_UP` for waiting |
 | Rate limit | count per thread since the last human post, persisted; pause with notice; an extend command | a rolling count of recent agent posts and a cooldown, computed from history; no notice; humans and the orchestrator exempt |
 | Loops | paused at a plan boundary until a human, an extension or a timeout | slowed, not stopped; ended by `done`, `mute:` or a human |
 | A bad actor | the thread pauses for everyone | `mute: @x` by the orchestrator or a human |
