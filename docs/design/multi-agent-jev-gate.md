@@ -167,8 +167,6 @@ No other parameter is set per thread.
   judges whether there is still something to say. Duplicate answers are
   the classifier's to avoid by picking fewer bots, and are noise when it
   does not.
-- **Overrides of a mute.** A mute is one rule, the table in
-  `GATE`; a skill can rely on it.
 
 ---
 
@@ -350,9 +348,7 @@ their own timing, outside this order.
   `unmute: @all` lifts every mute in the thread. This is the instrument
   an orchestrator uses to impose a structure — who speaks is exactly who
   it addresses, and a bot that addresses another bot starts nothing — and
-  the way a human stops a flooding bot without silencing the rest. A
-  mute is one rule with no exceptions beyond the table in `GATE`; a skill
-  can rely on it.
+  the way a human stops a flooding bot without silencing the rest.
 - Mutes are posts, so every gateway in the room reads them and enforces
   them for the bots it runs (§3, principle 5); they live in the thread's
   settings (`SETTINGS`).
