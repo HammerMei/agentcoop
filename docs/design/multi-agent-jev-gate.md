@@ -379,9 +379,10 @@ their own timing, outside this order.
   failures.
 - *Rule*: a turn does not start while the recent agent posts number
   ≥ `rate_limit_posts`, or their words total ≥ `rate_limit_words`, or
-  the bot posted within `cooldown_seconds`. Either limit binds on its
-  own; a limit set to 0 is off, and with both at 0 only the cooldown
-  remains. The rate limit gates the *start* of a turn only: a started
+  the bot posted within `cooldown_seconds`. Each of the three binds on
+  its own and is off at 0: `cooldown_seconds` is the least gap between
+  one bot's own posts in a thread, independent of how much the thread
+  holds; with all three at 0 nothing holds a turn back. The rate limit gates the *start* of a turn only: a started
   turn always posts its reply in its own thread, so the count can go
   over by the number of turns already running there — bounded by the
   room's bots, and by one more per gateway across gateways — and the
