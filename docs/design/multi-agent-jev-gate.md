@@ -340,8 +340,11 @@ their own timing, outside this order.
   the way a human stops a flooding bot without silencing the rest. A
   mute is one rule with no exceptions beyond the admission table; a skill
   can rely on it.
-- Mutes are posts, so every gateway in the room reads them, and they live
-  in the thread's settings (`SETTINGS`).
+- A mute is enforced by the gateway, as an admission rule, not by the
+  muted bot: the bot's backend is not run, so it cannot ignore it. Who
+  may post a `mute:` is `AUTHORITY`'s rule. Mutes are posts, so every
+  gateway in the room reads them and enforces them for the bots it runs;
+  they live in the thread's settings (`SETTINGS`).
 
 ### RATE_LIMIT
 
