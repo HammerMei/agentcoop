@@ -221,34 +221,46 @@ reply below is a line or two, so the post count is what binds.
 
 ### Order of handling
 
-Every inbound post, for every bot the gateway runs in that room:
+When a post arrives, the gateway runs these steps for each bot it runs
+in that room:
 
-1. **Control words** — from an authorised sender (`AUTHORITY`), apply
-   `limit:`, `orchestrator:`, `mute:`, `unmute:` to the thread's
-   settings. A post that is only control words goes no further.
-2. **Addressed?** — if the post addresses the bot, the table in `GATE`
-   says, from who addressed it and the thread's state, whether the bot
-   speaks.
-3. **Muted?** — if not addressed and the bot is muted in the thread, it
-   does not speak; the post waits in its backlog. (`MUTE`)
-4. **Who speaks?** — the classifier is asked once per post about the
-   bots that are not muted, told which bots the post addresses; the bots
-   it adds speak too. Others wait. (`WHO_SPEAKS`)
-5. **Allowed now?** — a turn waits while its thread is rate-limited or
-   the bot is in cooldown; the exemptions are in the table in `GATE` and
-   `RATE_LIMIT`. A turn that cannot start now leaves its post in the
-   bot's backlog; a classifier choice also stays in the decision cache.
-   The sweeper's next pass asks again. (`RATE_LIMIT`, `CATCH_UP`)
-6. **One at a time** — one bot runs one turn at a time in a room.
-   (`ONE_TURN`)
-7. **Context** — the turn receives everything after the bot's cursor and
-   before the post that started it, labelled by thread, then that post.
-   A turn the sweeper or a scheduled job started receives everything
-   through a high-water mark instead. (`CURSOR`)
-8. **Reply** — the envelope is parsed; the reply in the thread that
-   started the turn is posted in canonical form; a reply to another
-   delivered thread is posted if that thread allows it; `done` posts
-   nothing. (`REPLY_ENVELOPE`)
+1. **Control words.** If the sender is authorised (`AUTHORITY`) and the
+   post contains `limit:`, `orchestrator:`, `mute:` or `unmute:`, the
+   gateway updates the thread's settings. If the post contains nothing
+   but control words, handling stops here.
+2. **Addressed?** If the post addresses the bot, the gateway looks up
+   the table in `GATE` — a fixed table in this document, whose rows are
+   who or what started the turn and whose columns are whether the bot is
+   muted in the thread — and the table gives the answer: the bot gets a
+   turn, or it does not. For example, a human's mention always gives the
+   bot a turn, even when it is muted; another bot's mention gives a
+   muted bot nothing.
+3. **Muted?** If the post does not address the bot and the bot is muted
+   in the thread, the bot gets no turn; the post stays in the bot's
+   backlog. (`MUTE`)
+4. **Who speaks?** For the bots that are not muted, the gateway asks the
+   classifier once per post: given this post, and given which bots it
+   addresses, which other bots should speak? Each bot the classifier
+   names gets a turn. Every other bot gets no turn from this post; the
+   post stays in its backlog. (`WHO_SPEAKS`)
+5. **Allowed now?** A turn that step 2 or step 4 granted still waits
+   while the thread is rate-limited or the bot is in cooldown, unless
+   the turn's source is exempt — the exemptions are listed in the table
+   in `GATE` and in `RATE_LIMIT`. While the turn waits, the gateway
+   stores nothing new: the post is already in the bot's backlog, and the
+   classifier's decision stays in the decision cache. The sweeper asks
+   again at its next pass. (`RATE_LIMIT`, `CATCH_UP`)
+6. **One at a time.** A bot runs one turn at a time in a room; a second
+   turn for the same bot waits until the first ends. (`ONE_TURN`)
+7. **Context.** The gateway gives the turn every post after the bot's
+   cursor and before the post that started the turn, labelled by
+   thread, and then that post. A turn the sweeper or a scheduled job
+   started gets every post after the cursor up to a high-water mark
+   instead. (`CURSOR`)
+8. **Reply.** The gateway parses the reply envelope. It posts the reply
+   for the thread that started the turn, in canonical form. It posts a
+   reply for another delivered thread only if that thread allows it.
+   `done` posts nothing. (`REPLY_ENVELOPE`)
 
 The sweeper (`CATCH_UP`) and scheduled jobs (`FOLLOW_UP`) start turns on
 their own timing, outside this order.
