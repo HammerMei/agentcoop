@@ -303,20 +303,35 @@ their own timing, outside this order.
 
 ### WHO_SPEAKS — the room classifier
 
-- *Inputs*: the agent list (each bot's username and profile — who it is,
-  what it does, when it wants to be asked, in free text: "answers every
-  post from `a`", "only when asked", "anything about the build"); the
-  thread's recent posts; the new post, with the bots it addresses marked.
-  *Question*: which bots should speak now? *Answer*: a set of usernames,
-  possibly empty, each with one line of reason. This document assumes
-  each bot's profile reaches the classifier; where the profile lives is
-  open (§9).
-- *Speakers*: the classifier's answer plus the bots the post addresses. It
-  may add bots ("@bob, how is the market?" may add the bot that gives the
-  market update; "a, can you check?" may add `a`, named without its `@`);
-  it cannot remove an addressed one. When its answer leaves
-  out a bot the post addresses, that bot speaks anyway and the disagreement
-  is recorded — post, bot, reason — for the measurement in §8.
+- *What the classifier is given*, and nothing else:
+  - the new post, with the bots it addresses marked;
+  - the thread's most recent `classifier_posts` posts, newest first, up
+    to a token budget — when they do not all fit, the oldest are left
+    out and the classifier is told how many;
+  - the agent list: for each bot its username, display name and
+    nickname — so a bot named in prose without its `@` is still
+    recognised — and its profile: who it is, what it does, when it
+    wants to be asked, in free text ("answers every post from `a`",
+    "only when asked", "anything about the build"). This document
+    assumes the profile reaches the classifier; where it lives is open
+    (§9).
+
+  Nothing about which bots are busy or behind: that is the concern of
+  `RATE_LIMIT` and `ONE_TURN`, not of the classifier.
+- *The question*: which bots should speak now?
+- *The answer*, two lists of usernames, each entry with one line of
+  reason, both possibly empty:
+  - **add** — bots that should speak although the post does not address
+    them ("@bob, how is the market?" may add the bot that gives the
+    market update; "a, can you check?" may add `a`, named without its
+    `@`);
+  - **remove** — bots the post addresses that, in the classifier's
+    judgement, need not speak. The gateway records this list and does
+    nothing with it: an addressed bot always speaks. It is kept to
+    measure how well humans and bots use `@` — how often a mention goes
+    to a bot that had no reason to answer (§8).
+- *Speakers*: the bots the post addresses plus the classifier's **add**
+  list.
 - *Addressed bots do not wait*: a turn for a bot the post addresses
   starts as soon as the post arrives; the classifier runs alongside, and
   the bots it adds start when its answer lands.
@@ -333,14 +348,6 @@ their own timing, outside this order.
   a choice that outlives it falls back to catch-up, the floor under
   everything. Another gateway asks its own classifier and may answer
   differently.
-- *Bounded input*: the last `classifier_posts` posts of the thread,
-  newest first, within a token budget; the agent list, each bot with its
-  username, display name and nickname so a bot named in prose is
-  recognised; and, for each bot
-  this gateway runs, the count of its undelivered posts in other threads
-  — a number, not the posts; for a bot another gateway runs the count is
-  `not-local`, never a guess. What does not fit is omitted with a count,
-  and the classifier is told so.
 - *Effect*: every speaker gets a turn, through `RATE_LIMIT` and
   `ONE_TURN`, in parallel. A bot not among the speakers waits: the post
   stays in its backlog, is delivered at its next turn, and `CATCH_UP`
@@ -373,7 +380,8 @@ their own timing, outside this order.
   per-thread modes would need.
 - *Never*: writes text, starts a turn by itself, removes a bot the post
   addresses, orders the bots it picks, or reads anything but the room.
-- *Logged*: every decision, reason and fallback, for `STATUS` and §8.
+- *Logged*: every decision — both lists, their reasons, and any
+  fallback — for `STATUS` and §8.
 
 ### MUTE
 
@@ -919,10 +927,10 @@ size, is the measure of the classifier; nothing observed later is.
 
 - picked by the classifier → `done` rate; not picked → later catch-up with
   a reply rate; these are costs and delays, not labels;
-- the classifier's would-be vetoes: posts where its answer left out a
-  bot the post addressed, with the reason and what that bot's turn then did
-  (`done`, a reply, a handoff) — the evidence for whether the classifier
-  should ever override a mention;
+- the classifier's **remove** list: addressed bots it judged need not
+  speak, with the reason and what that bot's turn then did (`done`, a
+  reply, a handoff) — how well humans and bots aim their `@`, and the
+  evidence for whether the classifier should ever override a mention;
 - bots the classifier added to an addressed post, and what they did;
 - corrections: how long after the correcting post the corrected bot
   acknowledged it, and through which path (addressed, picked, catch-up,
@@ -1000,11 +1008,12 @@ Mechanism tests, by task — written against the simulator first:
   the `unmute:` requests — mute before fire, mute during retry; three
   firings of one job while muted run once.
 - **6**: one platform post arriving on three local connector streams at
-  once → one classifier call and the same decision for each local bot; a
-  addressed bot speaks even when the answer omits it, and the omission is
-  recorded; a result arriving after another turn delivered its post
-  starts nothing even when newer unrelated posts are in the backlog;
-  bounded input, remote bots' counts `not-local`; timeout → retries → the
+  once → one classifier call and the same decision for each local bot;
+  an addressed bot speaks even when it is on the **remove** list, and
+  the list is recorded; a result arriving after another turn delivered
+  its post starts nothing even when newer unrelated posts are in the
+  backlog; the oldest posts left out of the input are counted and the
+  count is passed; timeout → retries → the
   configured fallback, shown in status; shadow agreement with blind
   labels before it is acted on.
 - **7**: §6.1 and §6.2 reproduced.
@@ -1028,7 +1037,7 @@ Mechanism tests, by task — written against the simulator first:
   failure runs decide the fallback and the retry count; shadow
   measurement decides the rest.
 - **Whether the classifier may ever override a mention**: decided from
-  the recorded would-be vetoes (§8.1); until then addressed bots always
+  the recorded **remove** lists (§8.1); until then addressed bots always
   speak.
 - **The room's event order in the gateway**: a connector abstraction
   giving one total order per room — server order for posts, a local
