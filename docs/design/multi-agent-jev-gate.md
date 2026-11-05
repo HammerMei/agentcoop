@@ -105,7 +105,7 @@ A count or duration set to 0 is off.
 | `classifier_posts` | room | Most recent posts of the thread shown to the classifier. | `WHO_SPEAKS` |
 | `classifier_timeout_seconds` | room | How long one classifier call may take. | `WHO_SPEAKS` |
 | `classifier_retries` | room | Classifier calls retried after a timeout or error before the fallback applies. | `WHO_SPEAKS` |
-| `classifier_fallback` | room | What happens when the classifier fails: `nobody`, `everyone` or `rule`. | `WHO_SPEAKS` |
+| `classifier_fallback` | room | Who speaks when the classifier fails: `addressed-only`, `everyone` or `addressed-or-everyone`. | `WHO_SPEAKS` |
 | `classifier_decision_ttl_seconds` | room | How long a classifier decision is kept for a bot whose turn was held. | `WHO_SPEAKS` |
 | `follow_up_retry_cap` | room | Retries of a failed scheduled-job turn before a notice is posted and the job stops. | `FOLLOW_UP` |
 
@@ -360,17 +360,19 @@ their own timing, outside this order.
   nothing, whatever else the backlog holds; it is recorded with its
   reason.
 - *Failure*: the call has `classifier_timeout_seconds` and is retried up
-  to `classifier_retries`; after that the post is handled by
-  `classifier_fallback`:
+  to `classifier_retries`; after that `classifier_fallback` says which
+  bots speak, by who wrote the post:
 
-  | `classifier_fallback` | bots the post addresses | every other bot |
+  | `classifier_fallback` | a human's post | a bot's post |
   |---|---|---|
-  | `nobody` | speak | wait for catch-up |
-  | `everyone` | speak | speak — mute and the rate limit still apply |
-  | `rule` | speak; if the post addresses nobody, every bot speaks | — today's behaviour for posts written by bots |
+  | `addressed-only` | the bots it addresses | the bots it addresses |
+  | `everyone` | every bot | every bot |
+  | `addressed-or-everyone` | the bots it addresses | every bot — today's behaviour |
 
-  Each fallback decision is recorded with its reason and shown in
-  `STATUS`. Processing of the post never waits on the classifier beyond
+  The fallback only replaces the classifier's answer. Mute, the rate
+  limit and cooldown apply to the bots it names exactly as they apply
+  to bots the classifier names (`MUTE`, `RATE_LIMIT`). Each fallback
+  decision is recorded with its reason and shown in `STATUS`. Processing of the post never waits on the classifier beyond
   its retries; `CATCH_UP` does not depend on it. The default is chosen
   from the simulator's failure runs (§8.1).
 - *Limits*: the classifier judges relevance and timing from the text. It
@@ -979,7 +981,7 @@ Mechanism tests, by task — written against the simulator first:
   orchestrator's own outbound control word updates its gateway's
   settings; a replayed older control arriving after the value returned
   to its default is ignored.
-- **2**: with the classifier off and the `nobody` fallback, a bot's post
+- **2**: with the classifier off and the `addressed-only` fallback, a bot's post
   addressing nobody starts no turn; under `mute: @all` a bot's mention
   of a bot starts nothing, a human's or the orchestrator's starts a turn,
   and a bot's mention of the orchestrator starts the orchestrator's turn;
