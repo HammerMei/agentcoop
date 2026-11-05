@@ -85,7 +85,7 @@ Each term uses only the terms above it.
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot silenced in a thread by `mute: @bot`, or every bot but the orchestrator by `mute: @all`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
 | **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
-| **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. Recognised only from an authorised sender (`AUTHORITY`); otherwise text. |
+| **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`); from anyone else the post is delivered unchanged and nothing is applied. |
 | **settings** | A thread's current control words — orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
 | **agent list** | The usernames the gateway treats as agents — `agent_usernames` in configuration — with each one's profile (`AGENT_LIST`). |
 
@@ -469,10 +469,13 @@ their own timing, outside this order.
 
 ### AUTHORITY
 
-- Control words are honoured from humans with the owner role and from the
-  thread's orchestrator. `orchestrator:` is honoured from owner-role
-  humans only. From anyone else they are text. A thread has one
-  orchestrator; `orchestrator:` again replaces it. The same bot may be the
+- The gateway acts on a control word only when a human with the owner
+  role or the thread's orchestrator wrote it; on `orchestrator:` only
+  when an owner-role human wrote it. A control word written by anyone
+  else — a guest, a bot that is not the orchestrator — changes nothing:
+  the gateway does not apply it, and the post is delivered to the bots
+  like any other post, control word included, as ordinary text. A thread
+  has one orchestrator; `orchestrator:` again replaces it. The same bot may be the
   orchestrator of several threads and is an ordinary bot elsewhere.
 - Roles are server-injected (`CLAUDE.md`, connector prompt prefix).
 
