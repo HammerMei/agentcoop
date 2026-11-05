@@ -514,10 +514,11 @@ their own timing, outside this order.
   at its first control word; each value carries the post it came from.
 - *Expiry*: settings are removed after `control_ttl_days` of silence in
   the thread (days, not seconds), or when the platform archives or
-  deletes the thread; the defaults apply again. Silence is read from the
-  room's history — the age of the thread's newest post — not kept in the
-  settings. A thread muted and then abandoned unmutes on its own. `STATUS` lists the threads that hold settings and
-  their age.
+  deletes the thread; the defaults apply again. Silence is the age of
+  the thread's newest post, which the gateway notes in memory as posts
+  arrive — no history is read to check it. A thread muted and then
+  abandoned unmutes on its own. `STATUS` lists the threads that hold
+  settings and their age.
 - *Order*: control words apply in the server's order of their posts, not
   in arrival order: a control is applied only if its post is newer than
   the one the current value came from. A value that returns to its
