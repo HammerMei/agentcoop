@@ -73,11 +73,14 @@ Each term uses only the terms above it.
 | **post** | One message on the platform, written by a human or by a bot. |
 | **bot** | An agent's presence on a chat server, as `CONTEXT.md` defines it. Inside the gateway, a bot's presence in one room is a *watcher*; the cursor and backlog below are per bot per room. |
 | **thread** | A platform thread, or the room's top-level posts taken together as one thread. The settings and the rate limit apply per thread. |
+| **addressed** | A post is addressed to a bot when it mentions it. In a human's post: a platform mention (`@a`), `@all` or a room-wide mention. In a bot's post: only the mentions the platform records for its canonical form (`REPLY_ENVELOPE`). A bot named without its `@` is not addressed. |
+| **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). Not the connector's own `watermark`, which records what the connector has passed on, not what a session has seen. |
+| **backlog** | What is waiting for a bot: the room's posts after its cursor — on the platform, not yet delivered to its session — and the prompt of any scheduled job of its own that fired while it was muted. Grouped by thread where a thread's size or age matters. |
 | **classifier** | A small model asked once per post which bots in the room should speak now (`WHO_SPEAKS`). It can add bots to those the post addresses; it never removes one, and never writes text. |
 | **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** — those bots wrote after the thread's newest human post, within `rate_limit_seconds` — number `rate_limit_posts` or more, or total `rate_limit_words` words or more; a limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
 | **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread; a turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
-| **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it (`FOLLOW_UP`). |
+| **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it; if the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot silenced in a thread by `mute: @bot`, or every bot but the orchestrator by `mute: @all`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
@@ -291,7 +294,7 @@ their own timing, outside this order.
   | another bot's mention | yes, under the rate limit | no |
   | the classifier (`WHO_SPEAKS`) | yes, under the rate limit | not asked about it |
   | the sweeper (`CATCH_UP`) | yes, under the rate limit | no |
-  | the bot's own scheduled job (`FOLLOW_UP`) | yes | deferred until unmuted or the expiry, then ends silently |
+  | the bot's own scheduled job (`FOLLOW_UP`) | yes | no turn now: the job's prompt goes into the bot's backlog for that thread and starts once the bot is unmuted |
 
   The orchestrator's own turns start regardless of the rate limit.
   `mute: @all` never mutes the orchestrator, so in a meeting bots' reports
@@ -376,10 +379,14 @@ their own timing, outside this order.
 
 - `mute: @x` on a thread: `x` gets a turn there only from a human's or
   the orchestrator's mention. The classifier does not pick it, the
-  sweeper skips it, other bots' mentions of it open nothing, and its own
-  scheduled job is deferred until it is unmuted or the job expires
-  (`FOLLOW_UP`). Posts are still delivered to it as context by whichever
-  turn comes next. `unmute: @x` lifts it.
+  sweeper skips it, other bots' mentions of it open nothing, and a
+  scheduled job of its own that fires meanwhile puts its prompt into the
+  bot's backlog instead of starting a turn (`FOLLOW_UP`). Posts are
+  still delivered to it as context by whichever turn comes next.
+  `unmute: @x` lifts it — and asks the sweeper for a pass on `x`, so
+  whatever waited in `x`'s backlog for the mute to end — a post that
+  addresses it, a job's prompt — starts at once, under the rate limit,
+  rather than at the next periodic pass.
 - `mute: @all` mutes every bot on the agent list except the orchestrator;
   `unmute: @all` lifts every mute in the thread. This is the instrument
   an orchestrator uses to impose a structure — who speaks is exactly who
@@ -431,7 +438,7 @@ their own timing, outside this order.
   |---|---|---|---|---|
   | a human's mention | exempt — the human intervenes and cannot be shut out by noisy bots | exempt | yes | the human |
   | the orchestrator's mention, or its own turn | exempt | exempt | the orchestrator's posts do not count | its recent posts are shown to the owner in `STATUS`; a human can `mute:` or re-designate it at any time |
-  | a scheduled job firing | exempt | exempt | the firing is not a post; the reply its turn makes counts | `follow_up_retry_cap`, the expiry and the backoff in `FOLLOW_UP` |
+  | a scheduled job firing | exempt | exempt | the firing is not a post; the reply its turn makes counts | `follow_up_retry_cap` and the backoff in `FOLLOW_UP` |
 
   Posts written by humans, and by integration accounts configured as
   owners or guests but not in `agent_usernames`, never count. A human's
@@ -679,24 +686,35 @@ Injected into every turn:
   whom, expected by when, judged from the task — and schedules a job for
   the follow-up time. When it fires, the bot reports progress, or asks
   the other party for status, and schedules the next check with a longer
-  gap; past the expiry it says so and stops. Estimates are the bot's own;
-  a wrong one costs a check too early or too late.
+  gap; past the time it expected, it says so and stops. Estimates are
+  the bot's own; a wrong one costs a check too early or too late.
 - *Scheduler contract* (changes to the existing scheduler): a job
-  persists the connector, room, **thread**, the task text, its expiry,
-  and its retry state; today a job carries a room and a message and is
+  persists the connector, room, **thread**, the task text and its retry
+  state; today a job carries a room and a message and is
   injected without a thread. A firing inherits the thread. An occurrence
   is cleared when its turn ends normally (`CURSOR`) — not when the
   message is queued, which is today's rule; a failed turn keeps the
-  occurrence, retries with bounded exponential backoff, keeps the
-  original expiry, and past `follow_up_retry_cap` retries posts a notice
-  and stops. Clearing an occurrence and saving the cursor are two saves,
+  occurrence, retries with bounded exponential backoff, and past
+  `follow_up_retry_cap` retries posts a notice and stops. Clearing an occurrence and saving the cursor are two saves,
   so across a crash an occurrence is at-least-once: the skill tolerates
   a repeated firing.
-- *Eligibility*: see the turn eligibility table (`TURN_ELIGIBILITY`), row "the bot's
-  own scheduled job". The firing itself is not a post and counts
-  nothing; the reply its turn makes counts in its thread. While the bot
-  is muted in the thread the firing is deferred; if the expiry passes
-  first, the occurrence ends without running, recorded in `STATUS`.
+- *Eligibility*: see the turn eligibility table (`TURN_ELIGIBILITY`),
+  row "the bot's own scheduled job". The firing itself is not a post and
+  counts nothing; the reply its turn makes counts in its thread.
+- *While the bot is muted*: a firing does not start a turn. Its prompt
+  goes into the bot's backlog for the job's thread, and the sweeper
+  starts the turn once the bot is unmuted — the `unmute:` post asks for
+  a pass (`MUTE`). A job has at most one firing waiting in a backlog; a
+  later firing of the same job replaces it, so a daily job whose bot was
+  muted for three days runs once. The gateway keeps no deadline for a
+  job: whether the task is still worth doing is the bot's judgement when
+  it finally runs.
+- *Time-sensitive jobs*: a meeting's `mute: @all` holds every job of
+  every muted bot for as long as the meeting runs, time-sensitive or
+  not; a `mute:` of a misbehaving bot does the same, and there it is
+  the point. How much this costs in practice is measured in the
+  simulator (§8.1). Marking a job as time-sensitive, okay-to-delay or
+  droppable is a scheduler change and out of scope (§10).
 
 ### ORCHESTRATOR
 
@@ -919,6 +937,7 @@ size, is the measure of the classifier; nothing observed later is.
   `FOLLOW_UP` job recovered them;
 - orchestrator turns per meeting round;
 - rate-limited turns, exemptions used, fallback decisions;
+- jobs held by a mute, and for how long;
 - posts per human prompt, latency per post, classifier calls and tokens
   per post.
 
@@ -977,8 +996,9 @@ Mechanism tests, by task — written against the simulator first:
   through its high-water mark and a post arriving after it waits.
 - **5**: a job fires in its thread; a failed firing is retried and not
   lost; the cap posts a notice; a job fires in a rate-limited thread; a
-  muted bot's job waits and ends silently at expiry — mute before fire,
-  mute during retry, unmute before expiry, expiry while muted.
+  muted bot's job puts its prompt in the backlog and runs at the pass
+  the `unmute:` requests — mute before fire, mute during retry; three
+  firings of one job while muted run once.
 - **6**: one platform post arriving on three local connector streams at
   once → one classifier call and the same decision for each local bot; a
   addressed bot speaks even when the answer omits it, and the omission is
@@ -1071,6 +1091,11 @@ Mechanism tests, by task — written against the simulator first:
   Both outcomes are accepted: coordination across gateways is best
   effort in this version, and a human's mention always reaches its bot.
   Reopened only with a protocol between gateways.
+- **Job priorities** — marking a scheduled job as time-sensitive,
+  okay-to-delay or droppable, so that a mute — a meeting's `mute: @all`
+  above all — does not hold a job that cannot wait. A change to the
+  scheduler, not to this design; reopened when the simulator shows what
+  a meeting's mute costs in held jobs.
 - **Anonymous votes, hidden information** — the room is the unit of
   visibility.
 
