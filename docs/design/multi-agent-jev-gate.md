@@ -83,7 +83,7 @@ Each term uses only the terms above it.
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it; if the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
-| **muted** | A bot silenced in a thread by `mute: @bot`, or every bot but the orchestrator by `mute: @all`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
+| **muted** | A bot silenced in a thread by `mute: @bot`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is shorthand for naming every bot on the agent list except the orchestrator, and is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
 | **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
 | **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`); from anyone else the post is delivered unchanged and nothing is applied. |
 | **settings** | A thread's current control words — orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
@@ -297,9 +297,9 @@ their own timing, outside this order.
   | the bot's own scheduled job (`FOLLOW_UP`) | yes | no turn now: the job's prompt goes into the bot's backlog for that thread and starts once the bot is unmuted |
 
   The orchestrator's own turns start regardless of the rate limit.
-  `mute: @all` never mutes the orchestrator, so in a meeting bots' reports
-  reach it; a human may still `mute:` the orchestrator itself, and then
-  only a human's mention wakes it.
+  `mute: @all` expands to every bot but the orchestrator, so in a
+  meeting bots' reports reach it; a human may still `mute:` the
+  orchestrator by name, and then only a human's mention wakes it.
 
 ### WHO_SPEAKS — the room classifier
 
@@ -397,26 +397,52 @@ their own timing, outside this order.
   whatever waited in `x`'s backlog for the mute to end — a post that
   addresses it, a job's prompt — starts at once, under the rate limit,
   rather than at the next periodic pass.
-- `mute: @all` mutes every bot on the agent list except the orchestrator;
-  `unmute: @all` lifts every mute in the thread. This is the instrument
-  an orchestrator uses to impose a structure — who speaks is exactly who
-  it addresses, and a bot that addresses another bot starts nothing — and
-  the way a human stops a flooding bot without silencing the rest.
+- A mute always names its bots: the settings hold a list of usernames
+  per thread, nothing else. `mute: @all` is shorthand for every bot on
+  the agent list except the orchestrator, and `unmute: @all` for every
+  bot currently muted in the thread; both are expanded into names:
+  - written by a bot (the orchestrator), the gateway expands `@all`
+    **before posting**, as part of the canonical form
+    (`REPLY_ENVELOPE`), so the post on the platform carries the names
+    and every gateway reads the same list; an `@all` that expands to
+    nobody is not posted;
+  - written by a human, nothing can rewrite the post, so each gateway
+    expands `@all` when it reads it, against its own agent list. Two
+    gateways with the same agent list reach the same names; with
+    different lists they do not, and `AGENT_LIST` reports that
+    difference loudly at startup.
+- A bot that joins the room after `mute: @all` was posted is not muted:
+  it was not on the list. Muting it is the orchestrator's job — its
+  skill sees the newcomer's first post and mutes it if the meeting
+  needs it. This also covers a bot whose gateway was down when the mute
+  was posted: it speaks once, and the orchestrator mutes it again.
+- `mute: @all` plus the orchestrator addressing bots is how an
+  orchestrator imposes a structure — who speaks is exactly who it
+  addresses, and a bot that addresses another bot starts nothing;
+  `mute: @x` is how a human stops a flooding bot without silencing the
+  rest.
 - Mutes are posts, so every gateway in the room reads them and enforces
   them for the bots it runs (§3, principle 5); they live in the thread's
-  settings (`SETTINGS`).
+  settings (`SETTINGS`). `STATUS` shows the names, not the shorthand.
 
 ### RATE_LIMIT
 
-- *Computed, not stored*: from the thread's history, the gateway counts
-  the posts written by bots after the thread's newest human post and
-  within `rate_limit_seconds` — the recent agent posts — and their
-  words, and reads the time of the bot's own last post. Every
-  gateway in the room computes from the same history with the same agent
-  list; the result converges, best effort — paging limits, API lag,
-  edits and fetch failures can make two gateways differ for a while.
-  `STATUS` shows the current count, the oldest post fetched and fetch
-  failures.
+- *Kept in memory, from the posts the gateway sees*: per thread, the
+  gateway keeps the recent agent posts — time, author, word count — and
+  each bot's last post time. A post written by a bot is added when it
+  arrives; a human's post empties the thread's list; entries older than
+  `rate_limit_seconds` are dropped. A post this gateway's own bot
+  writes is added when the post succeeds, since a connector drops its
+  own account's posts and would otherwise never count them. Nothing is
+  fetched to answer "may this turn start": the answer is read from
+  memory. At a watcher's start the list is seeded from the posts the
+  connector's replay delivers anyway; posts older than the replay
+  window are missed, so the limit is a little loose for the first
+  minutes after a restart — accepted over a fetch. Every gateway in the
+  room sees the same posts with the same agent list, so their counts
+  agree, best effort — API lag and the replay window can make two
+  gateways differ for a while. `STATUS` shows the current count and
+  words per thread.
 - *Rule*: a turn does not start while the recent agent posts number
   ≥ `rate_limit_posts`, or their words total ≥ `rate_limit_words`, or
   the bot posted within `cooldown_seconds`. Each of the three binds on
@@ -503,15 +529,11 @@ their own timing, outside this order.
   that is accepted over recording a role per post.
 - Two gateways in one room each keep their own settings from the same
   posts; they agree because the posts are the same, not because they
-  talk to each other.
-- *A gateway's own control posts*: a connector drops its own account's
-  messages, so a control word an orchestrator posts would never come back
-  to the gateway that posted it. After a successful outbound post the
-  gateway applies the control word to its settings through the same
-  inbound transition — same authority check, same parser — not a
-  shortcut. A crash between the platform accepting that post and the
-  settings being saved leaves this gateway behind the others until the
-  next control post; accepted as best effort.
+  talk to each other. The one thing each reads for itself is a human's
+  `@all` (`MUTE`). A control word a gateway's own bot posted never comes
+  back to it — a connector drops its own account's posts — and that is
+  harmless: the bots it would affect are on other gateways, which do
+  receive it.
 
 ### ONE_TURN
 
@@ -624,7 +646,8 @@ their own timing, outside this order.
   posting so that the post's mentions are exactly its `to`: a recipient
   not mentioned in the text is prepended as `@name`; an `@name` in the
   text that is not a recipient loses its `@`; `all` becomes the
-  platform's room-wide mention. A human reads the recipients at the head
+  platform's room-wide mention; `@all` in a `mute:` or `unmute:` is
+  replaced by the names it stands for (`MUTE`). A human reads the recipients at the head
   of the post, and every gateway reads the platform's mentions
   and reaches the same set — after a restart and from a history fetch
   alike. Every post is parsed one way, from the platform, whoever wrote
@@ -803,7 +826,7 @@ usage pricing?` on a thread. `chair` is the orchestrator.
 
 | # | Event | Turns | Posts |
 |---|---|---|---|
-| 1 | `chair: mute: @all` · `@a @b @c @d — one post each, independently; address only me.` | — | 1 (chair, not counted) |
+| 1 | `chair: mute: @all` — posted as `mute: @a @b @c @d` · `@a @b @c @d — one post each, independently; address only me.` | — | 1 (chair, not counted) |
 | 2 | four bots, each addressed by the orchestrator → four turns in parallel, none rate-limited; a bot that starts later may see an earlier reply in its backlog — no isolation. "Address only me" is enforced by the mute, not by the prompt: a bot that addresses another bot starts nothing | 4 | 4 |
 | 3 | each reply addresses `chair` → an orchestrator turn per reply; the skill answers `done` three times and synthesises on the fourth | 4 (3 `done`) | 1 (chair, not counted) |
 | 4 | `chair: @a @b @c @d — objections only, otherwise done.` | 4 | 1 (`d`) |
@@ -840,10 +863,11 @@ anyone know why the build is red?`
   `H` addresses one (§10).
 - `a: @b your change touched the build file — did you bump the version?`
   — `b` is addressed: a turn on gateway 2. `b` replies `to: [a, H]`. Each
-  gateway counts both posts toward the rate limit from the history.
-- `H: mute: @all` — both gateways write the same settings; only a
-  human's or the orchestrator's mention opens a turn in the thread from
-  here.
+  gateway counts both posts toward the rate limit: gateway 1 received
+  `b`'s post and posted `a`'s; gateway 2 the reverse.
+- `H: mute: @all` — each gateway expands it against the same agent list
+  and writes the same names; only a human's or the orchestrator's
+  mention opens a turn in the thread from here.
 
 ---
 
@@ -964,7 +988,7 @@ size, is the measure of the classifier; nothing observed later is.
 | 0 | **Simulator.** §8.1: the script, a scenario file for every §7 row, persona files from the test room, the classifier in shadow (logged, not acted on) and acted on. | — |
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the settings' persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS |
 | 2 | **Turn eligibility for bot senders, mute.** Posts from bots go through the turn eligibility rules; `mute:`, `unmute:`, `orchestrator:` as posts. | TURN_ELIGIBILITY, MUTE, AUTHORITY |
-| 3 | **Rate limit.** Recent-post count and cooldown from history; the exemptions; agent-list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT |
+| 3 | **Rate limit.** Recent-post count and cooldown kept in memory, own posts included; the exemptions; agent-list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT |
 | 4 | **Sweeper, one turn, status.** Addressed or picked posts first; catch-up by threshold and age. | CATCH_UP, ONE_TURN, STATUS |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; cleared on a normal end; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP |
 | 6 | **Classifier in shadow**, then acted on. | WHO_SPEAKS |
@@ -983,10 +1007,12 @@ Mechanism tests, by task — written against the simulator first:
   second post the platform refuses keeps the first, reports the second,
   saves the cursor; the reply in the starting thread posts in a
   rate-limited thread, a second-thread reply does not; mentions equal
-  `to`; settings survive restart and lapse at `control_ttl_days`; an
-  orchestrator's own outbound control word updates its gateway's
-  settings; a replayed older control arriving after the value returned
-  to its default is ignored.
+  `to`; settings survive restart and lapse at `control_ttl_days`; a
+  bot's `mute: @all` is posted as names and a human's is expanded on
+  read, and a bot added to the agent list afterwards is not muted; an
+  `@all` that expands to nobody is not posted; a replayed older control
+  arriving after the value returned to its default is ignored; a bot's
+  own post counts toward the rate limit on the gateway that posted it.
 - **2**: with the classifier off and the `addressed-only` fallback, a bot's post
   addressing nobody starts no turn; under `mute: @all` a bot's mention
   of a bot starts nothing, a human's or the orchestrator's starts a turn,
@@ -1160,7 +1186,7 @@ The two are run through the same simulator before either is built.
 |---|---|---|
 | Who decides an unaddressed turn | a per-thread mode: silent, answer every post, or catch up later | the room classifier, once per post; `mute:` as the only control |
 | Sequencing and dependencies | a plan per request: members, parallel or sequential, membership, timeouts, member states | read from the room when a reply arrives; `FOLLOW_UP` for waiting |
-| Rate limit | count per thread since the last human post, persisted; pause with notice; an extend command | a rolling count of agent posts and words since the last human post, and a cooldown, computed from history; no notice; humans and the orchestrator exempt |
+| Rate limit | count per thread since the last human post, persisted; pause with notice; an extend command | a rolling count of agent posts and words since the last human post, and a cooldown, kept in memory from the posts seen; no notice; humans and the orchestrator exempt |
 | Loops | paused at a plan boundary until a human, an extension or a timeout | slowed, not stopped; ended by `done`, `mute:` or a human |
 | A bad actor | the thread pauses for everyone | `mute: @x` by the orchestrator or a human |
 | Who is told what happened | plan-end notices, callbacks, stop reports | nobody; the room is the record |
