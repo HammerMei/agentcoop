@@ -1,4 +1,4 @@
-# Rooms with several agents — the classifier gate
+# Rooms with several agents — a classifier decides who speaks
 
 This design asks a small classifier one question about every post in a
 room: *who in this room should speak now?* Otherwise every post goes to
@@ -146,9 +146,9 @@ No other parameter is set per thread.
    so no bot can get around them, the gateway:
    - delivers every post to every bot, in order, dropping nothing
      (`CURSOR`, `CATCH_UP`);
-   - starts a bot's turn only when the table in `GATE` allows it, and
+   - starts a bot's turn only when the turn eligibility table allows it, and
      holds the turn while the thread is rate-limited, the bot is in
-     cooldown, or the bot already has a turn running (`GATE`, `MUTE`,
+     cooldown, or the bot already has a turn running (`TURN_ELIGIBILITY`, `MUTE`,
      `RATE_LIMIT`, `ONE_TURN`);
    - accepts a control word only from a human with the owner role or
      from the thread's orchestrator (`AUTHORITY`, `SETTINGS`);
@@ -229,7 +229,7 @@ in that room:
    gateway updates the thread's settings. If the post contains nothing
    but control words, handling stops here.
 2. **Addressed?** If the post addresses the bot, the gateway looks up
-   the table in `GATE` — a fixed table in this document, whose rows are
+   the turn eligibility table — a fixed table in this document, whose rows are
    who or what started the turn and whose columns are whether the bot is
    muted in the thread — and the table gives the answer: the bot gets a
    turn, or it does not. For example, a human's mention always gives the
@@ -245,8 +245,8 @@ in that room:
    post stays in its backlog. (`WHO_SPEAKS`)
 5. **Allowed now?** A turn that step 2 or step 4 granted still waits
    while the thread is rate-limited or the bot is in cooldown, unless
-   the turn's source is exempt — the exemptions are listed in the table
-   in `GATE` and in `RATE_LIMIT`. While the turn waits, the gateway
+   the turn's source is exempt — the exemptions are listed in the turn
+   eligibility table and in `RATE_LIMIT`. While the turn waits, the gateway
    stores nothing new: the post is already in the bot's backlog, and the
    classifier's decision stays in the decision cache. The sweeper asks
    again at its next pass. (`RATE_LIMIT`, `CATCH_UP`)
@@ -265,7 +265,7 @@ in that room:
 The sweeper (`CATCH_UP`) and scheduled jobs (`FOLLOW_UP`) start turns on
 their own timing, outside this order.
 
-### GATE
+### TURN_ELIGIBILITY — who gets a turn
 
 - *Scope*: every post, every bot, human and bot senders alike; no
   exception for bot senders.
@@ -279,7 +279,7 @@ their own timing, outside this order.
 - *Not addressed*: `MUTE`, then `WHO_SPEAKS`, decide. Addressing a bot puts
   it among the speakers for sure; the classifier can add other bots but
   cannot remove an addressed one.
-- *Who gets a turn*: whether a turn's source — who or what started it —
+- *The turn eligibility table*: whether a turn's source — who or what started it —
   may start a turn for a bot depends only on whether the bot is muted in
   the thread. This table is the only rule; "under the rate limit" means the
   turn also waits for `RATE_LIMIT`.
@@ -405,7 +405,7 @@ their own timing, outside this order.
   the bot posted within `cooldown_seconds`. Each of the three binds on
   its own and is off at 0: `cooldown_seconds` is the least gap between
   one bot's own posts in a thread, independent of how much the thread
-  holds; with all three at 0 nothing holds a turn back. The rate limit gates the *start* of a turn only: a started
+  holds; with all three at 0 nothing holds a turn back. The rate limit applies to the *start* of a turn only: a started
   turn always posts its reply in its own thread, so the count can go
   over by the number of turns already running there — bounded by the
   room's bots, and by one more per gateway across gateways — and the
@@ -506,7 +506,7 @@ their own timing, outside this order.
   backlog and, for a classifier choice, the cached decision. A bot that
   becomes free starts nothing by itself; it and a turn that ends each
   ask the sweeper for a pass on that bot, and the pass reconstructs
-  eligibility from the backlog, the table in `GATE` and the cache
+  eligibility from the backlog, the turn eligibility table and the cache
   (`CATCH_UP`). The turn that then runs is not second-guessed: it has
   everything posted meanwhile in its backlog, and the bot judges whether
   there is still something to say. A reply someone else already gave, or
@@ -534,7 +534,7 @@ their own timing, outside this order.
   (`REPLY_ENVELOPE`). It is not written, and the same posts are
   delivered again, when the backend fails or the reply is still invalid
   after the one re-prompt (`FAILURE_NOTICE`).
-- *Contract*: nothing is withheld by `GATE`. A turn that ends
+- *Contract*: nothing is withheld by turn eligibility. A turn that ends
   normally is not delivered again. A fetch failure, a failed turn, or a
   crash before the cursor is saved re-delivers the same posts, and a
   reply already posted before such a crash may be posted again; there is
@@ -546,8 +546,8 @@ their own timing, outside this order.
   returning post and thread ids, paging past the first page (Mattermost
   fetches one today).
 - *Posts found at reconnect or startup*: the connector's per-room replay
-  runs them through the gate like new posts; the gate decides whether a
-  turn starts, never whether a post is delivered.
+  runs them through the turn eligibility rules like new posts; those
+  rules decide whether a turn starts, never whether a post is delivered.
 - *Per thread*: backlog size and age per thread are computed from the
   posts after the cursor, for `CATCH_UP` and `STATUS`; nothing per thread
   is stored for it.
@@ -563,7 +563,7 @@ their own timing, outside this order.
   empty turn runs — which with one room cursor usually means one turn
   serves several threads.
 - *Addressed or picked posts first*: a post in the bot's backlog that the
-  table in `GATE` allows now — one that addresses the bot, or whose
+  turn eligibility table allows now — one that addresses the bot, or whose
   classifier decision, not yet expired, picked the bot and whose post is
   still in the backlog — starts a turn as soon as the rate limit, the
   cooldown and the bot allow, with the oldest such post taken as the
@@ -602,7 +602,7 @@ their own timing, outside this order.
   not mentioned in the text is prepended as `@name`; an `@name` in the
   text that is not a recipient loses its `@`; `all` becomes the
   platform's room-wide mention. A human reads the recipients at the head
-  of the post, and every gateway's gate reads the platform's mentions
+  of the post, and every gateway reads the platform's mentions
   and reaches the same set — after a restart and from a history fetch
   alike. Every post is parsed one way, from the platform, whoever wrote
   it.
@@ -651,7 +651,7 @@ their own timing, outside this order.
 - *Identity*: "starts no turn" cannot rest on the notice's text, which
   anyone can type. The notice is a gateway-generated event kind, carried
   in platform metadata where the platform has it and recognised by the
-  connector before `GATE`; every gateway in the room treats it as context
+  connector before `TURN_ELIGIBILITY`; every gateway in the room treats it as context
   only and executes nothing from it. In the simulator the event kind is
   explicit in the scenario; how each platform carries it is settled in
   the lab (§8.1).
@@ -692,7 +692,7 @@ Injected into every turn:
   and stops. Clearing an occurrence and saving the cursor are two saves,
   so across a crash an occurrence is at-least-once: the skill tolerates
   a repeated firing.
-- *Under the gate*: see the table in `GATE`, row "the bot's
+- *Eligibility*: see the turn eligibility table (`TURN_ELIGIBILITY`), row "the bot's
   own scheduled job". The firing itself is not a post and counts
   nothing; the reply its turn makes counts in its thread. While the bot
   is muted in the thread the firing is deferred; if the expiry passes
@@ -700,7 +700,7 @@ Injected into every turn:
 
 ### ORCHESTRATOR
 
-- `orchestrator: @bot` on a thread: the table in `GATE` and `RATE_LIMIT`
+- `orchestrator: @bot` on a thread: the turn eligibility table and `RATE_LIMIT`
   give the bot and the bots it addresses their exemptions, and `AUTHORITY`
   honours its control words, including `mute:` of other bots. Policy for
   its turns lives in its skill.
@@ -733,7 +733,7 @@ shows:
   display name and nickname, read from the platform's user record. A sender on none of the connector's user
   lists is rejected by the connector today, so an agent missing from the
   agent list is not "treated as a human": its posts are rejected by the
-  connector and never reach the gate. At startup the gateway checks the
+  connector and never reach the turn eligibility rules. At startup the gateway checks the
   agent list against the room's members where the platform allows, logs
   a missing or unknown agent loudly, and shows both in `STATUS`. Two
   gateways whose agent lists differ for one room do not converge on the
@@ -848,7 +848,7 @@ through it, to see the conversations this design produces — and the odd
 corners — before paying for an implementation.
 
 - **Mechanism**: a deterministic script implementing §5 as written —
-  the table in `GATE`, the rate limit, the sweeper, the cursor, the reply
+  the turn eligibility table, the rate limit, the sweeper, the cursor, the reply
   envelope. It is not a language model tracing the rules: a model's
   trace would hide whether a wrong step was a hole in the spec or an
   error in the trace. Where the script and the text disagree, one of
@@ -928,7 +928,7 @@ size, is the measure of the classifier; nothing observed later is.
 |---|---|---|
 | 0 | **Simulator.** §8.1: the script, a scenario file for every §7 row, persona files from the test room, the classifier in shadow (logged, not acted on) and acted on. | — |
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the settings' persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS |
-| 2 | **Gate for bot senders, mute.** Posts from bots through the gate; `mute:`, `unmute:`, `orchestrator:` as posts. | GATE, MUTE, AUTHORITY |
+| 2 | **Turn eligibility for bot senders, mute.** Posts from bots go through the turn eligibility rules; `mute:`, `unmute:`, `orchestrator:` as posts. | TURN_ELIGIBILITY, MUTE, AUTHORITY |
 | 3 | **Rate limit.** Recent-post count and cooldown from history; the exemptions; agent-list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT |
 | 4 | **Sweeper, one turn, status.** Addressed or picked posts first; catch-up by threshold and age. | CATCH_UP, ONE_TURN, STATUS |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; cleared on a normal end; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP |
@@ -1128,7 +1128,7 @@ The two are run through the same simulator before either is built.
 | Multiple bots answering one post | serial, each seeing the last | the classifier picks few; the rest is noise |
 | Classifier | optional, for addressing by name and mode recommendation | required, once per post; may add speakers, never remove an addressed one |
 | Rules a reader must hold | plan lifecycle, three modes with switching, pause and its three resets | one question, one control, one rate limit, one cursor and the threads' settings |
-| What it gives up | simplicity; cross-gateway rooms | deadlines and reports for unattended work; aggregation for an orchestrator; determinism of the gate |
+| What it gives up | simplicity; cross-gateway rooms | deadlines and reports for unattended work; aggregation for an orchestrator; determinism of turn eligibility |
 
 ## Appendix C — Code references
 
