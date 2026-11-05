@@ -571,14 +571,17 @@ their own timing, outside this order.
 
 ### CATCH_UP — the sweeper
 
-- *Scope*: a pass per bot over its undelivered posts grouped by thread —
-  on a timer, and on request when the bot becomes free or one of its
-  turns ends (`ONE_TURN`). The threads a pass will act on are chosen once
-  at its start; immediately before each one, the pass checks that the
-  bot still has backlog for it, since an earlier turn of the same pass
-  may have delivered it. A thread with nothing left is skipped — no
-  empty turn runs — which with one room cursor usually means one turn
-  serves several threads.
+- *Scope*: a pass runs for one bot, over the posts not yet delivered to
+  it, grouped by thread. It runs on a timer, and on request when the bot
+  becomes free or one of its turns ends (`ONE_TURN`). At the start of a
+  pass the gateway lists the threads it will act on, in order. It then
+  takes them one at a time, and before starting a turn for a thread it
+  looks again: does the bot still have undelivered posts in this thread?
+  Often it does not — the turn started for an earlier thread in the
+  same pass delivered the bot's whole room backlog, this thread included
+  (`CURSOR`). Then the pass skips the thread: no turn runs with nothing
+  to deliver. With one cursor per room, one turn usually serves every
+  thread the pass listed.
 - *Addressed or picked posts first*: a post in the bot's backlog that the
   turn eligibility table allows now — one that addresses the bot, or whose
   classifier decision, not yet expired, picked the bot and whose post is
