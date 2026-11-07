@@ -133,13 +133,13 @@ No other parameter is set per thread.
 3. **Every bot eventually sees everything.** One cursor per bot per
    room; a turn is given everything after the cursor, from every thread,
    and may reply in any thread it was given. A turn that is held back
-   drops nothing: the posts wait in the backlog.
+   drops nothing, because the posts wait in the backlog.
 4. **The platform is the only shared medium**, apart from the in-memory
    classifier decisions one gateway holds for its own bots. The gateway
    computes the rate limit from the posts it sees in the room; control
    words are posts in the room; the orchestrator is whoever a post
    designated. No two bots share persisted gateway state, so bots run
-   by different gateways coexist in one room, best effort: two gateways
+   by different gateways coexist in one room, best effort. Two gateways
    cannot confer, so a post may draw two answers or none (§10). The
    gateway persists three kinds of state per room: a cursor per bot,
    the threads' settings, and the scheduled jobs.
@@ -190,19 +190,20 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 and
 reply below is a line or two, so the post count is what binds.
 
 1. `H: @a, can you check the nginx log? When it's done, @b, restart the
-   backend.` The post addresses `a` and `b`: a turn each, started at once.
+   backend.` The post addresses `a` and `b`, so each gets a turn,
+   started at once.
    The classifier is asked about the post at the same time and adds
    nobody, so `c` gets no turn; the post is now in `c`'s backlog. `b`
    reads "when it's done", finds nothing to say yet (`done`, which posts
    nothing), and sets itself a scheduled job for 20 minutes' time
    (`FOLLOW_UP`).
 2. `a` replies `to: [H, b]`: `@H @b 502 burst at 09:12, log is clean
-   now. b, go ahead.` The reply addresses `b`: a turn; it receives `H`'s
-   post and `a`'s. `b` restarts the backend and replies `to: [H, a]`.
-3. `b`'s reply addresses `a`: a turn for `a`. The hint says a reply that only
+   now. b, go ahead.` The reply addresses `b`, so `b` gets a turn; it
+   receives `H`'s post and `a`'s. `b` restarts the backend and replies `to: [H, a]`.
+3. `b`'s reply addresses `a`, so `a` gets a turn. The hint says a reply that only
    acknowledges is `done`, and `a` answers `done`. Two recent agent posts.
-4. The sweeper finds `c` with three undelivered posts: one catch-up turn
-   for `c`, which reads them and answers `done`. Still two posts.
+4. The sweeper finds `c` with three undelivered posts and gives `c` one
+   catch-up turn; `c` reads them and answers `done`. Still two posts.
 5. `H: @all, same as last week's incident?` `@all` addresses everyone:
    three turns in parallel, each told in its hint that the others were
    addressed too. `a` answers; `b` starts a little later, sees `a`'s reply in
@@ -212,7 +213,7 @@ reply below is a line or two, so the post count is what binds.
    reached. `b`'s next turn does not start; its post waits in the
    backlog. `H: enough, thanks` addresses nobody and the classifier
    picks nobody; but it is a human post, so only agent posts after it
-   count now: zero. At the next sweeper pass `b`'s held turn starts; `b`
+   count now, and there are none. At the next sweeper pass `b`'s held turn starts; `b`
    reads "enough, thanks" and answers `done`. Had `H` said nothing, the
    turn would have waited until enough of the six posts were older than
    300 s.
@@ -249,8 +250,8 @@ in that room:
    while the thread is rate-limited or the bot is in cooldown, unless
    the turn's source is exempt. The turn eligibility table and
    `RATE_LIMIT` list the exemptions. While the turn waits, the gateway
-   stores nothing new: the post is already in the bot's backlog, and the
-   classifier's decision stays in the decision cache. The sweeper asks
+   stores nothing new, because the post is already in the bot's backlog
+   and the classifier's decision stays in the decision cache. The sweeper asks
    again at its next pass. (`RATE_LIMIT`, `CATCH_UP`)
 6. **One at a time.** A bot runs one turn at a time in a room; a second
    turn for the same bot waits until the first ends. (`ONE_TURN`)
@@ -331,7 +332,7 @@ their own timing, outside this order.
     `@`.
   - **remove**: bots the post addresses that, in the classifier's
     judgement, need not speak. The gateway records this list and does
-    nothing with it: an addressed bot always speaks. The list measures
+    nothing with it, because an addressed bot always speaks. The list measures
     how well humans and bots use `@`: how often a mention goes to a bot
     that had no reason to answer (§8).
 - *Speakers*: the bots the post addresses plus the classifier's **add**
@@ -357,9 +358,9 @@ their own timing, outside this order.
     to catch-up, the floor under everything.
   - Another gateway asks its own classifier and may answer differently.
 - *Effect*: every speaker gets a turn, through `RATE_LIMIT` and
-  `ONE_TURN`, in parallel. A bot not among the speakers waits: the post
-  stays in its backlog, the bot's next turn delivers it, and `CATCH_UP`
-  gives the bot its own look later. The gateway asks the classifier to
+  `ONE_TURN`, in parallel. A bot not among the speakers gets no turn
+  from this post. The post stays in its backlog, the bot's next turn
+  delivers it, and `CATCH_UP` gives the bot its own look later. The gateway asks the classifier to
   pick few: one bot that can answer, not everyone who could.
 - *A decision belongs to its post*: it makes a bot eligible only while
   that post is still in the bot's backlog. The gateway checks this when
@@ -420,24 +421,25 @@ their own timing, outside this order.
   - a username resolves to itself if it is a bot on the agent list.
 
   Who resolves the names depends on who wrote the control word:
-  - A bot (the orchestrator) wrote it, in the `control` field of its
-    reply: the gateway resolves the names **before posting**, as part
-    of the canonical form (`REPLY_ENVELOPE`). The post on the platform
+  - When a bot (the orchestrator) wrote it, in the `control` field of
+    its reply, the gateway resolves the names **before posting**, as
+    part of the canonical form (`REPLY_ENVELOPE`). The post on the platform
     then carries the resolved names, and every gateway reads the same
     list. A username that is not a bot on the agent list, or an empty
     list, makes the reply invalid. An `all` that resolves to no bot is
     left out of the post.
-  - A human wrote it: nothing can rewrite the post, so each gateway
-    resolves the names when it reads the post, against its own agent
-    list. The gateway ignores a username that is not a bot on its
+  - When a human wrote it, nothing can rewrite the post, so each
+    gateway resolves the names when it reads the post, against its own
+    agent list. The gateway ignores a username that is not a bot on its
     agent list and shows it in `STATUS`. Two gateways with the same
     agent list reach the same names; with different lists they do not,
     and `AGENT_LIST` reports that difference loudly at startup.
 - *A bot that joins the room after `mute: @all` was posted is not
-  muted*: it was not on the list. Muting it is the orchestrator's job:
-  its skill sees the newcomer's first post and mutes it if the meeting
-  needs it. The same covers a bot whose gateway was down when the mute
-  was posted: it speaks once, and the orchestrator mutes it again.
+  muted*, because it was not on the list. Muting it is the
+  orchestrator's job: its skill sees the newcomer's first post and
+  mutes it if the meeting needs it. The same covers a bot whose
+  gateway was down when the mute was posted. It speaks once, and the
+  orchestrator mutes it again.
 - *Two uses*:
   - `mute: @all` plus the orchestrator addressing bots is how an
     orchestrator imposes a structure: who speaks is exactly who it
@@ -570,16 +572,16 @@ their own timing, outside this order.
   that returns to its default stays in the settings with its post, so
   `mute: @all`, then `unmute: @all`, then a replay of the `mute: @all`
   leaves the thread unmuted. The gateway computes the rate limit with
-  the thread's *current* orchestrator: re-designating the orchestrator
-  changes which past posts count. This is accepted over recording a
+  the thread's *current* orchestrator, so re-designating the
+  orchestrator changes which past posts count. This is accepted over recording a
   role per post.
 - *Two gateways in one room* each keep their own settings from the
   same posts. They agree because the posts are the same, not because
   they talk to each other. The one thing each reads for itself is a
   human's `@all` (`MUTE`). A control word a gateway's own bot posted
   never comes back to it, because a connector drops its own account's
-  posts. That is harmless: the bots it would affect are on other
-  gateways, which do receive it.
+  posts. That is harmless, because the bots it would affect are on
+  other gateways, which do receive it.
 
 ### ONE_TURN
 
@@ -597,9 +599,9 @@ their own timing, outside this order.
   the bot becoming free, and a turn ending, each ask the sweeper for a
   pass on that bot, and the pass reconstructs eligibility from the
   backlog, the turn eligibility table and the cache (`CATCH_UP`).
-- The gateway does not second-guess the turn that then runs: the turn
-  has everything posted meanwhile in its backlog, and the bot judges
-  whether there is still something to say. A reply someone else
+- The gateway does not second-guess the turn that then runs, because
+  the turn has everything posted meanwhile in its backlog, and the bot
+  judges whether there is still something to say. A reply someone else
   already gave, or a human's "never mind", is in front of it; `done`
   costs a few seconds.
 
@@ -641,7 +643,7 @@ their own timing, outside this order.
     counter on
     ordinary turns, so this is possible and not bounded, and it sits
     inside the project's best-effort delivery (`docs/requirements.md`).
-  - Delivered backlog is context: the gateway does not re-execute
+  - Delivered backlog is context, so the gateway does not re-execute
     control words and mentions in it.
 - *Interface*: the connector history fetch, bounded by post id,
   returning post and thread ids, paging past the first page (Mattermost
@@ -665,9 +667,9 @@ their own timing, outside this order.
   2. It takes them one at a time. Before starting a turn for a thread,
      it looks again: does the bot still have undelivered posts in this
      thread?
-  3. Often it does not: the turn started for an earlier thread in the
-     same pass delivered the bot's whole room backlog, this thread
-     included (`CURSOR`). Then the pass skips the thread. No turn runs
+  3. Often it does not, because the turn started for an earlier thread
+     in the same pass delivered the bot's whole room backlog, this
+     thread included (`CURSOR`). Then the pass skips the thread. No turn runs
      with nothing to deliver.
 
   With one cursor per room, one turn usually serves every thread the
@@ -698,9 +700,9 @@ their own timing, outside this order.
   for a bot whose backlog is empty; a scheduled job is the one
   exception, since it has no post of its own.
 - *What it covers*: posts not yet delivered. The pass does not revisit
-  a post that another thread's turn already delivered: that turn could
-  reply in the post's thread (`REPLY_ENVELOPE`), and the bot's session
-  remembers it. "Not now" therefore means: the bot sees the post at its
+  a post that another thread's turn already delivered, because that
+  turn could reply in the post's thread (`REPLY_ENVELOPE`), and the
+  bot's session remembers it. "Not now" therefore means: the bot sees the post at its
   next turn, whichever thread starts it, and may answer there and then.
 
 ### REPLY_ENVELOPE
@@ -745,14 +747,14 @@ replies:
   - `text`: the body to post.
   - `control`: control words to set in the thread: `mute` and `unmute`
     (a list of usernames, or `all`), `limit` (`posts`, `words`). There
-    is no `orchestrator` key: only an owner-role human sets that
-    (`AUTHORITY`).
+    is no `orchestrator` key, because only an owner-role human sets
+    that (`AUTHORITY`).
   - `done: true`: the bot has nothing to post in this thread. A `to`
     on a `done` says whose requests the bot read and chose not to
     answer; the gateway records it and posts nothing (§8).
   - A reply carries `done`, or `text`, or `control`, or `text` and
-    `control` together. Never `text` and `done` together: that bot has
-    not decided whether to post.
+    `control` together. Never `text` and `done` together, because a
+    bot that writes both has not decided whether to post.
   - The gateway reads an output that is only the token
     `<end-of-agent-chain>` as one `done` reply with no `to`. Text
     followed by the token is not that; it is invalid.
@@ -763,9 +765,9 @@ replies:
     `mute` or `unmute` first (`MUTE`). Why text: the platform post is
     the only medium every gateway and every human reads, and humans
     write control words as text. A `mute: all` or `unmute: all` may
-    resolve to no bot: the orchestrator is the only bot in the room, or
-    no bot is muted in the thread. Then the gateway leaves that `mute`
-    or `unmute` out of the post. If the reply still has `text` or
+    resolve to no bot, when the orchestrator is the only bot in the
+    room or no bot is muted in the thread. Then the gateway leaves that
+    `mute` or `unmute` out of the post. If the reply still has `text` or
     another control word, the gateway posts what remains; if nothing
     remains, it posts nothing and treats the reply as `done`.
   - `text` is rewritten so that the post's mentions are exactly its
@@ -892,7 +894,7 @@ The gateway injects these into every turn:
   post requests (`MUTE`). A job has at most one firing waiting in a
   backlog; a later firing of the same job replaces it, so a daily job
   whose bot was muted for three days runs once. The gateway keeps no
-  deadline for a job: whether the task is still worth doing is the
+  deadline for a job, so whether the task is still worth doing is the
   bot's judgement when it finally runs.
 - *Time-sensitive jobs*: a meeting's `mute: @all` holds every job of
   every muted bot for as long as the meeting runs, time-sensitive or
@@ -1011,11 +1013,11 @@ before it. Later `H` posts in `B`: `@x is staging green?`
 anyone know why the build is red?`
 
 - Each gateway asks its classifier once and acts on its own bot only.
-  Both may pick `a` and `b`: two replies. Gateway 1 may pick `b` and
-  gateway 2 `a`: neither runs the bot it picked, and nobody answers until
-  `H` addresses one (§10).
+  When both pick `a` and `b`, there are two replies. When gateway 1
+  picks `b` and gateway 2 picks `a`, neither runs the bot it picked, and
+  nobody answers until `H` addresses one (§10).
 - `a: @b your change touched the build file. Did you bump the version?`
-  The reply addresses `b`: a turn on gateway 2. `b` replies `to: [a, H]`. Each
+  The reply addresses `b`, so `b` gets a turn on gateway 2. `b` replies `to: [a, H]`. Each
   gateway counts both posts toward the rate limit: gateway 1 received
   `b`'s post and posted `a`'s; gateway 2 the reverse.
 - `H: mute: @all`: each gateway resolves it against the same agent list
@@ -1043,9 +1045,9 @@ anyone know why the build is red?`
 | Role-play with a game master | GM skill; `mute: @all` | Players speak when addressed; the GM narrates after each. | yes, except hidden information |
 | Monitor room (CI, webhooks) | none | The integration account is configured as a guest: its mention starts a bot, other bots by classifier, nothing it posts counts. | yes |
 
-Single-bot channels and 1:1 DMs are unchanged: the bot is addressed by
-definition or by `require_mention`, and the rate limit counts its own
-posts. Anonymous votes are not supported (§10).
+Single-bot channels and 1:1 DMs are unchanged, because the bot is
+addressed by definition or by `require_mention`, and the rate limit
+counts its own posts. Anonymous votes are not supported (§10).
 
 ---
 
@@ -1060,9 +1062,9 @@ included, before paying for an implementation.
 
 - **Mechanism**: a deterministic script implementing §5 as written:
   the turn eligibility table, the rate limit, the sweeper, the cursor, the reply
-  envelope. It is not a language model tracing the rules: a model's
-  trace would hide whether a wrong step was a hole in the spec or an
-  error in the trace. Where the script and the text disagree, one of
+  envelope. It is not a language model tracing the rules, because a
+  model's trace would hide whether a wrong step was a hole in the spec
+  or an error in the trace. Where the script and the text disagree, one of
   them is wrong and is fixed.
 - **Bots**: each bot turn is one real `claude -p` (or OpenCode) call with
   the bot's persona from the test room's configuration, in one session
@@ -1293,8 +1295,9 @@ Mechanism tests, by task, written against the simulator first:
 - **Coordination across gateways**: two gateways in one room cannot
   confer, so for one post both may name a bot of their own (two
   replies), or each may name a bot the other runs (no reply at all).
-  Both outcomes are accepted: coordination across gateways is best
-  effort in this version, and a human's mention always reaches its bot.
+  Both outcomes are accepted, because coordination across gateways is
+  best effort in this version, and a human's mention always reaches its
+  bot.
   Reopened only with a protocol between gateways.
 - **Job priorities**: marking a scheduled job as time-sensitive,
   okay-to-delay or droppable, so that a mute (a meeting's `mute: @all`
