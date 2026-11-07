@@ -79,11 +79,11 @@ Each term uses only the terms above it.
 | **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** (those bots wrote after the thread's newest human post, within `rate_limit_seconds`) number `rate_limit_posts` or more, or total `rate_limit_words` words or more. A limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
 | **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread. A turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
-| **unfinished thread** | Per bot, per room: a thread whose posts a turn delivered to the bot while the thread was closed to it (muted there, or rate-limited). The sweeper gives the bot a turn there once the thread is open to it again (`CATCH_UP`). Persisted with the cursor. |
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler ("check on a's report in 30 minutes"). The job fires at the set time and starts a turn for that bot with no post behind it. If the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. Each of its replies posts text, sets control words, or says `done` for a thread. A turn whose replies are all `done` posts nothing. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot silenced in a thread by `mute: @bot`. A muted bot gets a turn there only from a human's or the orchestrator's mention. The classifier does not pick it and the sweeper skips it. `mute: @all` is shorthand for naming every bot on the agent list except the orchestrator, and is how an orchestrator runs a meeting with exactly the speakers it chooses. `mute: @bot` is for one bot that will not stop. |
+| **unfinished thread** | Per bot, per room: a thread whose posts a turn delivered to the bot while the bot was muted there or the thread was rate-limited, and in which the bot has not yet replied. Every later turn's `HINT` lists the bot's unfinished threads that are open to it, and the sweeper gives the bot a turn in one that no other turn has cleared (`CATCH_UP`). Persisted with the cursor. |
 | **reply envelope** | The structured form of a turn's output: a list of replies, each in one thread, carrying text to post, control words, or `done` (`REPLY_ENVELOPE`). |
 | **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:`, written as text in a post. A human types it. A bot writes it in the `control` field of its reply envelope and the gateway posts it as text. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`). From anyone else the post is delivered unchanged and nothing is applied. |
 | **settings** | A thread's current control words (orchestrator, limit, mutes), each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
@@ -577,7 +577,8 @@ their own timing, outside this order.
 - *Expiry*: the gateway removes a thread's settings after
   `control_ttl_days` of silence in the thread (days, not seconds), or
   when the platform archives or deletes the thread. The defaults then
-  apply again. Silence is the age of the thread's newest post. The
+  apply again, and an archived or deleted thread also leaves every
+  bot's unfinished set (`CATCH_UP`). Silence is the age of the thread's newest post. The
   gateway notes that time in memory as posts arrive and reads no
   history to check it. A thread muted and then abandoned unmutes on
   its own. `STATUS` lists the threads that hold settings and their
@@ -610,8 +611,9 @@ their own timing, outside this order.
   item, §9.)
 - *There is no waiting turn.* A turn that cannot start, because the
   bot is busy or the thread is rate-limited, leaves behind only its
-  post in the backlog and, for a classifier choice, the cached
-  decision. A bot that becomes free starts nothing by itself. Instead,
+  post in the backlog, for a classifier choice the cached decision,
+  and for a delivered thread the bot could not post in the unfinished
+  entry (`CATCH_UP`). A bot that becomes free starts nothing by itself. Instead,
   the bot becoming free, and a turn ending, each ask the sweeper for a
   pass on that bot, and the pass reconstructs eligibility from the
   backlog, the turn eligibility table and the cache (`CATCH_UP`).
@@ -679,7 +681,10 @@ their own timing, outside this order.
   bot becomes free or one of its turns ends (`ONE_TURN`). A pass goes
   like this:
   1. At the start, the gateway lists the threads the pass will act on,
-     in order.
+     in order: first the threads with a post the turn eligibility table
+     allows now (*Addressed or picked posts first*), then the bot's
+     unfinished threads that are open to it (*Unfinished threads*),
+     then the threads due a catch-up turn (*Catch-up turns*).
   2. It takes them one at a time. Before starting a turn for a thread,
      it looks again: does the bot still have undelivered posts in this
      thread?
@@ -718,22 +723,31 @@ their own timing, outside this order.
   opened (next bullet).
 - *Unfinished threads*: a turn can deliver a thread's posts to a bot
   that may not post there, because the cursor is per room, not per
-  thread. Such a thread is **unfinished** for the bot. The gateway
-  keeps the set of unfinished threads per bot per room, persisted with
-  the cursor:
-  - When a turn ends, the gateway adds every delivered thread that the
-    `HINT` marked closed, unless the envelope holds a `done` reply for
-    that thread. A `done` there says the bot had nothing to say.
-  - When a turn ends normally and its `HINT` marked a thread open, as
-    the starting thread or among the delivered threads, the gateway
-    removes that thread. The bot had its chance there, whether or not
-    it replied.
+  thread. Such a thread is **unfinished** for the bot until the bot
+  replies in it. The gateway keeps the set of unfinished threads per
+  bot per room, persisted with the cursor:
+  - When a turn ends normally, the gateway adds every delivered thread
+    that the `HINT` marked closed, unless the envelope holds a `done`
+    reply for that thread. A `done` there says the bot had nothing to
+    say.
+  - When a turn ends normally, the gateway removes every thread for
+    which the envelope holds a reply (`text`, `control` or `done`).
+  - Every turn's `HINT` lists the bot's unfinished threads that are
+    open to it now, so the bot can reply in them in that turn
+    (`HINT`). A thread the bot does not reply in stays unfinished.
   - At each pass, for every unfinished thread that is open to the bot
-    now (not muted there, under the rate limit, out of cooldown), the
-    sweeper starts a turn with that thread as the starting thread, even
-    when the backlog is empty. The `HINT` says that the thread was
-    closed earlier and is open now. The posts the bot could not answer
-    are already in its session.
+    and that the bot is out of cooldown for, the sweeper starts a turn
+    with that thread as the starting thread, even when the backlog is
+    empty. The envelope of that turn must hold a reply for that thread
+    (`REPLY_ENVELOPE`, *Validation*), so the turn always clears it.
+    The posts the bot could not answer are already in its session.
+  - When the platform archives or deletes a thread, the gateway drops
+    it from every bot's unfinished set, with the thread's settings
+    (`SETTINGS`).
+
+  Cooldown is a condition on starting a turn, not on where a running
+  turn may post. That is why it appears in the sweeper's condition and
+  not in the `HINT`'s definition of open.
 
   This is what makes `unmute:` act at once: the `unmute:` post asks
   for a pass, the pass finds the thread unfinished and open, and the
@@ -751,15 +765,19 @@ reply envelope:
 
 - the thread that started the turn, and the other threads delivered;
 - for each of those threads, whether it is **open** or **closed** to
-  the bot. A thread is open when the bot is not muted there and the
-  thread is under the rate limit, or when a human or the orchestrator
-  addressed the bot there. The rate limit never closes a thread to the
-  orchestrator. The bot may post only in open threads
+  the bot. The thread that started the turn is always open: the turn
+  eligibility table admitted the turn there, exemptions included. Any
+  other delivered thread is open when the bot is not muted there and
+  the thread is under the rate limit, or when a human or the
+  orchestrator addressed the bot there. The rate limit never closes a
+  thread to the orchestrator. The bot may post only in open threads
   (`REPLY_ENVELOPE`);
+- the bot's unfinished threads that are open to it now, that is, not
+  muted there and under the rate limit, so that the bot can reply in
+  them in this turn (`CATCH_UP`). When the sweeper started the turn
+  for one of them, that thread is the starting thread;
 - for each open thread, how many posts and words its rate limit has
   left;
-- when the sweeper started the turn for an unfinished thread, that the
-  thread was closed earlier and is open now (`CATCH_UP`);
 - the replies from the last turn that the platform refused
   (`REPLY_ENVELOPE`, *Partial failure*);
 - the instruction:
@@ -877,6 +895,8 @@ replies:
   - a `thread` is one the turn was not delivered;
   - a reply with `text` or `control` is in a thread the `HINT` marked
     closed;
+  - the sweeper started the turn for an unfinished thread and no reply
+    is in that thread (`CATCH_UP`);
   - a reply has `control` and the bot is not the thread's
     orchestrator, or `control` holds a key other than `mute`, `unmute`
     and `limit`;
@@ -1047,9 +1067,11 @@ before it. Later `H` posts in `B`: `@x is staging green?`
   "green". In `A`, `to: [b]`, "right, 404s, my mistake." Each posts in
   its thread and counts there.
 - Had `x` been muted in `A`, or `A` rate-limited, the `HINT` would
-  have marked `A` closed. A reply there would be invalid, `A` would
-  become unfinished for `x`, and the sweeper would give `x` a turn in
-  `A` once `A` opened.
+  have marked `A` closed. A reply there would be invalid, and `A`
+  would become unfinished for `x`. `x` would reply in `A` at its next
+  turn after `A` opened, whatever started that turn; if no turn came,
+  the sweeper would start one for `A`. That extra turn is the one cost
+  this mechanism adds.
 
 ### 6.4 Two gateways, one room
 
@@ -1208,9 +1230,6 @@ Mechanism tests, by task, written against the simulator first:
 
 - **0**: the §6 tables reproduced.
 - **1**:
-  - a reply in a thread the `HINT` marked closed is invalid, and a
-    reply in an open thread posts even when a `mute:` arrived while
-    the turn ran;
   - the cursor is saved at each normal end and not at a failed one,
     with a failure injected at every boundary;
   - a two-thread turn posts in both, each counted in its own;
@@ -1251,6 +1270,11 @@ Mechanism tests, by task, written against the simulator first:
     mute;
   - mutes read from the settings after restart.
 - **3**:
+  - a reply in a thread the `HINT` marked closed is invalid, and a
+    reply in an open thread posts even when a `mute:` arrived while
+    the turn ran;
+  - a scheduled job's turn in a rate-limited thread has its own thread
+    open;
   - counts match across two gateway processes on one room with equal
     agent lists, and status says so when they differ;
   - a human's mention starts in a rate-limited thread;
@@ -1260,8 +1284,13 @@ Mechanism tests, by task, written against the simulator first:
     starts a turn there once it opens, with an empty backlog;
   - a `done` reply for a closed thread keeps it out of the unfinished
     set;
-  - an open thread leaves the set when the turn ends normally, reply
-    or not;
+  - an unfinished thread that opened is listed in the `HINT` of a turn
+    another thread started, a reply there clears it, and no reply
+    there leaves it in the set;
+  - the sweeper's turn for an unfinished thread is invalid without a
+    reply in that thread;
+  - a failed turn adds nothing to the set;
+  - an archived thread leaves the set;
   - the unfinished set survives a restart;
   - `unmute:` starts the unfinished thread's turn at the pass it
     requests;
@@ -1454,7 +1483,7 @@ The two are run through the same simulator before either is built.
 | Several gateways in one room | non-goal | best effort: a post may draw two answers or none |
 | Multiple bots answering one post | serial, each seeing the last | the classifier picks few. The rest is noise |
 | Classifier | optional, for addressing by name and mode recommendation | required, once per post. May add speakers, never remove an addressed one |
-| Rules a reader must hold | plan lifecycle, three modes with switching, pause and its three resets | one question, one control, one rate limit, one cursor and the threads' settings |
+| Rules a reader must hold | plan lifecycle, three modes with switching, pause and its three resets | one question, one control, one rate limit, one cursor and the unfinished threads per bot, and the threads' settings |
 | What it gives up | simplicity, and cross-gateway rooms | deadlines and reports for unattended work, aggregation for an orchestrator, and determinism of turn eligibility |
 
 ## Appendix C: Code references
