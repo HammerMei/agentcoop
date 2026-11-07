@@ -299,7 +299,7 @@ their own timing, outside this order.
 
   Three notes on the table:
   - The orchestrator's own turns start regardless of the rate limit.
-  - `mute: @all` expands to every bot but the orchestrator, so in a
+  - `mute: @all` resolves to every bot but the orchestrator, so in a
     meeting the bots' reports reach it.
   - A human may still `mute:` the orchestrator by name. Then only a
     human's mention wakes it.
@@ -412,21 +412,27 @@ their own timing, outside this order.
   addresses it, a job's prompt) starts at once, under the rate limit,
   rather than at the next periodic pass.
 - *A mute always names its bots.* The settings hold a list of
-  usernames per thread, nothing else. `mute: @all` is shorthand for
-  every bot on the agent list except the orchestrator, and `unmute:
-  @all` for every bot currently muted in the thread. Who expands the
-  shorthand into names depends on who wrote it:
-  - A bot (the orchestrator) wrote it, as `mute: all` in the `control`
-    field of its reply: the gateway expands `all` **before posting**,
-    as part of the canonical form (`REPLY_ENVELOPE`). The post on the
-    platform then carries the names, and every gateway reads the same
-    list. The gateway does not post a `mute: all` that expands to
-    nobody.
+  usernames per thread, nothing else. Before a `mute` or `unmute`
+  takes effect, the gateway **resolves** its names into that list:
+  - `all` in a `mute` resolves to every bot on the agent list except
+    the orchestrator; `all` in an `unmute` resolves to every bot
+    currently muted in the thread;
+  - a username resolves to itself if it is a bot on the agent list.
+
+  Who resolves the names depends on who wrote the control word:
+  - A bot (the orchestrator) wrote it, in the `control` field of its
+    reply: the gateway resolves the names **before posting**, as part
+    of the canonical form (`REPLY_ENVELOPE`). The post on the platform
+    then carries the resolved names, and every gateway reads the same
+    list. A username that is not a bot on the agent list, or an empty
+    list, makes the reply invalid. An `all` that resolves to no bot is
+    left out of the post.
   - A human wrote it: nothing can rewrite the post, so each gateway
-    expands `@all` when it reads the post, against its own agent list.
-    Two gateways with the same agent list reach the same names; with
-    different lists they do not, and `AGENT_LIST` reports that
-    difference loudly at startup.
+    resolves the names when it reads the post, against its own agent
+    list. The gateway ignores a username that is not a bot on its
+    agent list and shows it in `STATUS`. Two gateways with the same
+    agent list reach the same names; with different lists they do not,
+    and `AGENT_LIST` reports that difference loudly at startup.
 - *A bot that joins the room after `mute: @all` was posted is not
   muted*: it was not on the list. Muting it is the orchestrator's job:
   its skill sees the newcomer's first post and mutes it if the meeting
@@ -753,11 +759,15 @@ replies:
 - *Canonical form*. Before posting, the gateway renders each reply
   into one post, `control` first, then `text`:
   - `control` becomes text, one line per control word (`mute: @a @b`,
-    `limit: 20 posts 2000 words`), with `all` replaced by the names it
-    stands for (`MUTE`). Why text: the platform post is the only medium
-    every gateway and every human reads, and humans write control words
-    as text. The gateway leaves out a control word that expands to
-    nobody, and does not post a reply with nothing left.
+    `limit: 20 posts 2000 words`). The gateway resolves the names in a
+    `mute` or `unmute` first (`MUTE`). Why text: the platform post is
+    the only medium every gateway and every human reads, and humans
+    write control words as text. A `mute: all` or `unmute: all` may
+    resolve to no bot: the orchestrator is the only bot in the room, or
+    no bot is muted in the thread. Then the gateway leaves that `mute`
+    or `unmute` out of the post. If the reply still has `text` or
+    another control word, the gateway posts what remains; if nothing
+    remains, it posts nothing and treats the reply as `done`.
   - `text` is rewritten so that the post's mentions are exactly its
     `to`:
     - a recipient the text does not mention: the gateway prepends
@@ -807,7 +817,9 @@ replies:
   - a `thread` is one the turn was not delivered;
   - a reply has `control` and the bot is not the thread's
     orchestrator, or `control` holds a key other than `mute`, `unmute`
-    and `limit`.
+    and `limit`;
+  - a `mute` or `unmute` is an empty list, or names a username that is
+    not a bot on the agent list.
 - *What the gateway does not enforce*. There is no record of "requests
   this turn serves", so the gateway cannot check that `to` covers
   everyone who asked. `HINT` asks for it; the simulator counts the
@@ -1006,7 +1018,7 @@ anyone know why the build is red?`
   The reply addresses `b`: a turn on gateway 2. `b` replies `to: [a, H]`. Each
   gateway counts both posts toward the rate limit: gateway 1 received
   `b`'s post and posted `a`'s; gateway 2 the reverse.
-- `H: mute: @all`: each gateway expands it against the same agent list
+- `H: mute: @all`: each gateway resolves it against the same agent list
   and writes the same names; only a human's or the orchestrator's
   mention opens a turn in the thread from here.
 
@@ -1153,9 +1165,13 @@ Mechanism tests, by task, written against the simulator first:
   the orchestrator are each invalid; a `control` reply without `to` is
   valid; a `done` reply's `to` is recorded and nothing is posted; a
   `control` with `text` renders as one post, control words first; settings survive restart and lapse at `control_ttl_days`; a
-  bot's `mute: @all` is posted as names and a human's is expanded on
-  read, and a bot added to the agent list afterwards is not muted; an
-  `@all` that expands to nobody is not posted; a replayed older control
+  bot's `mute: all` is posted as names and a human's `mute: @all` is
+  resolved on read, and a bot added to the agent list afterwards is not
+  muted; a `mute: all` that resolves to no bot is left out of the post,
+  and a reply with nothing left posts nothing; a bot's `mute` that is
+  an empty list or names a bot not on the agent list is invalid; a
+  human's `mute:` of a name not on the agent list is ignored and shown
+  in status; a replayed older control
   arriving after the value returned to its default is ignored; a bot's
   own post counts toward the rate limit on the gateway that posted it.
 - **2**: with the classifier off and the `addressed-only` fallback, a bot's post
