@@ -1427,6 +1427,13 @@ Mechanism tests, by task, written against the simulator first:
   above all) does not hold a job that cannot wait. A change to the
   scheduler, not to this design. Reopened when the simulator shows what
   a meeting's mute costs in held jobs.
+- **Enforcing a reply to a mention**: a validation rule that a turn's
+  envelope must hold a reply (`text`, `control` or `done`) in every
+  open thread where a delivered post addressed the bot. The gateway
+  already knows those threads, so the rule is cheap. Not added, because
+  `HINT` asks for it and the simulator measures the omissions (§8.1).
+  Reopened if the omission rate shows that bots do not follow the
+  `HINT`.
 - **Anonymous votes, hidden information**: the room is the unit of
   visibility.
 
