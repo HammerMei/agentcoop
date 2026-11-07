@@ -759,8 +759,9 @@ replies:
     answer. The gateway records it and posts nothing (§8).
   - A reply carries `done`, or `text`, or `control`, or `text` and
     `control` together. The gateway rejects a reply that carries both
-    `text` and `done`, because a bot that writes both has not decided
-    whether to post.
+    `text` and `done`, because the two fields contradict each other:
+    `text` says there is something to post, `done` says there is
+    nothing.
   - The gateway reads an output that is only the token
     `<end-of-agent-chain>` as one `done` reply with no `to`. Any other
     text before or after the token makes the output invalid
