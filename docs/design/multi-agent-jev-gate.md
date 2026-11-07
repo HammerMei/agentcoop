@@ -758,11 +758,13 @@ replies:
     on a `done` says whose requests the bot read and chose not to
     answer. The gateway records it and posts nothing (§8).
   - A reply carries `done`, or `text`, or `control`, or `text` and
-    `control` together. Never `text` and `done` together, because a
-    bot that writes both has not decided whether to post.
+    `control` together. The gateway rejects a reply that carries both
+    `text` and `done`, because a bot that writes both has not decided
+    whether to post.
   - The gateway reads an output that is only the token
-    `<end-of-agent-chain>` as one `done` reply with no `to`. Text
-    followed by the token is not that. It is invalid.
+    `<end-of-agent-chain>` as one `done` reply with no `to`. Any other
+    text before or after the token makes the output invalid
+    (*Validation*).
 - *Canonical form*. Before posting, the gateway renders each reply
   into one post, `control` first, then `text`:
   - `control` becomes text, one line per control word (`mute: @a @b`,
