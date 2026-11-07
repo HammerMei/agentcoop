@@ -79,6 +79,7 @@ Each term uses only the terms above it.
 | **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** (those bots wrote after the thread's newest human post, within `rate_limit_seconds`) number `rate_limit_posts` or more, or total `rate_limit_words` words or more. A limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
 | **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread. A turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
+| **unfinished thread** | Per bot, per room: a thread whose posts a turn delivered to the bot while the thread was closed to it (muted there, or rate-limited). The sweeper gives the bot a turn there once the thread is open to it again (`CATCH_UP`). Persisted with the cursor. |
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler ("check on a's report in 30 minutes"). The job fires at the set time and starts a turn for that bot with no post behind it. If the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. Each of its replies posts text, sets control words, or says `done` for a thread. A turn whose replies are all `done` posts nothing. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
@@ -141,8 +142,9 @@ No other parameter is set per thread.
    designated. No two bots share persisted gateway state, so bots run
    by different gateways coexist in one room, best effort. Two gateways
    cannot confer, so a post may draw two answers or none (§10). The
-   gateway persists three kinds of state per room: a cursor per bot,
-   the threads' settings, and the scheduled jobs.
+   gateway persists four kinds of state per room: a cursor and the
+   unfinished threads per bot, the threads' settings, and the scheduled
+   jobs.
 5. **The gateway knows nothing about collaboration. It enforces a few
    basic rules and nothing else.** Mechanically, with no model involved,
    so no bot can get around them, the gateway:
@@ -264,11 +266,12 @@ in that room:
    cursor and before the post that started the turn, labelled by
    thread, and then that post. A turn the sweeper or a scheduled job
    started gets every post after the cursor up to a high-water mark
-   instead. (`CURSOR`)
-8. **Reply.** The gateway parses the reply envelope. It posts the reply
-   for the thread that started the turn, in canonical form. It posts a
-   reply for another delivered thread only if that thread allows it.
-   A `done` reply posts nothing. (`REPLY_ENVELOPE`)
+   instead. With the posts, the gateway tells the bot which of the
+   delivered threads are open to it. (`CURSOR`, `HINT`)
+8. **Reply.** The gateway parses the reply envelope. It posts each
+   reply in canonical form in its thread, if the `HINT` marked that
+   thread open. A reply in a closed thread is invalid. A `done` reply
+   posts nothing. (`REPLY_ENVELOPE`)
 
 The sweeper (`CATCH_UP`) and scheduled jobs (`FOLLOW_UP`) start turns on
 their own timing, outside this order.
@@ -301,6 +304,7 @@ their own timing, outside this order.
   | another bot's mention | yes, under the rate limit | no |
   | the classifier (`WHO_SPEAKS`) | yes, under the rate limit | not asked about it |
   | the sweeper (`CATCH_UP`) | yes, under the rate limit | no |
+  | the sweeper, for an unfinished thread that opened (`CATCH_UP`) | yes, under the rate limit | no |
   | the bot's own scheduled job (`FOLLOW_UP`) | yes | no turn now. The job's prompt goes into the bot's backlog for that thread and starts once the bot is unmuted. |
 
   Three notes on the table:
@@ -412,11 +416,13 @@ their own timing, outside this order.
   - a scheduled job of its own that fires puts its prompt into `x`'s
     backlog instead of starting a turn (`FOLLOW_UP`);
   - whichever turn comes next still delivers the thread's posts to it
-    as context.
+    as context, and the thread becomes unfinished for `x`
+    (`CATCH_UP`).
 - *`unmute: @x`* lifts the mute and asks the sweeper for a pass on `x`.
-  So whatever waited in `x`'s backlog for the mute to end (a post that
-  addresses it, a job's prompt) starts at once, under the rate limit,
-  rather than at the next periodic pass.
+  The pass starts a turn for `x` in the thread at once, under the rate
+  limit, rather than at the next periodic pass: the thread is
+  unfinished for `x` if any post reached it while muted, and a job's
+  prompt may be waiting in `x`'s backlog (`CATCH_UP`, `FOLLOW_UP`).
 - *A mute always names its bots.* The settings hold a list of
   usernames per thread, nothing else. Before a `mute` or `unmute`
   takes effect, the gateway **resolves** its names into that list:
@@ -490,13 +496,14 @@ their own timing, outside this order.
   `cooldown_seconds` is the least gap between one bot's own posts in a
   thread, independent of how much the thread holds. With all three at
   0 nothing holds a turn back.
-- *The rule applies to the start of a turn only.* A started turn
-  always posts its reply in its own thread, so the count can go over
-  by the number of turns already running there, and the words by what
-  those turns write. The overshoot in posts is bounded by the room's
-  bots, plus one more per gateway across gateways. A reply to another
-  thread (`REPLY_ENVELOPE`) checks that thread's rate limit at posting
-  time, serialised per thread within one gateway.
+- *The rule applies to the start of a turn only.* When a turn starts,
+  the gateway checks the rate limit of every thread it delivers and
+  tells the bot which threads are open (`HINT`). It counts each reply
+  at posting time, so the count can go over by the number of turns
+  already running there, and the words by what those turns write. A
+  running turn posts at most one reply per thread it was delivered, so
+  the overshoot in posts is bounded by the room's bots, plus one more
+  per gateway across gateways.
 - *Words*: the limit is for the people reading the thread. A one-line
   acknowledgement costs a reader seconds where a thousand-word analysis
   costs minutes, and the post count alone cannot tell them apart. A
@@ -636,8 +643,8 @@ their own timing, outside this order.
   `HINT` gives the thread that started it and the others present.
 - *When the gateway saves the cursor*: it writes the new cursor (the
   last post delivered) when the turn ends normally, that is, when
-  every reply is `done`, posted, rejected by the reply check, or
-  refused by the platform (`REPLY_ENVELOPE`).
+  every reply is `done`, posted, or refused by the platform
+  (`REPLY_ENVELOPE`).
 
   It does not write the cursor, and delivers the same posts again, when
   the backend fails or the reply is still invalid after the one
@@ -706,13 +713,65 @@ their own timing, outside this order.
   so the pass usually skips the rest. The trigger gives the thread. The
   bot reads and decides, and `done` is the common answer. This is the
   bot's own look at what the classifier passed over. No turn starts
-  for a bot whose backlog is empty. A scheduled job is the one
-  exception, since it has no post of its own.
+  for a bot whose backlog is empty, with two exceptions: a scheduled
+  job, which has no post of its own, and an unfinished thread that has
+  opened (next bullet).
+- *Unfinished threads*: a turn can deliver a thread's posts to a bot
+  that may not post there, because the cursor is per room, not per
+  thread. Such a thread is **unfinished** for the bot. The gateway
+  keeps the set of unfinished threads per bot per room, persisted with
+  the cursor:
+  - When a turn ends, the gateway adds every delivered thread that the
+    `HINT` marked closed, unless the envelope holds a `done` reply for
+    that thread. A `done` there says the bot had nothing to say.
+  - When a turn ends normally and its `HINT` marked a thread open, as
+    the starting thread or among the delivered threads, the gateway
+    removes that thread. The bot had its chance there, whether or not
+    it replied.
+  - At each pass, for every unfinished thread that is open to the bot
+    now (not muted there, under the rate limit, out of cooldown), the
+    sweeper starts a turn with that thread as the starting thread, even
+    when the backlog is empty. The `HINT` says that the thread was
+    closed earlier and is open now. The posts the bot could not answer
+    are already in its session.
+
+  This is what makes `unmute:` act at once: the `unmute:` post asks
+  for a pass, the pass finds the thread unfinished and open, and the
+  turn starts.
 - *What it covers*: posts not yet delivered. The pass does not revisit
   a post that another thread's turn already delivered, because that
   turn could reply in the post's thread (`REPLY_ENVELOPE`), and the
   bot's session remembers it. "Not now" therefore means: the bot sees the post at its
   next turn, whichever thread starts it, and may answer there and then.
+
+### HINT
+
+The gateway injects these into every turn, before the bot writes its
+reply envelope:
+
+- the thread that started the turn, and the other threads delivered;
+- for each of those threads, whether it is **open** or **closed** to
+  the bot. A thread is open when the bot is not muted there and the
+  thread is under the rate limit, or when a human or the orchestrator
+  addressed the bot there. The rate limit never closes a thread to the
+  orchestrator. The bot may post only in open threads
+  (`REPLY_ENVELOPE`);
+- for each open thread, how many posts and words its rate limit has
+  left;
+- when the sweeper started the turn for an unfinished thread, that the
+  thread was closed earlier and is open now (`CATCH_UP`);
+- the replies from the last turn that the platform refused
+  (`REPLY_ENVELOPE`, *Partial failure*);
+- the instruction:
+  - make your point, and do not restate;
+  - reply `done` in a thread where you have nothing to add;
+  - control words go in `control`, never in `text`;
+  - `to` is who the post is for, not who it mentions: include everyone
+    who asked you something in this backlog;
+  - reply in another open thread when something there needs you;
+  - `all` only with a reason;
+  - if you are waiting on someone, say so and set a scheduled job;
+  - if your reply unblocks someone, address them.
 
 ### REPLY_ENVELOPE
 
@@ -794,31 +853,15 @@ replies:
   The post itself must carry the recipients, because every gateway
   reads them from the mentions the platform recorded, never from the
   envelope.
-- *The reply check*. The gateway checks once whether a reply may
-  post. When it checks depends on the thread:
-  - In the thread whose post started the turn, the check was the turn
-    eligibility check at the turn's start. The gateway posts the reply
-    there without checking again, so a `mute:` or a rate limit that
-    arrives while the turn runs does not stop it.
-  - In any other thread the turn was delivered, the gateway checks at
-    posting time, and the reply posts only if that thread allows it:
-
-  | that thread | posts? |
-  |---|---|
-  | bot not muted, room under the rate limit | yes |
-  | bot not muted, rate-limited | no |
-  | bot muted there | only if a human or the orchestrator addressed the bot there |
-
-  - The orchestrator is exempt from the rate limit here too.
-  - Every posted reply counts in its thread.
-  - The gateway does not post a reply that fails the check, and does
-    not hold it either. The next turn's `HINT` says which reply was not
-    posted and why, and the bot decides whether to say it again.
-    `HINT` tells the bot each thread's state before it writes, so this
-    is rare.
+- *Where a reply may post*. The `HINT` decided at the turn's start
+  which delivered threads are open to the bot, and the gateway posts
+  every reply to an open thread without checking again. A `mute:` or
+  a rate limit that arrives while the turn runs does not stop a reply.
+  A reply with `text` or `control` in a closed thread is invalid
+  (*Validation*). Every posted reply counts in its thread.
 - *Partial failure*. The gateway attempts every reply once, in order.
   When the platform refuses a reply, the gateway reports it in the
-  next turn's `HINT` like a rejected one. The replies already posted
+  next turn's `HINT`. The replies already posted
   stay, the turn ends normally, and the gateway saves the cursor
   (`CURSOR`). The gateway retries nothing on the bot's behalf, because
   a retry could post a reply twice, and delivery is best effort.
@@ -832,6 +875,8 @@ replies:
     only the sender;
   - a name in `to` is not a member of the room;
   - a `thread` is one the turn was not delivered;
+  - a reply with `text` or `control` is in a thread the `HINT` marked
+    closed;
   - a reply has `control` and the bot is not the thread's
     orchestrator, or `control` holds a key other than `mute`, `unmute`
     and `limit`;
@@ -860,27 +905,6 @@ replies:
   gateway in the room treats it as context only and executes nothing
   from it. In the simulator the event kind is explicit in the
   scenario. How each platform carries it is settled in the lab (§8.1).
-
-### HINT
-
-The gateway injects these into every turn:
-
-- the thread that started the turn, and the other threads delivered;
-- whether the bot is muted in each thread;
-- how many posts and words each thread's rate limit has left;
-- the replies from the last turn that the gateway could not post, and
-  why: a reply to another thread that the thread did not allow, or a
-  reply the platform refused;
-- the instruction:
-  - make your point, and do not restate;
-  - reply `done` in a thread where you have nothing to add;
-  - control words go in `control`, never in `text`;
-  - `to` is who the post is for, not who it mentions: include everyone
-    who asked you something in this backlog;
-  - reply in another delivered thread when something there needs you;
-  - `all` only with a reason;
-  - if you are waiting on someone, say so and set a scheduled job;
-  - if your reply unblocks someone, address them.
 
 ### FOLLOW_UP: a skill on the scheduler
 
@@ -946,8 +970,8 @@ shows:
 - per thread: the orchestrator, the muted bots, the settings' age, the
   recent agent posts out of `rate_limit_posts` and their words out of
   `rate_limit_words`, and the orchestrator's recent posts;
-- per bot: backlog size and age per thread, computed on request, and
-  the cooldown remaining;
+- per bot: backlog size and age per thread, computed on request, the
+  unfinished threads, and the cooldown remaining;
 - the last classifier decisions with reasons, and any fallback
   decisions;
 - which exemption started each recent turn;
@@ -1022,9 +1046,10 @@ before it. Later `H` posts in `B`: `@x is staging green?`
   labelled `B`. Its envelope carries two replies: in `B`, `to: [H]`,
   "green". In `A`, `to: [b]`, "right, 404s, my mistake." Each posts in
   its thread and counts there.
-- Had `x` been muted in `A`, or `A` rate-limited, the `A` reply would not have
-  posted. `x`'s next turn would be told so, and `x` would decide whether
-  to say it when next addressed in `A`.
+- Had `x` been muted in `A`, or `A` rate-limited, the `HINT` would
+  have marked `A` closed. A reply there would be invalid, `A` would
+  become unfinished for `x`, and the sweeper would give `x` a turn in
+  `A` once `A` opened.
 
 ### 6.4 Two gateways, one room
 
@@ -1145,8 +1170,9 @@ size, is the measure of the classifier. Nothing observed later is.
   and across two;
 - omissions in turns that answer several posts: requests in a turn's
   backlog that its replies did not address;
-- replies not posted by the reply check, and whether they were said
-  later;
+- replies to a closed thread, returned as invalid, and what the bot
+  did next;
+- unfinished threads per bot, and how long each stayed unfinished;
 - silent stalls: handoffs where the next bot never spoke, and whether a
   `FOLLOW_UP` job recovered them;
 - orchestrator turns per meeting round;
@@ -1163,7 +1189,7 @@ size, is the measure of the classifier. Nothing observed later is.
 | 1 | **Deliver, do not drop.** Cursor per bot, history by post id, the envelope with several replies and the canonical form, and the settings' persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS |
 | 2 | **Turn eligibility for bot senders, mute.** Posts from bots go through the turn eligibility rules. `mute:`, `unmute:` and `orchestrator:` as posts. | TURN_ELIGIBILITY, MUTE, AUTHORITY |
 | 3 | **Rate limit.** Recent-post count and cooldown kept in memory, own posts included, the exemptions, and agent-list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT |
-| 4 | **Sweeper, one turn, status.** Addressed or picked posts first, then catch-up by threshold and age. | CATCH_UP, ONE_TURN, STATUS |
+| 4 | **Sweeper, one turn, status.** Addressed or picked posts first, then unfinished threads, then catch-up by threshold and age. | CATCH_UP, ONE_TURN, STATUS |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread, are cleared on a normal end, and retry with backoff and a cap. The `FOLLOW_UP` skill. | FOLLOW_UP |
 | 6 | **Classifier in shadow**, then acted on. | WHO_SPEAKS |
 | 7 | **Skills.** The brainstorm orchestrator, and a PM skill for fan-out with follow-ups. | none (policy) |
@@ -1182,15 +1208,17 @@ Mechanism tests, by task, written against the simulator first:
 
 - **0**: the §6 tables reproduced.
 - **1**:
+  - a reply in a thread the `HINT` marked closed is invalid, and a
+    reply in an open thread posts even when a `mute:` arrived while
+    the turn ran;
   - the cursor is saved at each normal end and not at a failed one,
     with a failure injected at every boundary;
   - a two-thread turn posts in both, each counted in its own;
-  - a reply to a thread that does not allow it is not posted and is
-    reported next turn;
   - a two-reply envelope whose second post the platform refuses keeps
     the first, reports the second, saves the cursor;
-  - the reply in the starting thread posts in a rate-limited thread, a
-    second-thread reply does not;
+  - the reply in the starting thread posts in a rate-limited thread,
+    and a reply in a second thread that the `HINT` marked rate-limited
+    is invalid;
   - mentions equal `to`;
   - a reply with both `text` and `done`, raw output of text plus the
     token, an empty `replies`, and a `control` from a bot that is not
@@ -1228,6 +1256,15 @@ Mechanism tests, by task, written against the simulator first:
   - a human's mention starts in a rate-limited thread;
   - a bot the orchestrator addresses starts in a rate-limited thread.
 - **4**:
+  - a thread delivered while closed becomes unfinished, and the sweeper
+    starts a turn there once it opens, with an empty backlog;
+  - a `done` reply for a closed thread keeps it out of the unfinished
+    set;
+  - an open thread leaves the set when the turn ends normally, reply
+    or not;
+  - the unfinished set survives a restart;
+  - `unmute:` starts the unfinished thread's turn at the pass it
+    requests;
   - the threads of a pass chosen once;
   - ordering by event order;
   - a turn that could not start runs at a later pass with the meanwhile
@@ -1413,7 +1450,7 @@ The two are run through the same simulator before either is built.
 | A bad actor | the thread pauses for everyone | `mute: @x` by the orchestrator or a human |
 | Who is told what happened | plan-end notices, callbacks, stop reports | nobody. The room is the record |
 | Replies | one thread per turn | any thread the turn was delivered |
-| Persisted state | cursor, rate limit, mode, orchestrator, and plan records in a shared room state, with posts deduplicated into room events | the cursor, the threads' settings, the scheduled jobs |
+| Persisted state | cursor, rate limit, mode, orchestrator, and plan records in a shared room state, with posts deduplicated into room events | the cursor and unfinished threads per bot, the threads' settings, the scheduled jobs |
 | Several gateways in one room | non-goal | best effort: a post may draw two answers or none |
 | Multiple bots answering one post | serial, each seeing the last | the classifier picks few. The rest is noise |
 | Classifier | optional, for addressing by name and mode recommendation | required, once per post. May add speakers, never remove an addressed one |
