@@ -791,15 +791,9 @@ replies:
     - `all`: the gateway replaces it with the platform's room-wide
       mention.
 
-  Why: the rewritten post gives both kinds of reader the recipients in
-  one place.
-  - A human sees the recipients at the head of the post.
-  - Every gateway reads the recipients from the mentions the platform
-    recorded, and reaches the same set whether it received the post
-    live, replayed it after a restart, or fetched it from history.
-
-  Every gateway parses every post one way, from the platform, whoever
-  wrote it.
+  Why: every gateway reads a post's recipients from the mentions the
+  platform recorded, never from the envelope, so the post itself must
+  carry them.
 - *The reply check*. The reply in the thread that started the turn
   **always posts**. Why: the turn was started there, and that was the
   only check. A `mute:` that lands mid-turn does not stop it. A reply
