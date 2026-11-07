@@ -81,11 +81,11 @@ Each term uses only the terms above it.
 | **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread; a turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
 | **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it; if the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
-| **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. A turn either ends in `done` (posts nothing) or posts one or more replies. |
+| **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. Each of its replies posts text, sets control words, or says `done` for a thread; a turn whose replies are all `done` posts nothing. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot silenced in a thread by `mute: @bot`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is shorthand for naming every bot on the agent list except the orchestrator, and is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
-| **reply envelope** | The structured form of a turn's output: one or more replies, each `thread`, `to`, `text`; or `done` (`REPLY_ENVELOPE`). |
-| **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:` — written in a post. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`); from anyone else the post is delivered unchanged and nothing is applied. |
+| **reply envelope** | The structured form of a turn's output: a list of replies, each in one thread, carrying text to post, control words, or `done` (`REPLY_ENVELOPE`). |
+| **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:`, written as text in a post. A human types it; a bot writes it in the `control` field of its reply envelope and the gateway posts it as text. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`); from anyone else the post is delivered unchanged and nothing is applied. |
 | **settings** | A thread's current control words — orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
 | **agent list** | The usernames the gateway treats as agents — `agent_usernames` in configuration — with each one's profile (`AGENT_LIST`). |
 
@@ -263,7 +263,7 @@ in that room:
 8. **Reply.** The gateway parses the reply envelope. It posts the reply
    for the thread that started the turn, in canonical form. It posts a
    reply for another delivered thread only if that thread allows it.
-   `done` posts nothing. (`REPLY_ENVELOPE`)
+   A `done` reply posts nothing. (`REPLY_ENVELOPE`)
 
 The sweeper (`CATCH_UP`) and scheduled jobs (`FOLLOW_UP`) start turns on
 their own timing, outside this order.
@@ -417,11 +417,12 @@ their own timing, outside this order.
   every bot on the agent list except the orchestrator, and `unmute:
   @all` for every bot currently muted in the thread. Who expands the
   shorthand into names depends on who wrote it:
-  - A bot (the orchestrator) wrote it: the gateway expands `@all`
-    **before posting**, as part of the canonical form
-    (`REPLY_ENVELOPE`). The post on the platform then carries the
-    names, and every gateway reads the same list. The gateway does not
-    post an `@all` that expands to nobody.
+  - A bot (the orchestrator) wrote it, as `mute: all` in the `control`
+    field of its reply: the gateway expands `all` **before posting**,
+    as part of the canonical form (`REPLY_ENVELOPE`). The post on the
+    platform then carries the names, and every gateway reads the same
+    list. The gateway does not post a `mute: all` that expands to
+    nobody.
   - A human wrote it: nothing can rewrite the post, so each gateway
     expands `@all` when it reads the post, against its own agent list.
     Two gateways with the same agent list reach the same names; with
@@ -530,6 +531,13 @@ their own timing, outside this order.
   orchestrator) changes nothing: the gateway does not apply it, and it
   delivers the post to the bots like any other post, control word
   included, as ordinary text.
+- A bot writes control words in the `control` field of its reply
+  envelope, and the gateway checks authority there: a `control` from a
+  bot that is not the thread's orchestrator is an invalid reply
+  (`REPLY_ENVELOPE`), and nothing is posted. A control word a bot
+  writes in its `text` instead is posted as text, and every gateway
+  reads it like any other post: applied if the sender is the
+  orchestrator, ordinary text otherwise.
 - A thread has one orchestrator; a later `orchestrator:` replaces it.
   The same bot may be the orchestrator of several threads and is an
   ordinary bot elsewhere.
@@ -611,10 +619,9 @@ their own timing, outside this order.
   The turn may reply in any thread it was delivered (`REPLY_ENVELOPE`);
   `HINT` gives the thread that started it and the others present.
 - *When the gateway saves the cursor*: it writes the new cursor (the
-  last post delivered) when the turn ends normally, that is:
-  - `done`; or
-  - every reply posted, rejected by the reply check, or refused by the
-    platform (`REPLY_ENVELOPE`).
+  last post delivered) when the turn ends normally, that is, when
+  every reply is `done`, posted, rejected by the reply check, or
+  refused by the platform (`REPLY_ENVELOPE`).
 
   It does not write the cursor, and delivers the same posts again, when
   the backend fails or the reply is still invalid after the one
@@ -699,55 +706,67 @@ backend's structured output) is decided in task 1 (§9) and may not be
 YAML.
 
 ```yaml
-# A turn with two replies, in two threads.
 replies:
-  - thread: T1            # omitted: the thread that started the turn
+  # Text to post.
+  - thread: T1                # omitted: the thread that started the turn
     to: [H, b]
     text: "502 burst at 09:12, log is clean now. b, go ahead."
+
+  # Control words only. No `to`.
   - thread: T2
-    to: [all]
-    text: "Staging is green."
+    control:
+      mute: [a, b]            # or: all
+      limit: {posts: 20, words: 2000}
+
+  # Control words and text in one post.
+  - thread: T1
+    to: [a, b, c, d]
+    control: {mute: all}
+    text: "One post each, independently. Address only me."
+
+  # Nothing to say in this thread. `to` is optional and recorded.
+  - thread: T3
+    to: [x]
+    done: true
 ```
 
-```yaml
-# A single reply, written at top level.
-to: [H]
-text: "Green."
-```
-
-```yaml
-# Nothing to post.
-done: true
-```
-
-```yaml
-# A control-only reply: the orchestrator closing a meeting.
-text: "unmute: @all"     # no `to`: the text is only control words
-```
-
-- *Fields*. The bot returns either `replies` or `done`, never both.
-  - `replies`: a list. Each reply has three fields:
-    - `thread`: one of the threads delivered to this turn. When the bot
-      omits it, the gateway uses the thread that started the turn.
-    - `to`: who the reply addresses. Required and non-empty: humans or
-      bots in the room, or `all`. The bot never lists itself. A reply
-      whose `text` is only control words needs no `to`.
-    - `text`: the reply body.
-  - A bot may write a single reply as top-level `to` and `text` instead
-    of a one-item `replies` list.
-  - `done`: the bot has nothing to post.
+- *Fields*. The bot returns `replies`, a non-empty list. Each reply
+  has:
+  - `thread`: one of the threads delivered to this turn. When the bot
+    omits it, the gateway uses the thread that started the turn.
+  - `to`: who the reply addresses: humans or bots in the room, or
+    `all`. The bot never lists itself. Required with `text`, optional
+    with `done`, absent otherwise.
+  - `text`: the body to post.
+  - `control`: control words to set in the thread: `mute` and `unmute`
+    (a list of usernames, or `all`), `limit` (`posts`, `words`). There
+    is no `orchestrator` key: only an owner-role human sets that
+    (`AUTHORITY`).
+  - `done: true`: the bot has nothing to post in this thread. A `to`
+    on a `done` says whose requests the bot read and chose not to
+    answer; the gateway records it and posts nothing (§8).
+  - A reply carries `done`, or `text`, or `control`, or `text` and
+    `control` together. Never `text` and `done` together: that bot has
+    not decided whether to post.
   - The gateway reads an output that is only the token
-    `<end-of-agent-chain>` as `done`.
-- *Canonical form*. Before posting, the gateway rewrites each reply's
-  `text` so that the post's mentions are exactly its `to`:
-  - a recipient the text does not mention: the gateway prepends
-    `@name`;
-  - an `@name` in the text that is not a recipient: the gateway drops
-    the `@`;
-  - `all`: the gateway replaces it with the platform's room-wide
-    mention;
-  - `@all` in a `mute:` or `unmute:`: the gateway replaces it with the
-    names it stands for (`MUTE`).
+    `<end-of-agent-chain>` as one `done` reply with no `to`. Text
+    followed by the token is not that; it is invalid.
+- *Canonical form*. Before posting, the gateway renders each reply
+  into one post, `control` first, then `text`:
+  - `control` becomes text, one line per control word (`mute: @a @b`,
+    `limit: 20 posts 2000 words`), with `all` replaced by the names it
+    stands for (`MUTE`). Why text: the platform post is the only medium
+    every gateway and every human reads, and humans write control words
+    as text. The gateway leaves out a control word that expands to
+    nobody, and does not post a reply with nothing left.
+  - `text` is rewritten so that the post's mentions are exactly its
+    `to`:
+    - a recipient the text does not mention: the gateway prepends
+      `@name`;
+    - an `@name` in the text that is not a recipient: the gateway drops
+      the `@`;
+    - `all`: the gateway replaces it with the platform's room-wide
+      mention.
 
   Why: a human reads the recipients at the head of the post, and every
   gateway reads the platform's mentions and reaches the same set, live,
@@ -780,11 +799,16 @@ text: "unmute: @all"     # no `to`: the text is only control words
 - *Validation*. The gateway returns an invalid output to the session
   once, with the schema error; a second invalid output fails the turn
   (`FAILURE_NOTICE`). An output is invalid when:
-  - it has no `replies` and no `done`;
-  - a reply has no `to`, or an empty `to`, or addresses only the
-    sender;
+  - `replies` is missing or empty;
+  - a reply has none of `text`, `control` and `done`, or has both
+    `text` and `done`;
+  - a reply with `text` has no `to`, or an empty `to`, or addresses
+    only the sender;
   - a name is neither a room member nor a bot the gateway knows;
-  - a `thread` is one the turn was not delivered.
+  - a `thread` is one the turn was not delivered;
+  - a reply has `control` and the bot is not the thread's
+    orchestrator, or `control` holds a key other than `mute`, `unmute`
+    and `limit`.
 - *What the gateway does not enforce*. There is no record of "requests
   this turn serves", so the gateway cannot check that `to` covers
   everyone who asked. `HINT` asks for it; the simulator counts the
@@ -818,8 +842,9 @@ The gateway injects these into every turn:
 - the replies from the last turn that the gateway could not post, and
   why: a reply to another thread that the thread did not allow, or a
   reply the platform refused;
-- the instruction: "make your point; do not restate; answer `done` if
-  you have nothing to add; `to` is who the post is for, not who it
+- the instruction: "make your point; do not restate; reply `done` in
+  a thread where you have nothing to add; control words go in
+  `control`, never in `text`; `to` is who the post is for, not who it
   mentions: include everyone who asked you something in this backlog;
   reply in another delivered thread when something there needs you;
   `all` only with a reason; if you are waiting on someone, say so and
@@ -943,12 +968,12 @@ usage pricing?` on a thread. `chair` is the orchestrator.
 
 | # | Event | Turns | Posts |
 |---|---|---|---|
-| 1 | `chair: mute: @all` — posted as `mute: @a @b @c @d` · `@a @b @c @d — one post each, independently; address only me.` | — | 1 (chair, not counted) |
+| 1 | `chair` replies `control: {mute: all}` with `to: [a, b, c, d]` and text "one post each, independently; address only me". Posted as one post: `mute: @a @b @c @d` then `@a @b @c @d one post each, independently; address only me.` | — | 1 (chair, not counted) |
 | 2 | four bots, each addressed by the orchestrator → four turns in parallel, none rate-limited; a bot that starts later may see an earlier reply in its backlog — no isolation. "Address only me" is enforced by the mute, not by the prompt: a bot that addresses another bot starts nothing | 4 | 4 |
 | 3 | each reply addresses `chair` → an orchestrator turn per reply; the skill answers `done` three times and synthesises on the fourth | 4 (3 `done`) | 1 (chair, not counted) |
 | 4 | `chair: @a @b @c @d — objections only, otherwise done.` | 4 | 1 (`d`) |
 | 5 | `d`'s objection addresses `chair` → an orchestrator turn: the skill notes it. It also addressed `a`; that opened nothing for `a` (muted). `d` has answered every round at length and off the point, so the orchestrator runs the last round without it: `@a @b @c — last round: anything to add?` → three turns, three `done` | 1 + 3 | 1 (chair, not counted) |
-| 6 | `chair: @H <close>` · `unmute: @all` | — | 1 (chair, not counted) |
+| 6 | `chair` replies `control: {unmute: all}` with `to: [H]` and the closing text. Posted as `unmute: @a @b @c @d` then `@H <close>`. | — | 1 (chair, not counted) |
 
 Eleven bot turns, five orchestrator turns after its first post (three
 `done`), five counted posts. The gateway keeps no record of the round;
@@ -1124,7 +1149,11 @@ Mechanism tests, by task — written against the simulator first:
   second post the platform refuses keeps the first, reports the second,
   saves the cursor; the reply in the starting thread posts in a
   rate-limited thread, a second-thread reply does not; mentions equal
-  `to`; settings survive restart and lapse at `control_ttl_days`; a
+  `to`; a reply with both `text` and `done`, raw output of text plus
+  the token, an empty `replies`, and a `control` from a bot that is not
+  the orchestrator are each invalid; a `control` reply without `to` is
+  valid; a `done` reply's `to` is recorded and nothing is posted; a
+  `control` with `text` renders as one post, control words first; settings survive restart and lapse at `control_ttl_days`; a
   bot's `mute: @all` is posted as names and a human's is expanded on
   read, and a bot added to the agent list afterwards is not muted; an
   `@all` that expands to nobody is not posted; a replayed older control
