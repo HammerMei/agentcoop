@@ -770,9 +770,9 @@ replies:
   into one post, `control` first, then `text`:
   - `control` becomes text, one line per control word (`mute: @a @b`,
     `limit: 20 posts 2000 words`). The gateway resolves the names in a
-    `mute` or `unmute` first (`MUTE`). Why text: the platform post is
-    the only medium every gateway and every human reads, and humans
-    write control words as text. A `mute: all` or `unmute: all` may
+    `mute` or `unmute` first (`MUTE`). `control` becomes text because
+    the platform post is the only medium every gateway and every human
+    reads, and humans write control words as text. A `mute: all` or `unmute: all` may
     resolve to no bot, when the orchestrator is the only bot in the
     room or no bot is muted in the thread. Then the gateway leaves that
     `mute` or `unmute` out of the post. If the reply still has `text` or
