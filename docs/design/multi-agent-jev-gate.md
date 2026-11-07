@@ -1,4 +1,4 @@
-# Rooms with several agents — a classifier decides who speaks
+# Rooms with several agents: a classifier decides who speaks
 
 This design asks a small classifier one question about every post in a
 room: *who in this room should speak now?* Otherwise every post goes to
@@ -13,8 +13,7 @@ collected in Appendix C.
 
 ### 1.1 Current behaviour
 
-A room with several bots is protected from runaway exchanges by three
-layers:
+Three layers protect a room with several bots from runaway exchanges:
 
 - an agent may answer with the token `<end-of-agent-chain>`, and then
   nothing is posted;
@@ -31,15 +30,15 @@ Below those layers:
 - the rule that an agent mentions only its intended recipients exists in
   the agent prompt alone.
 
-Two rooms were measured (Appendix A): a test room with five bots over
-one afternoon, and a production room with three bots and one human over
-one week.
+Appendix A reports measurements from two rooms: a test room with five
+bots over one afternoon, and a production room with three bots and one
+human over one week.
 
 ### 1.2 The problems
 
 1. **Dropped posts carry substance.** Every recoverable post the counter
    dropped carried substance, and the drops fell on the convergence phase
-   of a debate — the counter cannot tell a loop from a conclusion, so it
+   of a debate. The counter cannot tell a loop from a conclusion, so it
    cut where the conversation was ending.
 2. **Each bot sees a different room.** The counter drops rather than
    delivers, so each bot's view of the room diverges by whatever its own
@@ -50,8 +49,8 @@ one week.
    mention gate, so it reaches every bot in the room whether or not it
    addresses them; each human prompt in the test room produced about 25 bot
    posts.
-4. **Mentioning is not addressing.** A reply that quotes a peer — "@H, I
-   agree with @b's point" — lists `b` in `to:` as well as `H`, and `b`
+4. **Mentioning is not addressing.** A reply that quotes a peer ("@H, I
+   agree with @b's point") lists `b` in `to:` as well as `H`, and `b`
    gets a turn it was not asked for. Nothing enforces the prompt rule
    that an agent mentions only its intended recipients.
 5. **`@all` fans out blindly.** A `@all` prompt produced four
@@ -75,19 +74,19 @@ Each term uses only the terms above it.
 | **thread** | A platform thread, or the room's top-level posts taken together as one thread. The settings and the rate limit apply per thread. |
 | **addressed** | A post is addressed to a bot when it mentions it. In a human's post: a platform mention (`@a`), `@all` or a room-wide mention. In a bot's post: only the mentions the platform records for its canonical form (`REPLY_ENVELOPE`). A bot named without its `@` is not addressed. |
 | **cursor** | Per bot, per room: the last post delivered to that bot's session. The one piece of delivery state (`CURSOR`). Not the connector's own `watermark`, which records what the connector has passed on, not what a session has seen. |
-| **backlog** | What is waiting for a bot: the room's posts after its cursor — on the platform, not yet delivered to its session — and the prompt of any scheduled job of its own that fired while it was muted. Grouped by thread where a thread's size or age matters. |
+| **backlog** | What is waiting for a bot: the room's posts after its cursor (on the platform, not yet delivered to its session) and the prompt of any scheduled job of its own that fired while it was muted. Grouped by thread where a thread's size or age matters. |
 | **classifier** | A small model asked once per post which bots in the room should speak now (`WHO_SPEAKS`). It can add bots to those the post addresses; it never removes one, and never writes text. |
-| **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** — those bots wrote after the thread's newest human post, within `rate_limit_seconds` — number `rate_limit_posts` or more, or total `rate_limit_words` words or more; a limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
+| **rate limit** | Per thread: a bot's turn does not start while the thread's **recent agent posts** (those bots wrote after the thread's newest human post, within `rate_limit_seconds`) number `rate_limit_posts` or more, or total `rate_limit_words` words or more; a limit set to 0 is off (`RATE_LIMIT`). Humans and the orchestrator are neither counted nor held. |
 | **cooldown** | Per bot per thread: the least gap, `cooldown_seconds`, between one bot's own posts in a thread; a turn does not start for a bot that posted there more recently than that (`RATE_LIMIT`). Independent of the rate limit. |
 | **sweeper** | A periodic pass, per bot, over the bot's backlog. It starts the turns the rate limit or a busy bot held back, and gives a bot that has not been asked in a while a look at what it missed (`CATCH_UP`). |
-| **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler — "check on a's report in 30 minutes" — which fires at the set time and starts a turn for that bot with no post behind it; if the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
+| **scheduled job** | A reminder a bot sets for itself through the gateway's existing scheduler ("check on a's report in 30 minutes"). The job fires at the set time and starts a turn for that bot with no post behind it; if the bot is muted there, the job's prompt waits in its backlog instead (`FOLLOW_UP`). |
 | **turn** | One run of a bot's backend. It is started by a post that addresses the bot, by the classifier, by the sweeper, or by a scheduled job firing. It is told which thread started it, receives its backlog, and may reply in any thread it was delivered. Each of its replies posts text, sets control words, or says `done` for a thread; a turn whose replies are all `done` posts nothing. |
 | **orchestrator** | The bot a human has designated for a thread with `orchestrator: @bot`. The rate limit does not apply to it or to the bots it addresses, and its control words are honoured. A convenience for meetings, not part of the ordinary path. |
 | **muted** | A bot silenced in a thread by `mute: @bot`. A muted bot gets a turn there only from a human's or the orchestrator's mention; the classifier does not pick it and the sweeper skips it. `mute: @all` is shorthand for naming every bot on the agent list except the orchestrator, and is how an orchestrator runs a meeting with exactly the speakers it chooses; `mute: @bot` is for one bot that will not stop. |
 | **reply envelope** | The structured form of a turn's output: a list of replies, each in one thread, carrying text to post, control words, or `done` (`REPLY_ENVELOPE`). |
 | **control word** | `limit:`, `orchestrator:`, `mute:`, `unmute:`, written as text in a post. A human types it; a bot writes it in the `control` field of its reply envelope and the gateway posts it as text. The gateway applies it only when an authorised sender wrote it (`AUTHORITY`); from anyone else the post is delivered unchanged and nothing is applied. |
-| **settings** | A thread's current control words — orchestrator, limit, mutes — each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
-| **agent list** | The usernames the gateway treats as agents — `agent_usernames` in configuration — with each one's profile (`AGENT_LIST`). |
+| **settings** | A thread's current control words (orchestrator, limit, mutes), each with the post it came from, persisted from the thread's first control word until they expire (`SETTINGS`). |
+| **agent list** | The usernames the gateway treats as agents (`agent_usernames` in configuration), with each one's profile (`AGENT_LIST`). |
 
 Parameters:
 
@@ -117,17 +116,17 @@ No other parameter is set per thread.
 
 1. **Who speaks is read from the room, the way a person reads it.** For
    every post, the classifier reads the thread and the agent list and
-   picks the bots that should speak now — the ones the post addresses,
+   picks the bots that should speak now: the ones the post addresses,
    plus any it adds; none, one or several. When a human writes "a does
-   X, then b does Y", nothing is scheduled: `b` reads the request and
-   waits, and speaks when `a` reports that X is done — because `a`'s
-   report addresses `b`, or because the classifier reads the thread and
-   picks `b`.
+   X, then b does Y", the gateway schedules nothing. `b` reads the
+   request and waits, and speaks when `a` reports that X is done,
+   either because `a`'s report addresses `b`, or because the classifier
+   reads the thread and picks `b`.
 2. **A mention is a request to speak.**
    - A human's or the orchestrator's mention always gives the bot a
      turn, rate-limited or muted or not.
    - A bot's mention of another bot gives it a turn, delayed by the rate
-     limit if need be — unless the addressed bot is muted. In a meeting
+     limit if need be, unless the addressed bot is muted. In a meeting
      (`mute: @all`) that leaves only mentions of the orchestrator, which
      is how bots report to it.
    - The classifier's answer is never used to drop a bot the post addresses.
@@ -135,15 +134,15 @@ No other parameter is set per thread.
    room; a turn is given everything after the cursor, from every thread,
    and may reply in any thread it was given. A turn that is held back
    drops nothing: the posts wait in the backlog.
-4. **The platform is the only shared medium** — apart from the in-memory
-   classifier decisions one gateway holds for its own bots. Rate limiting
-   is computed from the room's history; control words are posts in the
-   room; the orchestrator is whoever a post designated. No two bots share
-   persisted gateway state, so bots run by different gateways coexist in
-   one room, best effort: two gateways cannot confer, so a post may draw
-   two answers or none (§10). The gateway persists three kinds of state
-   per room: a cursor per bot, the threads' settings, and the scheduled
-   jobs.
+4. **The platform is the only shared medium**, apart from the in-memory
+   classifier decisions one gateway holds for its own bots. The gateway
+   computes the rate limit from the posts it sees in the room; control
+   words are posts in the room; the orchestrator is whoever a post
+   designated. No two bots share persisted gateway state, so bots run
+   by different gateways coexist in one room, best effort: two gateways
+   cannot confer, so a post may draw two answers or none (§10). The
+   gateway persists three kinds of state per room: a cursor per bot,
+   the threads' settings, and the scheduled jobs.
 5. **The gateway knows nothing about collaboration; it enforces a few
    basic rules and nothing else.** Mechanically, with no model involved,
    so no bot can get around them, the gateway:
@@ -160,8 +159,8 @@ No other parameter is set per thread.
    - fires a scheduled job at its time, in its thread (`FOLLOW_UP`).
 
    It keeps no plan, no record of who owes whom an answer, and no notion
-   of a meeting; it never judges what a bot says. How bots collaborate —
-   a brainstorm, a handoff, a follow-up, a deadline — is a skill running
+   of a meeting; it never judges what a bot says. How bots collaborate
+   (a brainstorm, a handoff, a follow-up, a deadline) is a skill running
    inside a bot, using those rules.
 
 ### Non-goals
@@ -173,7 +172,7 @@ No other parameter is set per thread.
 - **Convergence by the gateway.** No judgement of whether a bot is
   right; a loop is slowed, not ended.
 - **Fairness between bots.** A bot that talks a lot uses the thread's
-  allowance; others wait, as in any room — until someone mutes it.
+  allowance; others wait, as in any room, until someone mutes it.
 - **Scheduling by the gateway.** Bots addressed by one post start in
   parallel; the gateway orders nothing and second-guesses nothing. A turn
   that could not start runs later only when a sweeper pass finds it
@@ -191,25 +190,25 @@ Room `#team`: bots `a`, `b`, `c`; human `H`; `rate_limit_posts` 6 and
 reply below is a line or two, so the post count is what binds.
 
 1. `H: @a, can you check the nginx log? When it's done, @b, restart the
-   backend.` — `a` and `b` are addressed: a turn each, started at once.
+   backend.` The post addresses `a` and `b`: a turn each, started at once.
    The classifier is asked about the post at the same time and adds
    nobody, so `c` gets no turn; the post is now in `c`'s backlog. `b`
    reads "when it's done", finds nothing to say yet (`done`, which posts
    nothing), and sets itself a scheduled job for 20 minutes' time
    (`FOLLOW_UP`).
-2. `a` replies `to: [H, b]`: `@H @b 502 burst at 09:12, log is clean now
-   — b, go ahead.` — `b` is addressed: a turn; it receives `H`'s post and
-   `a`'s. `b` restarts the backend and replies `to: [H, a]`.
+2. `a` replies `to: [H, b]`: `@H @b 502 burst at 09:12, log is clean
+   now. b, go ahead.` The reply addresses `b`: a turn; it receives `H`'s
+   post and `a`'s. `b` restarts the backend and replies `to: [H, a]`.
 3. `b`'s reply addresses `a`: a turn for `a`. The hint says a reply that only
    acknowledges is `done`, and `a` answers `done`. Two recent agent posts.
 4. The sweeper finds `c` with three undelivered posts: one catch-up turn
    for `c`, which reads them and answers `done`. Still two posts.
-5. `H: @all, same as last week's incident?` — `@all` addresses everyone:
+5. `H: @all, same as last week's incident?` `@all` addresses everyone:
    three turns in parallel, each told in its hint that the others were
    addressed too. `a` answers; `b` starts a little later, sees `a`'s reply in
    its backlog and adds one line; `c` answers `done`. Four recent agent
    posts.
-6. `a` and `b` exchange one more pair: six posts — the rate limit is
+6. `a` and `b` exchange one more pair: six posts, so the rate limit is
    reached. `b`'s next turn does not start; its post waits in the
    backlog. `H: enough, thanks` addresses nobody and the classifier
    picks nobody; but it is a human post, so only agent posts after it
@@ -951,9 +950,9 @@ shows:
 | # | Event | `a` | `b` | `c` |
 |---|---|---|---|---|
 | 1 | `H`'s post | addressed → turn | addressed → turn: reads "when a is done", answers `done`, schedules a job for 30 minutes' time | classifier adds nobody → wait |
-| 2 | `a: @H @b migration done, 14 tables.` | — | addressed → turn: deploys, replies `to: [H, a]` | classifier: nobody → wait |
-| 3 | `b: @H @a deployed, green.` | addressed → turn → `done` | — | classifier: nobody → wait |
-| 4 | sweeper: `c` has 3 undelivered posts | — | — | catch-up turn → `done` |
+| 2 | `a: @H @b migration done, 14 tables.` | none | addressed → turn: deploys, replies `to: [H, a]` | classifier: nobody → wait |
+| 3 | `b: @H @a deployed, green.` | addressed → turn → `done` | none | classifier: nobody → wait |
+| 4 | sweeper: `c` has 3 undelivered posts | none | none | catch-up turn → `done` |
 
 Two agent posts, three `done` turns, one classifier call per post. Had
 `a` posted "migration done" to `H` alone, the classifier would have read
@@ -968,12 +967,12 @@ usage pricing?` on a thread. `chair` is the orchestrator.
 
 | # | Event | Turns | Posts |
 |---|---|---|---|
-| 1 | `chair` replies `control: {mute: all}` with `to: [a, b, c, d]` and text "one post each, independently; address only me". Posted as one post: `mute: @a @b @c @d` then `@a @b @c @d one post each, independently; address only me.` | — | 1 (chair, not counted) |
-| 2 | four bots, each addressed by the orchestrator → four turns in parallel, none rate-limited; a bot that starts later may see an earlier reply in its backlog — no isolation. "Address only me" is enforced by the mute, not by the prompt: a bot that addresses another bot starts nothing | 4 | 4 |
+| 1 | `chair` replies `control: {mute: all}` with `to: [a, b, c, d]` and text "one post each, independently; address only me". Posted as one post: `mute: @a @b @c @d` then `@a @b @c @d one post each, independently; address only me.` | 0 | 1 (chair, not counted) |
+| 2 | four bots, each addressed by the orchestrator → four turns in parallel, none rate-limited; a bot that starts later may see an earlier reply in its backlog; there is no isolation. The mute, not the prompt, enforces "address only me": a bot that addresses another bot starts nothing | 4 | 4 |
 | 3 | each reply addresses `chair` → an orchestrator turn per reply; the skill answers `done` three times and synthesises on the fourth | 4 (3 `done`) | 1 (chair, not counted) |
-| 4 | `chair: @a @b @c @d — objections only, otherwise done.` | 4 | 1 (`d`) |
-| 5 | `d`'s objection addresses `chair` → an orchestrator turn: the skill notes it. It also addressed `a`; that opened nothing for `a` (muted). `d` has answered every round at length and off the point, so the orchestrator runs the last round without it: `@a @b @c — last round: anything to add?` → three turns, three `done` | 1 + 3 | 1 (chair, not counted) |
-| 6 | `chair` replies `control: {unmute: all}` with `to: [H]` and the closing text. Posted as `unmute: @a @b @c @d` then `@H <close>`. | — | 1 (chair, not counted) |
+| 4 | `chair: @a @b @c @d objections only, otherwise done.` | 4 | 1 (`d`) |
+| 5 | `d`'s objection addresses `chair` → an orchestrator turn: the skill notes it. It also addressed `a`; that opened nothing for `a` (muted). `d` has answered every round at length and off the point, so the orchestrator runs the last round without it: `@a @b @c last round: anything to add?` → three turns, three `done` | 1 + 3 | 1 (chair, not counted) |
+| 6 | `chair` replies `control: {unmute: all}` with `to: [H]` and the closing text. Posted as `unmute: @a @b @c @d` then `@H <close>`. | 0 | 1 (chair, not counted) |
 
 Eleven bot turns, five orchestrator turns after its first post (three
 `done`), five counted posts. The gateway keeps no record of the round;
@@ -982,13 +981,13 @@ the orchestrator's skill does.
 ### 6.3 One turn, two threads
 
 Thread `A` is an incident thread; thread `B` is unrelated. `b` posts in
-`A`, addressing nobody: "the 09:12 burst was 404s, not 502s" — a correction
+`A`, addressing nobody: "the 09:12 burst was 404s, not 502s", a correction
 of a figure `x` gave. The classifier picks nobody; `x`'s cursor stays
 before it. Later `H` posts in `B`: `@x is staging green?`
 
 - `x`'s turn receives `b`'s correction, labelled `A`, and `H`'s question,
   labelled `B`. Its envelope carries two replies: in `B`, `to: [H]`,
-  "green"; in `A`, `to: [b]`, "right — 404s, my mistake." Each posts in
+  "green"; in `A`, `to: [b]`, "right, 404s, my mistake." Each posts in
   its thread and counts there.
 - Had `x` been muted in `A`, or `A` rate-limited, the `A` reply would not have
   posted; `x`'s next turn would be told so, and `x` would decide whether
@@ -1003,11 +1002,11 @@ anyone know why the build is red?`
   Both may pick `a` and `b`: two replies. Gateway 1 may pick `b` and
   gateway 2 `a`: neither runs the bot it picked, and nobody answers until
   `H` addresses one (§10).
-- `a: @b your change touched the build file — did you bump the version?`
-  — `b` is addressed: a turn on gateway 2. `b` replies `to: [a, H]`. Each
+- `a: @b your change touched the build file. Did you bump the version?`
+  The reply addresses `b`: a turn on gateway 2. `b` replies `to: [a, H]`. Each
   gateway counts both posts toward the rate limit: gateway 1 received
   `b`'s post and posted `a`'s; gateway 2 the reverse.
-- `H: mute: @all` — each gateway expands it against the same agent list
+- `H: mute: @all`: each gateway expands it against the same agent list
   and writes the same names; only a human's or the orchestrator's
   mention opens a turn in the thread from here.
 
@@ -1019,18 +1018,18 @@ anyone know why the build is red?`
 |---|---|---|---|
 | One room, three scenarios in a day | `orchestrator:` + `mute: @all` for the meeting, `unmute: @all` after | Casual talk by classifier; a meeting with every bot muted but the ones the orchestrator addresses; casual talk again. | yes |
 | One thread, three scenarios | same, on the thread | A debugging thread becomes a vote under an orchestrator and returns; nothing is "running" to finish under the old rules. | yes |
-| Casual conversation (production `#nest`) | — | Addressed bots speak; the classifier adds a bot when the post is for it; corrections arrive through catch-up or as a second reply from a turn in another thread. | yes — catch-up tuned higher |
-| Brainstorm (test room, five bots) | orchestrator skill; `mute: @all` | §6.2. | yes — more orchestrator turns, no record |
+| Casual conversation (production `#nest`) | none | Addressed bots speak; the classifier adds a bot when the post is for it; corrections arrive through catch-up or as a second reply from a turn in another thread. | yes; catch-up tuned higher |
+| Brainstorm (test room, five bots) | orchestrator skill; `mute: @all` | §6.2. | yes; more orchestrator turns, no record |
 | Status / decision / roadmap meeting | orchestrator skill; `mute: @all` | The orchestrator addresses one bot at a time for reports, all at once for a vote by `done`; mutes a bot that will not stop. | yes |
 | Debugging session | `limit: 20 posts` | Most posts are for everyone; the classifier picks the bot or two best placed; the rest see the exchange through catch-up and reply when they have something. | yes |
 | Divide and collaborate | H or a PM skill | `@a @b` both addressed; dependencies by addressing; each bot tracks its own task (`FOLLOW_UP`). No deadline and no report to `H`; `H` reads the room. | yes, without the report |
-| Support / triage channel | — | The answering bot addresses a specialist. | yes |
-| Scheduled or agent-only room | — | No human: the rate limit and cooldown slow an exchange and nothing ends it but `done` or a `mute:`. | yes — needs a cap or a mute, as any design |
-| Code review room | — | The reviewer addresses the test bot. | yes |
-| Critic or pairing | the critic's profile says "answer every post from `a`" | The classifier picks the critic on every post from `a`. | yes — per-bot profile |
-| Unattended overnight task | — | Handoffs by addressing; each bot's `FOLLOW_UP` checks on what it waits for. | yes — guarantees are the skill's |
+| Support / triage channel | none | The answering bot addresses a specialist. | yes |
+| Scheduled or agent-only room | none | No human: the rate limit and cooldown slow an exchange and nothing ends it but `done` or a `mute:`. | yes; needs a cap or a mute, as any design |
+| Code review room | none | The reviewer addresses the test bot. | yes |
+| Critic or pairing | the critic's profile says "answer every post from `a`" | The classifier picks the critic on every post from `a`. | yes; per-bot profile |
+| Unattended overnight task | none | Handoffs by addressing; each bot's `FOLLOW_UP` checks on what it waits for. | yes; guarantees are the skill's |
 | Role-play with a game master | GM skill; `mute: @all` | Players speak when addressed; the GM narrates after each. | yes, except hidden information |
-| Monitor room (CI, webhooks) | — | The integration account is configured as a guest: its mention starts a bot, other bots by classifier, nothing it posts counts. | yes |
+| Monitor room (CI, webhooks) | none | The integration account is configured as a guest: its mention starts a bot, other bots by classifier, nothing it posts counts. | yes |
 
 Single-bot channels and 1:1 DMs are unchanged: the bot is addressed by
 definition or by `require_mention`, and the rate limit counts its own
@@ -1042,12 +1041,12 @@ posts. Anonymous votes are not supported (§10).
 
 ### 8.1 The simulator comes first
 
-Before any gateway code, §5 is implemented as a standalone simulator
-(`tools/roomsim/`, outside the gateway) and the scenarios in §7 are run
-through it, to see the conversations this design produces — and the odd
-corners — before paying for an implementation.
+Before any gateway code, task 0 implements §5 as a standalone simulator
+(`tools/roomsim/`, outside the gateway) and runs the scenarios in §7
+through it, to see the conversations this design produces, odd corners
+included, before paying for an implementation.
 
-- **Mechanism**: a deterministic script implementing §5 as written —
+- **Mechanism**: a deterministic script implementing §5 as written:
   the turn eligibility table, the rate limit, the sweeper, the cursor, the reply
   envelope. It is not a language model tracing the rules: a model's
   trace would hide whether a wrong step was a hole in the spec or an
@@ -1061,21 +1060,21 @@ corners — before paying for an implementation.
 - **Humans**: scripted lines in the scenario file, placed at a step; a
   model playing the human is allowed and labelled as such.
 - **Output**: a transcript with the script's annotations before each
-  event — the turn, its thread and backlog, the recent-post count, every
-  classifier decision, every sweep — and a tally of turns, posts, words, tokens
-  and context size per bot. People review the transcript for exchanges
-  that read wrong; what reads wrong is fixed in §5 and the scenario is
-  run again.
-- **Two kinds of run**: a run with live models is for behaviour — what
-  the bots do with the rules, over several runs, read by people; it is
+  event (the turn, its thread and backlog, the recent-post count, every
+  classifier decision, every sweep) and a tally of turns, posts, words,
+  tokens and context size per bot. People review the transcript for
+  exchanges that read wrong; they fix what reads wrong in §5 and run the
+  scenario again.
+- **Two kinds of run**: a run with live models is for behaviour: what
+  the bots do with the rules, over several runs, read by people. It is
   not expected to repeat. A run's inbound events and bot outputs can be
   saved as a recorded run, and replaying it is deterministic; the
   mechanism tests in §8.2 are written against the simulator first and
   carried to the gateway unchanged, and on a recorded run the gateway
   must produce the same annotation sequence as the simulator.
-- **What it cannot show**: platform behaviour — threads, the mention
+- **What it cannot show**: platform behaviour (threads, the mention
   array each platform computes from a canonical post, history paging,
-  webhook identities, how a failure notice is carried — and session
+  webhook identities, how a failure notice is carried) and session
   compaction. Those belong to the lab: the test server with the bots in
   §1's measurements.
 
@@ -1086,24 +1085,24 @@ conversations:
 - **classifier on every post**, with `classifier_retries` and a forced
   failure rate injected, recording the raw failure rate, how often a
   retry recovered, and how many retries it took;
-- **no classifier** — each `classifier_fallback` alone, as its own run;
+- **no classifier**: each `classifier_fallback` alone, as its own run;
 - **classifier with each fallback** under the injected failures, to see
   the experience a room would actually get when the classifier is down.
 
 It records two kinds of thing, kept apart:
 
-**Decision quality** — people label the classifier's exact input
+**Decision quality**: people label the classifier's exact input
 snapshots, blind: given this thread and agent list at this moment, who
 should have spoken? Agreement with those labels, per model and history
 size, is the measure of the classifier; nothing observed later is.
 
-**Operational outcomes** — per run:
+**Operational outcomes**, per run:
 
 - picked by the classifier → `done` rate; not picked → later catch-up with
   a reply rate; these are costs and delays, not labels;
 - the classifier's **remove** list: addressed bots it judged need not
   speak, with the reason and what that bot's turn then did (`done`, a
-  reply, a handoff) — how well humans and bots aim their `@`, and the
+  reply, a handoff): how well humans and bots aim their `@`, and the
   evidence for whether the classifier should ever override a mention;
 - bots the classifier added to an addressed post, and what they did;
 - corrections: how long after the correcting post the corrected bot
@@ -1127,19 +1126,19 @@ size, is the measure of the classifier; nothing observed later is.
 
 | # | Task | Builds |
 |---|---|---|
-| 0 | **Simulator.** §8.1: the script, a scenario file for every §7 row, persona files from the test room, the classifier in shadow (logged, not acted on) and acted on. | — |
+| 0 | **Simulator.** §8.1: the script, a scenario file for every §7 row, persona files from the test room, the classifier in shadow (logged, not acted on) and acted on. | none |
 | 1 | **Deliver, do not drop.** Cursor per bot; history by post id; the envelope with several replies and the canonical form; the settings' persistence. | CURSOR, REPLY_ENVELOPE, FAILURE_NOTICE, SETTINGS |
 | 2 | **Turn eligibility for bot senders, mute.** Posts from bots go through the turn eligibility rules; `mute:`, `unmute:`, `orchestrator:` as posts. | TURN_ELIGIBILITY, MUTE, AUTHORITY |
 | 3 | **Rate limit.** Recent-post count and cooldown kept in memory, own posts included; the exemptions; agent-list validation. | RATE_LIMIT, ORCHESTRATOR, AGENT_LIST, HINT |
 | 4 | **Sweeper, one turn, status.** Addressed or picked posts first; catch-up by threshold and age. | CATCH_UP, ONE_TURN, STATUS |
 | 5 | **Scheduler contract and follow-up.** Jobs carry the thread; cleared on a normal end; retry with backoff and cap; the `FOLLOW_UP` skill. | FOLLOW_UP |
 | 6 | **Classifier in shadow**, then acted on. | WHO_SPEAKS |
-| 7 | **Skills.** The brainstorm orchestrator; a PM skill for fan-out with follow-ups. | — (policy) |
+| 7 | **Skills.** The brainstorm orchestrator; a PM skill for fan-out with follow-ups. | none (policy) |
 
 Dependencies: 0 first; 1 before everything; 2 and 3 independent; 4 needs
 1; 5 needs 1; 6 needs 2, 3, 4; 7 needs 5 and 6.
 
-Mechanism tests, by task — written against the simulator first:
+Mechanism tests, by task, written against the simulator first:
 
 - **0**: the §6 tables reproduced.
 - **1**: the cursor is saved at each normal end and not at a failed one,
@@ -1185,7 +1184,8 @@ Mechanism tests, by task — written against the simulator first:
 - **5**: a job fires in its thread; a failed firing is retried and not
   lost; the cap posts a notice; a job fires in a rate-limited thread; a
   muted bot's job puts its prompt in the backlog and runs at the pass
-  the `unmute:` requests — mute before fire, mute during retry; three
+  the `unmute:` requests, both when the mute came before the firing and
+  when it came during a retry; three
   firings of one job while muted run once.
 - **6**: one platform post arriving on three local connector streams at
   once → one classifier call and the same decision for each local bot;
@@ -1208,8 +1208,8 @@ Mechanism tests, by task — written against the simulator first:
   minute, which puts `rate_limit_words` somewhere in the hundreds per
   five minutes.
 - **Which limit binds**: the simulator's tally has posts and words per
-  turn; the bad cases people mark in the transcripts — a thread that
-  reads as noise, a loop that ran too long — say which of the two
+  turn; the bad cases people mark in the transcripts (a thread that
+  reads as noise, a loop that ran too long) say which of the two
   limits, at what value, would have caught them.
 - **Classifier model, history size, timeout, retries and fallback**
   (`classifier_posts`, `classifier_timeout_seconds`,
@@ -1220,7 +1220,7 @@ Mechanism tests, by task — written against the simulator first:
   the recorded **remove** lists (§8.1); until then addressed bots always
   speak.
 - **The room's event order in the gateway**: a connector abstraction
-  giving one total order per room — server order for posts, a local
+  giving one total order per room: server order for posts, a local
   sequence for sweeps and job firings, a fixed high-water mark for a
   paged fetch. The simulator numbers events; the gateway needs the real
   one before its traces are compared with the simulator's.
@@ -1234,8 +1234,8 @@ Mechanism tests, by task — written against the simulator first:
   --json-schema`; the OpenCode HTTP backend has none). The contract is
   the fields; the encoding is chosen when the parser is written.
 - **Where a bot's profile lives.** The classifier needs, per bot, more
-  than a username: what the bot does and when it wants to be asked —
-  "how's the market today?" addresses nobody, and only a profile tells the
+  than a username: what the bot does and when it wants to be asked.
+  "How's the market today?" addresses nobody, and only a profile tells the
   classifier that one bot gives the daily stock update. The agent list
   configured today is a list of usernames. Candidates: a description per
   agent in each gateway's configuration, which two gateways must then
@@ -1245,22 +1245,22 @@ Mechanism tests, by task — written against the simulator first:
 
 ## 10. Out of scope for this version
 
-- **Plans, timeouts and reports** — a gateway record of who was asked
+- **Plans, timeouts and reports**: a gateway record of who was asked
   to do what, with a deadline per step, a cancel command, and a notice to
   the requester saying who answered and who did not (the plan-based
   alternative, Appendix B). Reopened if the simulator shows unattended
   handoffs stalling silently at a rate `FOLLOW_UP` does not recover.
-- **Agent-list synchronisation between gateways** — agent lists are
+- **Agent-list synchronisation between gateways**: agent lists are
   configured by hand and checked at startup. Reopened when two gateways
   share rooms in production.
-- **Skipping the classifier for addressed posts** — not asking when a post
+- **Skipping the classifier for addressed posts**: not asking when a post
   addresses every bot, or addresses any bot. An optimisation of cost and
   latency, reopened when the data shows the classifier adds nothing to
   such posts; the mechanism is defined as asking every time.
-- **A per-bot classifier** — one call per bot with its own backlog as
+- **A per-bot classifier**: one call per bot with its own backlog as
   input. Reopened if the room-level classifier's labels show it cannot
   judge for bots with different profiles.
-- **Ordering within one gateway** — bots addressed by one post start in
+- **Ordering within one gateway**: bots addressed by one post start in
   parallel, and two may answer the same question. Two mechanisms were
   considered and not built: a *stagger* (the next addressed bot starts when
   the previous turn ends or after a fixed delay, whichever first) and a
@@ -1274,23 +1274,23 @@ Mechanism tests, by task — written against the simulator first:
   gives the same effect for free. Reopened when the simulator's
   duplicate rate says the noise is worth a mechanism; true sequencing is
   an orchestrator's job.
-- **Coordination across gateways** — two gateways in one room cannot
+- **Coordination across gateways**: two gateways in one room cannot
   confer, so for one post both may name a bot of their own (two
   replies), or each may name a bot the other runs (no reply at all).
   Both outcomes are accepted: coordination across gateways is best
   effort in this version, and a human's mention always reaches its bot.
   Reopened only with a protocol between gateways.
-- **Job priorities** — marking a scheduled job as time-sensitive,
-  okay-to-delay or droppable, so that a mute — a meeting's `mute: @all`
-  above all — does not hold a job that cannot wait. A change to the
+- **Job priorities**: marking a scheduled job as time-sensitive,
+  okay-to-delay or droppable, so that a mute (a meeting's `mute: @all`
+  above all) does not hold a job that cannot wait. A change to the
   scheduler, not to this design; reopened when the simulator shows what
   a meeting's mute costs in held jobs.
-- **Anonymous votes, hidden information** — the room is the unit of
+- **Anonymous votes, hidden information**: the room is the unit of
   visibility.
 
 ---
 
-## Appendix A — Evidence from gateway logs
+## Appendix A: Evidence from gateway logs
 
 Lab: `#product-idea`, five bots (three `claude`, two `opencode`),
 `max_turns: 5`, one afternoon. Production: `#nest`, three bots and one
@@ -1299,16 +1299,16 @@ human, `max_turns: 2`, one week.
 | | Lab | Production |
 |---|---|---|
 | Bot turns | 207 | 544 |
-| Ended by the bot itself (the token alone — today's `done`) | 127 (61%) | 259 (48%) |
+| Ended by the bot itself (the token alone, today's `done`) | 127 (61%) | 259 (48%) |
 | Posts dropped by the counter | 74 events on 21 posts | 2 |
 | Dropped posts that carried substance | 18, all recoverable; 3 more posts were not recoverable | 2 of 2 |
-| Bot posts per human prompt (debate windows) | 31 / 18 / 23 | — |
+| Bot posts per human prompt (debate windows) | 31 / 18 / 23 | not measured |
 
 Half the lab drops came from a counter-reset bug since fixed (PR #195);
 the rest are genuine overflows on roughly ten posts, all in the
-convergence phase of the debate. Two misattributions — a bot denying a
+convergence phase of the debate. Two misattributions (a bot denying a
 peer had given a figure, a bot accusing a peer of two inconsistent
-figures — each trace to a post the counter had removed from the accuser's
+figures) each trace to a post the counter had removed from the accuser's
 context (issue #190). The TTL never acted as the reset in either
 deployment; a human post always came first.
 
@@ -1322,7 +1322,7 @@ Turn lengths in `#nest` over eleven days (615 turns): token-only turns
 median 3 s, 82% within 5 s, 96% within 15 s; turns with a reply median
 10 s, 21% within 5 s, 66% within 15 s.
 
-## Appendix B — Compared with the plan-based alternative
+## Appendix B: Compared with the plan-based alternative
 
 `multi-agent-enhancement.md` solves the same problem with per-thread
 modes, a plan record per request, callbacks and a shared room state.
@@ -1344,7 +1344,7 @@ The two are run through the same simulator before either is built.
 | Rules a reader must hold | plan lifecycle, three modes with switching, pause and its three resets | one question, one control, one rate limit, one cursor and the threads' settings |
 | What it gives up | simplicity; cross-gateway rooms | deadlines and reports for unattended work; aggregation for an orchestrator; determinism of turn eligibility |
 
-## Appendix C — Code references
+## Appendix C: Code references
 
 Where the statements in this document touch today's code.
 
