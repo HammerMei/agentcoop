@@ -469,8 +469,8 @@ their own timing, outside this order.
   - When a human's post arrives, the gateway empties the thread's list.
   - The gateway drops entries older than `rate_limit_seconds`.
   - When this gateway's own bot posts, the gateway adds the post once
-    the post succeeds. Why: a connector drops its own account's posts,
-    so the gateway would otherwise never count them.
+    the post succeeds, because a connector drops its own account's
+    posts and the gateway would otherwise never count them.
   - The gateway fetches nothing to answer "may this turn start": it
     reads the answer from memory.
   - At a watcher's start, the gateway seeds the list from the posts the
@@ -504,8 +504,8 @@ their own timing, outside this order.
   character counts as one word. Nothing else is special, so every
   gateway counts the same.
 - *A human's post resets it*: only agent posts after the thread's
-  newest human post count. Why: a human who writes in the thread has
-  read it. The bots the limit held start at the next sweeper pass.
+  newest human post count, because a human who writes in the thread
+  has read it. The bots the limit held start at the next sweeper pass.
   With `rate_limit_seconds` set very large, the limit becomes a stop
   that only a human's post clears.
 - *Exemptions*, by the turn's source, not by who wrote the post. A bot
@@ -791,12 +791,12 @@ replies:
     - `all`: the gateway replaces it with the platform's room-wide
       mention.
 
-  Why: every gateway reads a post's recipients from the mentions the
-  platform recorded, never from the envelope, so the post itself must
-  carry them.
+  The post itself must carry the recipients, because every gateway
+  reads them from the mentions the platform recorded, never from the
+  envelope.
 - *The reply check*. The reply in the thread that started the turn
-  **always posts**. Why: the turn was started there, and that was the
-  only check. A `mute:` that lands mid-turn does not stop it. A reply
+  **always posts**, because the turn was started there and that was
+  the only check. A `mute:` that lands mid-turn does not stop it. A reply
   to another delivered thread posts only if that thread allows it:
 
   | that thread | posts? |
@@ -816,8 +816,8 @@ replies:
   When the platform refuses a reply, the gateway reports it in the
   next turn's `HINT` like a rejected one. The replies already posted
   stay, the turn ends normally, and the gateway saves the cursor
-  (`CURSOR`). The gateway retries nothing on the bot's behalf. Why: a
-  retry could post a reply twice, and delivery is best effort.
+  (`CURSOR`). The gateway retries nothing on the bot's behalf, because
+  a retry could post a reply twice, and delivery is best effort.
 - *Validation*. The gateway returns an invalid output to the session
   once, with the schema error. A second invalid output fails the turn
   (`FAILURE_NOTICE`). An output is invalid when:
