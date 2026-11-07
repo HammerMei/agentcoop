@@ -794,10 +794,14 @@ replies:
   The post itself must carry the recipients, because every gateway
   reads them from the mentions the platform recorded, never from the
   envelope.
-- *The reply check*. The reply in the thread that started the turn
-  **always posts**, because the turn was started there and that was
-  the only check. A `mute:` that lands mid-turn does not stop it. A reply
-  to another delivered thread posts only if that thread allows it:
+- *The reply check*. The gateway checks once whether a reply may
+  post. When it checks depends on the thread:
+  - In the thread whose post started the turn, the check was the turn
+    eligibility check at the turn's start. The gateway posts the reply
+    there without checking again, so a `mute:` or a rate limit that
+    arrives while the turn runs does not stop it.
+  - In any other thread the turn was delivered, the gateway checks at
+    posting time, and the reply posts only if that thread allows it:
 
   | that thread | posts? |
   |---|---|
