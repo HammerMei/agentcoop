@@ -423,20 +423,24 @@ their own timing, outside this order.
   - `all` in a `mute` resolves to every bot on the agent list except
     the orchestrator. `all` in an `unmute` resolves to every bot
     currently muted in the thread;
-  - a username resolves to itself if it is a bot on the agent list.
+  - a username resolves to itself if it is a bot in the room: on the
+    agent list and a member of the room.
 
   Who resolves the names depends on who wrote the control word:
   - When a bot (the orchestrator) wrote it, in the `control` field of
     its reply, the gateway resolves the names **before posting**, as
     part of the canonical form (`REPLY_ENVELOPE`). The post on the platform
     then carries the resolved names, and every gateway reads the same
-    list. A username that is not a bot on the agent list, or an empty
-    list, makes the reply invalid. An `all` that resolves to no bot is
-    left out of the post.
+    list. A username that is not a bot in the room, or an empty list,
+    makes the reply invalid (`REPLY_ENVELOPE`, *Validation*). An `all`
+    that resolves to no bot is not an error: the gateway leaves it out
+    of the post. The two cases differ because an empty list is wrong
+    as written, while whether `all` names anyone depends on the room's
+    state, which the bot does not see.
   - When a human wrote it, nothing can rewrite the post, so each
     gateway resolves the names when it reads the post, against its own
-    agent list. The gateway ignores a username that is not a bot on its
-    agent list and shows it in `STATUS`. Two gateways with the same
+    agent list. The gateway ignores a username that is not a bot in
+    the room and shows it in `STATUS`. Two gateways with the same
     agent list reach the same names. With different lists they do not,
     and `AGENT_LIST` reports that difference loudly at startup.
 - *A bot that joins the room after `mute: @all` was posted is not
@@ -823,13 +827,14 @@ replies:
     `text` and `done`;
   - a reply with `text` has no `to`, or an empty `to`, or addresses
     only the sender;
-  - a name is neither a room member nor a bot the gateway knows;
+  - a name in `to` is not a member of the room;
   - a `thread` is one the turn was not delivered;
   - a reply has `control` and the bot is not the thread's
     orchestrator, or `control` holds a key other than `mute`, `unmute`
     and `limit`;
   - a `mute` or `unmute` is an empty list, or names a username that is
-    not a bot on the agent list.
+    not a bot in the room. An `all` that resolves to no bot is not an
+    error (*Canonical form*).
 - *What the gateway does not enforce*. There is no record of "requests
   this turn serves", so the gateway cannot check that `to` covers
   everyone who asked. `HINT` asks for it. The simulator counts the
@@ -1196,9 +1201,10 @@ Mechanism tests, by task, written against the simulator first:
     is not muted;
   - a `mute: all` that resolves to no bot is left out of the post, and
     a reply with nothing left posts nothing;
-  - a bot's `mute` that is an empty list or names a bot not on the
-    agent list is invalid;
-  - a human's `mute:` of a name not on the agent list is ignored and
+  - a bot's `mute` that is an empty list or names a bot not in the
+    room is invalid, and so is a `to` that names someone not in the
+    room;
+  - a human's `mute:` of a name that is not a bot in the room is ignored and
     shown in status;
   - a replayed older control arriving after the value returned to its
     default is ignored;
