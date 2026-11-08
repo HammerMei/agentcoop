@@ -7,12 +7,13 @@ the worked examples (§5).
 
 Evidence basis. Gateway claims cite the current tree. opencode claims cite the
 `v2.2.5` tag of `anomalyco/opencode` (the same repository renders as
-`sst/opencode`). Those claims come from reading the source and have not been
-observed on a running 2.x, so every 2.x statement carries one of these tags:
+`sst/opencode`) or a run of 2.2.6. Every 2.x statement carries one of these
+tags:
 
 - `[src]`: read in the named file at `v2.2.5`
 - `[docs]`: from `opencode.ai/v2/docs` or `agentclientprotocol.com`
-- `[live 1.18.34]`: observed on the local 1.18.34 `opencode acp` over stdio
+- `[live 2.2.6]`: observed on a local 2.2.6 `opencode acp` over stdio
+  (macOS). Appendix A holds the frames
 - `[inferred]` / `[unverified]`: the checklist in §8 must settle it before
   the implementation is called done
 
@@ -29,8 +30,8 @@ calls through `permission.asked` and `POST /permission/{id}/reply`
 1.18.13.
 
 The 2.x line changes every one of those contracts. Its first release is
-`v2.2.0` (2026-10-27) and its latest is `v2.2.5` (2026-10-30). The 1.19.x line
-is released in parallel, and it is what npm and Homebrew still carry.
+`v2.2.0` (2026-10-27). The 1.19.x line is released in parallel. npm carries
+only 1.19.x. Homebrew carries 2.2.6 as of 2026-11-07.
 
 | 1.x contract the gateway uses | 2.x | Consequence | Source |
 |---|---|---|---|
@@ -279,23 +280,19 @@ Why each value:
 The backend keeps the response's `agentCapabilities` for the connection's
 lifetime. §3.4 and §3.8 branch on it.
 
-**Client library (decision D1, for the operator).** The backend consumes
-eight methods and answers two. There are two ways to speak them:
+**Client library (D1).** The backend consumes eight methods and answers two.
+`connection.py` implements them as a hand-rolled client: newline-delimited
+JSON-RPC with id multiplexing, notification dispatch, and agent→client
+request dispatch. That is on the order of a hundred lines for the surface
+used here. It stays auditable and adds no dependency.
 
-- `agent-client-protocol` from PyPI, the SDK in the protocol's own
-  organisation. Stable 0.12.1 (2026-08-16), 1.0.0rc3 (2026-10-12), Python
-  ≥3.10. It depends on `pydantic>=2.7`, which is not currently a gateway
-  dependency. The client side is supported (`spawn_agent_process`,
-  `ClientSideConnection`). It absorbs schema drift and the v2 negotiation
-  when that lands.
-- A hand-rolled client: newline-delimited JSON-RPC with id multiplexing,
-  notification dispatch, and agent→client request dispatch. That is on the
-  order of a hundred lines for the surface used here. It stays auditable and
-  adds no dependency.
-
-The gateway owns the handling of the `[unverified]` wire details in §8 either
-way. The design does not depend on the choice, because `connection.py` is the
-only module that does.
+The alternative is `agent-client-protocol` from PyPI, the SDK in the
+protocol's own organisation. Its stable release is 0.12.1 (2026-08-16), with
+1.0.0rc3 (2026-10-12) still changing which methods it routes. It depends on
+`pydantic>=2.7`, which is not a gateway dependency. The gateway owns the
+handling of the `[unverified]` wire details in §8 either way. `connection.py`
+is the only module the choice touches, so the SDK can replace the hand-rolled
+client at its 1.0 without reaching the rest of the backend.
 
 ### 3.4 Backend method map
 
@@ -539,9 +536,12 @@ A gateway restart or a self-heal restart spawns a new agent process that
 holds none of the sessions the state file names. The backend re-attaches
 lazily. The first `stream()` or `ensure_durable_instructions()` for a session
 the connection has not attached runs `session/resume` (or `session/load`, with
-the updates discarded) and records the session as attached. A `session/load`
-replays the whole history before responding, so on an agent without `resume`
-that time would count against the first turn's timeout. The backend therefore
+the updates discarded) and records the session as attached. On opencode,
+`session/resume` in a fresh process replays nothing, and the next prompt on
+that session answers from the earlier turns `[live 2.2.6]`. A `session/load`
+replays the whole history before responding (eleven updates for a two-turn
+session `[live 2.2.6]`), so on an agent without `resume` that time would
+count against the first turn's timeout. The backend therefore
 runs the re-attach under its own bounded wait (the start-up timeout, not the
 turn timeout) before it sends the prompt. A failed re-attach surfaces as the
 structured error in §3.10. The lifecycle's existing handling of a dead stored
@@ -559,16 +559,23 @@ today.
 
 The increment's deliverable, seam by seam.
 
-**P1 launch.** `argv = [command, "acp"]`, with cwd = `working_directory`. The
-process spawns a private `opencode serve --stdio --port 0` child with a random
-`OPENCODE_PASSWORD` and reaches it over HTTP itself `[src]`
-`packages/cli/src/services/standalone.ts`, `commands/handlers/acp.ts`. The
-child inherits the parent's environment (`extendEnv: true`), so `env` set on
-the `opencode acp` process reaches the config loader `[src]` `standalone.ts`.
-Whether the inline config then takes effect in the private server is
-**`[unverified]`** (§8, item 1). The gateway cannot reach that private server,
-because its port and password are random. There is no HTTP side channel in
-this topology, and the design does not want one.
+**P1 launch.** `argv = [command, "acp"]`, with cwd = `working_directory`. 2.x
+has no `--cwd` flag on `opencode acp` (1.x had one), so the process cwd is the
+only way to set the directory `[live 2.2.6]`. The process spawns a private
+`opencode serve --stdio --port 0` child with a random `OPENCODE_PASSWORD` and
+reaches it over HTTP itself `[src]` `packages/cli/src/services/standalone.ts`,
+`commands/handlers/acp.ts`. The child inherits the parent's environment
+(`extendEnv: true`), so `env` set on the `opencode acp` process reaches the
+config loader `[src]` `standalone.ts`. The inline config takes effect in the
+private server `[live 2.2.6]`, see P3. The gateway cannot reach that private
+server, because its port and password are random. There is no HTTP side
+channel in this topology, and the design does not want one.
+
+Two prior reports say the opposite about inline config under `opencode acp`:
+anomalyco/opencode#34638 (1.17.11, Linux, auto-closed) and #52259 (2.0.3 to
+2.2.0, Windows). The maintainers could not reproduce either on macOS
+(PR #52286). The §8 checklist therefore keeps item 1 for Linux, where the
+production gateway runs.
 
 **P2 auth.** `auth_hint = "opencode auth login"`. `session/new` loads the
 model catalog first and fails `auth_required` when no provider is usable
@@ -615,7 +622,8 @@ string. This document notes it as orphaned and does not remove it.
 Asks reach the gateway because `turn.ts` subscribes to the private server's
 events for the turn and forwards every `permission.asked` as
 `session/request_permission` `[src]`. `allow` rules never ask. `deny` rules
-never ask.
+never ask. With the ruleset above, a `shell` call and a `write` call each
+produced a `session/request_permission` before running `[live 2.2.6]`.
 
 **P6 normalisation.** When `tool_call.name` is present, it is the opencode
 **tool** name: `shell`, `edit`, `write`, `patch`, `read`, `webfetch`,
@@ -646,26 +654,40 @@ absorbs both, so an existing allow-list keeps meaning what it meant.
   string and fail every `params` rule. That is fail-closed, but the
   `scratch-dir` preset would stop auto-approving.
 
-**The named gap.** Some asks are not a tool call: `external_directory`,
-`doom_loop`, a `.env` read. For those the ACP `toolCall` has **no `name`**.
-opencode builds it from the permission `action` only as `title` (the
-description, command or parent directory), `kind: other`, and `locations`
-`[src]` `permission.ts` `ask` spreads `name: input.tool?.name`. The `action`
-string the 1.x broker matched is therefore not on the wire. (`tool:
-external_directory` is what the `scratch-dir` preset in `config.example.yaml`
-uses, and `docs/permission-reference.md` documents it.) The profile handles
-an unnamed ask as follows:
+**The action gap.** The ask carries the **tool** that triggered it, never the
+permission **action** that fired. `permission.ts` `ask` builds `name` from
+`input.tool?.name` and nothing on the request carries `event.data.action`
+`[src]`. A `write` to `/tmp/x` under the ruleset above produced **two**
+asks, one for `external_directory` and one for `edit`, and both arrived with
+`name: "write"`, the same `rawInput {path, content}` and the same `locations`
+`[live 2.2.6]`. The 1.x broker matched the action string (`tool:
+external_directory`, which the `scratch-dir` preset in `config.example.yaml`
+uses and `docs/permission-reference.md:119` documents). That string is not on
+the ACP wire.
 
-- tool name `external_directory` when `kind == "other"` and `locations` is
-  non-empty, else `other`
-- param strings from the `locations` paths
+Consequences:
 
-This recovers the `scratch-dir` case. It leaves `doom_loop` to the ladder's
-default (guest: deny, owner: human). The clean fix is upstream: an
-`_meta["opencode/permission"] = {action, resources}` on the request, which
-the protocol's extensibility rules invite. That is a proposal for the
-operator to decide on. This increment does not file it. The exact wire shape
-of an unnamed ask is `[unverified]` on 2.2.5 (§8, item 2).
+- A rule on the tool and the path covers both asks. After P6 normalisation
+  the `scratch-dir` preset is `tool: Write` (or the 1.x alias `tool: edit`)
+  with `params: /tmp/.*`, and it auto-approves the `external_directory` ask
+  and the `edit` ask alike. The migration note rewrites the preset.
+- A rule written on the action alone (`tool: external_directory`) matches
+  nothing on this backend. Config loading warns on such a rule for a
+  `type: acp` agent.
+- The broker evaluates the ladder once per ask, so an external write that
+  needs a human produces two approval requests in chat, as it did on 1.x
+  (one `external_directory`, one `edit`).
+- An ask with no tool source would arrive with no `name`. The profile then
+  uses `kind` as the tool name and the `locations` paths as the param
+  strings. No such ask was observed. `doom_loop` is the candidate and is
+  `[unverified]` (§8, item 2).
+
+The clean fix is upstream: an `_meta["opencode/permission"] = {action,
+resources}` on the request, which the protocol's extensibility rules invite.
+That is anomalyco/opencode#62715 (D4). Related upstream history:
+anomalyco/opencode#30554 asked for context on `external_directory` asks, and
+PR #30567 added the command, path and `locations`. The action itself was not
+part of that fix.
 
 **P7 options.** Exactly `once` (`allow_once`), `always` (`allow_always`) and
 `reject` (`reject_once`) `[src]` `permission.ts`. The default selector is
@@ -673,8 +695,12 @@ correct.
 
 **P8 usage.** `response.usage {inputTokens, outputTokens, totalTokens,
 thoughtTokens?, cachedReadTokens?, cachedWriteTokens?}` is summed over the
-turn's steps `[src]` `translate.ts` `response`. The profile maps it to
-`TokenUsage` with `reasoning_tokens = thoughtTokens`. For cost,
+turn's steps `[src]` `translate.ts` `response`, `[live 2.2.6]`. The profile
+maps it to `TokenUsage` with `reasoning_tokens = thoughtTokens` and
+`cache_read_tokens = cachedReadTokens`. It ignores `totalTokens`, because
+that field counts the cached read as well (observed: `inputTokens: 294`,
+`outputTokens: 19`, `cachedReadTokens: 10752`, `totalTokens: 11084`) and
+`TokenUsage.total_tokens` is defined as input plus output. For cost,
 `usage_update.cost.amount` is the session's cumulative cost in USD `[src]`
 `turn.ts` `sendUsageUpdate`. The profile keeps the last seen value per session
 and reports the difference as `cost_usd`. It reports `None` on the first turn
@@ -692,8 +718,9 @@ still in history and still re-sent per turn.
 opencode 2.2 added a compaction-resistant mechanism: per-session instruction
 entries (`session.instructions.entry.put`, `[src]` `handlers/session.ts`). It
 is reachable only over the private server's HTTP, so it is out of reach (P1).
-It is the strongest argument for the upstream `_meta` route, or for opencode
-adopting the systemPrompt RFD.
+anomalyco/opencode#62716 asks opencode to implement the systemPrompt RFD on
+top of those entries (D4). When that lands, the opencode profile moves to
+rung (a) with no gateway change beyond the capability probe.
 
 **P9 errors.** opencode's error names ride `error.data.errorName`
 (`ServerUnavailable`, provider error types) `[src]` `error.ts`
@@ -727,6 +754,9 @@ increment ships, not here. Its contents:
 - Sessions are re-provisioned (§3.1).
 - Allow-list rules on `tool: bash` and `tool: edit` keep working through the
   P6 aliases, and `tool: edit` still covers writes as it did.
+- A rule on `tool: external_directory` matches nothing on this backend. The
+  `scratch-dir` preset becomes a path rule on the write tool (§4, the action
+  gap).
 - coop-keeper's `agents/coop-keeper/opencode.json` is v1-shaped
   (`permission` map, `default_agent`). 2.x auto-migrates it `[src]`
   `normalize.ts`. It ships from this repository and is due a v2 review. That
@@ -825,47 +855,51 @@ Everything else is a default.
 
 ---
 
-## 7. Decisions for the operator
+## 7. Decisions
 
-- **D1**: SDK (`agent-client-protocol`, pydantic) or hand-rolled client
-  (§3.3). The design is indifferent. The discriminators are a 0.x dependency
-  versus owning schema drift.
+- **D1**: `connection.py` is a hand-rolled client (§3.3). The PyPI SDK
+  `agent-client-protocol` is re-evaluated at its 1.0 release.
 - **D2**: `type: acp` + `profile:`, with `type: opencode` left as the 1.x
-  HTTP backend (§3.1, R5). The alternative is swapping the implementation
-  under `type: opencode`. That is a silent behaviour change for 1.19.x users,
-  and this document does not recommend it. The 1.x backend's retirement is a
-  separate, later increment.
+  HTTP backend (§3.1, R5). Swapping the implementation under `type: opencode`
+  would be a silent behaviour change for 1.19.x users, and it would remove
+  the path back to the HTTP backend while the ACP backend is new. The 1.x
+  backend's retirement is a separate, later increment.
 - **D3**: per-agent process topology (§3.2), with `sessions_per_process` as
   the escape hatch. Per-watcher processes are a later option that the idle
   lifecycle would make affordable.
-- **D4**: whether to propose two things upstream to opencode: an `_meta`
-  carrying the permission `action` on `session/request_permission` (§4, the
-  named gap), and adoption of the systemPrompt RFD. Both are proposals. This
-  document does not file them.
+- **D4**: two proposals are filed upstream as opencode feature requests:
+  anomalyco/opencode#62715, an `_meta` carrying the permission `action` and
+  `resources` on `session/request_permission` (§4, the action gap), and
+  anomalyco/opencode#62716, the client-provided systemPrompt RFD on top of
+  session instruction entries (§4, P5). The design works without either.
+  Each one, when it lands, removes a workaround named in §4.
 
 ---
 
 ## 8. Verification prerequisites
 
-These items were read from source, not observed. Each must be settled
-against a live opencode 2.2.5 before the opencode profile is called done.
-2.2.5 is installable from the GitHub release. Neither npm nor Homebrew carry
-2.x.
+Each item is settled against a live opencode 2.x before the opencode profile
+is called done. The state of each item on 2.2.6, macOS:
 
 1. `OPENCODE_CONFIG_CONTENT` on the `opencode acp` process reaches its
    private `--stdio` server, and a `shell`, `edit` or `external_directory`
    call under the §4 ruleset produces `session/request_permission`.
-2. The wire shape of an unnamed ask (`external_directory` on a `/tmp` write).
-   Confirm that `name` is absent, and what `title` and `locations` carry.
+   **Settled on macOS** `[live 2.2.6]`. **Open on Linux**, because #34638
+   and #52259 report the variable inert there and on Windows, and Linux is
+   where the production gateway runs.
+2. The wire shape of an ask with no tool source. `external_directory` on a
+   `/tmp` write turned out to be tool-sourced (`name: "write"`)
+   `[live 2.2.6]`. **Open**: `doom_loop`, which needs the same tool call
+   three times with identical input.
 3. `session/resume` of a session created by a previous `opencode acp`
    process, same data directory, same `cwd`, followed by a prompt turn on it.
+   **Settled** `[live 2.2.6]`.
 4. `always` persists as a project allow rule in the shared store (the reason
-   for invariant 1). Confirm it, then never send it.
-5. A `[live 1.18.34]` rehearsal of the handshake, `session/new`, a prompt
-   turn and a permission round-trip is possible today, because 1.18.34's
-   `opencode acp` already advertises `resume`, `fork` and `list`. It should
-   precede item 1. Observed so far: `initialize` and `session/new` (Appendix
-   A). Not yet observed: a prompt turn and a permission round-trip.
+   for invariant 1). **Open by choice**: the test writes a rule into the
+   operator's store. The docs are the evidence until a disposable store is
+   set up for it.
+5. The handshake, `session/new`, a prompt turn and a permission round-trip.
+   **Settled** `[live 2.2.6]`, Appendix A.
 
 For the Claude and Codex profiles, the `[unverified]` rows in §5 are the
 checklist.
@@ -919,49 +953,102 @@ checklist.
 
 ## Appendix A: observed frames
 
-`initialize` response, opencode 1.18.34 `[live 1.18.34]`:
+All frames `[live 2.2.6]`, macOS, `opencode acp` spawned with the §4 ruleset
+in `OPENCODE_CONFIG_CONTENT`. Long paths are shortened to `<cwd>`.
+
+`initialize` response:
 
 ```json
 {"protocolVersion": 1,
  "agentCapabilities": {
    "loadSession": true,
-   "mcpCapabilities": {"http": true, "sse": true},
+   "mcpCapabilities": {"http": true, "sse": false},
    "promptCapabilities": {"embeddedContext": true, "image": true},
-   "sessionCapabilities": {"close": {}, "fork": {}, "list": {}, "resume": {}}},
+   "sessionCapabilities": {"additionalDirectories": {}, "close": {}, "delete": {},
+                           "fork": {}, "list": {}, "resume": {}},
+   "_meta": {"opencode/child-session-updates": true}},
  "authMethods": [{"id": "opencode-login", "name": "Login with opencode",
                   "description": "Run `opencode auth login` in the terminal"}],
- "agentInfo": {"name": "OpenCode", "version": "1.18.34"}}
+ "agentInfo": {"name": "OpenCode", "version": "2.2.6"}}
 ```
 
-At 2.2.5 `[src]` `service.ts` `initialize`: `mcpCapabilities.sse` is `false`,
-`sessionCapabilities` adds `additionalDirectories` and `delete`, and the
-agent advertises `_meta["opencode/child-session-updates"]: true`.
-
-`session/new` response, 1.18.34 `[live 1.18.34]`:
+`session/new` response (the `options` list is elided):
 
 ```json
-{"sessionId": "ses_…",
- "configOptions": [{"id": "model", "category": "model", "type": "select",
-                    "currentValue": "<provider>/<model>", "options": ["…"]},
+{"sessionId": "ses_e45d8fb8affenLVxphDSWqXG9k",
+ "configOptions": [{"id": "model", "name": "Model", "category": "model", "type": "select",
+                    "currentValue": "opencode/iceman-free", "options": ["…"]},
                    "…"]}
 ```
 
-`session/request_permission` options, 2.2.5 `[src]` `permission.ts`:
+`session/request_permission` for the shell call (`printf hello`):
 
 ```json
-[{"optionId": "once",   "kind": "allow_once",   "name": "Allow once"},
- {"optionId": "always", "kind": "allow_always", "name": "Always allow"},
- {"optionId": "reject", "kind": "reject_once",  "name": "Reject"}]
+{"sessionId": "ses_e45d8fb8affenLVxphDSWqXG9k",
+ "toolCall": {"toolCallId": "514d98b0-…", "name": "shell", "title": "printf hello",
+              "kind": "execute", "status": "pending",
+              "locations": [{"path": "<cwd>"}],
+              "rawInput": {"command": "printf hello", "cwd": "<cwd>"}},
+ "options": [{"optionId": "once",   "kind": "allow_once",   "name": "Allow once"},
+             {"optionId": "always", "kind": "allow_always", "name": "Always allow"},
+             {"optionId": "reject", "kind": "reject_once",  "name": "Reject"}]}
 ```
 
-`session/prompt` response, 2.2.5 `[src]` `translate.ts` `response`
-(a sketch, not the exact encoding):
+`session/request_permission` for the write to `/tmp/coop-acp-probe.txt`. Two
+arrived with the same `toolCallId`, one per permission action
+(`external_directory`, then `edit`). The second one also carried a `content`
+diff. Neither names the action:
 
 ```json
-{"stopReason": "end_turn | max_tokens | refusal | cancelled",
- "usage": "optional, see §4 P8",
- "_meta": {"opencode/retry": "optional"}}
+{"sessionId": "ses_e45d8fb8affenLVxphDSWqXG9k",
+ "toolCall": {"toolCallId": "a1491130-…", "name": "write",
+              "title": "/tmp/coop-acp-probe.txt", "kind": "edit", "status": "pending",
+              "locations": [{"path": "/tmp/coop-acp-probe.txt"}],
+              "rawInput": {"path": "/tmp/coop-acp-probe.txt", "content": "hi"},
+              "content": [{"type": "diff", "path": "/tmp/coop-acp-probe.txt",
+                           "oldText": null, "newText": "hi"}]},
+ "options": ["same three as above"]}
 ```
+
+`tool_call_update` on completion, shell:
+
+```json
+{"sessionUpdate": "tool_call_update", "toolCallId": "514d98b0-…", "status": "completed",
+ "locations": [{"path": "<cwd>"}],
+ "content": [{"type": "content", "content": {"type": "text", "text": "hello"}}],
+ "rawOutput": {"metadata": {"status": "completed", "truncated": false, "exit": 0}}}
+```
+
+`usage_update`, then the `session/prompt` response, first turn:
+
+```json
+{"sessionUpdate": "usage_update", "used": 11022, "size": 262144,
+ "cost": {"amount": 0, "currency": "USD"}}
+```
+
+```json
+{"stopReason": "end_turn",
+ "usage": {"inputTokens": 21851, "outputTokens": 53, "totalTokens": 21991, "thoughtTokens": 87},
+ "_meta": {}}
+```
+
+`session/resume` response in a fresh process (no replay), then the response
+of a prompt on the resumed session:
+
+```json
+{"configOptions": ["…"]}
+```
+
+```json
+{"stopReason": "end_turn",
+ "usage": {"inputTokens": 294, "outputTokens": 19, "totalTokens": 11084,
+           "thoughtTokens": 19, "cachedReadTokens": 10752},
+ "_meta": {}}
+```
+
+`session/load` of the same session replayed eleven `session/update`
+notifications (`user_message_chunk`, `agent_message_chunk`, `tool_call`,
+`tool_call_update`) before its `{configOptions: […]}` response.
 
 ## Appendix B: sources
 
