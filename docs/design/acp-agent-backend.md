@@ -440,6 +440,26 @@ session's pending asks `cancelled` before the backend awaits the prompt
 response (§3.5). On broker `stop()`, the broker answers pending asks
 `cancelled`, as today's `reject_on_cancel` does.
 
+**Reject and cancelled are told apart in the turn, not in the broker.** The
+broker keeps its boolean contract. `request_permission()` returns `False` for
+a human deny and for a permission timeout, and the registry still resolves
+every pending request to `False` on expiry, on watcher stop and on broker
+stop. The ask handler decides which ACP outcome that `False` becomes. It
+awaits two things at once: the broker's answer and the turn's cancelled flag,
+which the backend sets when it sends `session/cancel` (§3.5). The broker
+answered first → `{outcome: "selected", optionId}` with the profile's
+`reject_once` option. The turn was cancelled first → `{outcome: "cancelled"}`.
+The distinction is needed because the gateway's own tear-downs already
+happen while an ask can be pending. The permission timeout is 300 s and the
+turn timeout is 360 s (`gateway/config.py`), so an ask raised late in a turn
+is still open when the turn expires. opencode treats both outcomes as
+`reject` for the tool `[src]` `permission.ts`. The spec requires `cancelled`
+after `session/cancel`, and other agents may record a selected option as a
+user decision, so the generic layer sends the spec's answer. A human-driven
+"deny and stop the task" is a different feature. It would map to
+`reject_once` plus `session/cancel` on opencode and Claude, and to Codex's
+native Cancel option. It is outside this increment.
+
 **Callable broker** (the TUI / `AgentSession` path). It is the same handler
 with the user's `(tool_name, tool_input) -> bool` in place of the ladder. The
 session attaches it after `start()` via `attach_callable_broker`. For this
