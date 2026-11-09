@@ -719,8 +719,12 @@ opencode 2.2 added a compaction-resistant mechanism: per-session instruction
 entries (`session.instructions.entry.put`, `[src]` `handlers/session.ts`). It
 is reachable only over the private server's HTTP, so it is out of reach (P1).
 anomalyco/opencode#62716 asks opencode to implement the systemPrompt RFD on
-top of those entries (D4). When that lands, the opencode profile moves to
-rung (a) with no gateway change beyond the capability probe.
+top of those entries (D4). Related upstream history: anomalyco/opencode#27500
+and PR #27478 tried, before 2.x, to forward a `_meta.systemPrompt` from
+`session/new` into each prompt's `system` field. The value was never stored on
+the session, and the PR was closed without merging. When #62716 lands, the
+opencode profile moves to rung (a) with no gateway change beyond the
+capability probe.
 
 **P9 errors.** opencode's error names ride `error.data.errorName`
 (`ServerUnavailable`, provider error types) `[src]` `error.ts`
