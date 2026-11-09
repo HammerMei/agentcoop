@@ -156,7 +156,7 @@ A count or duration of `0` disables that limit.
 | `follow_up_retry_cap` | Failed scheduled-turn retries before a notice is posted. |
 | `failure_backoff_seconds` | First wait after a backend failure; doubles per consecutive failure. |
 | `failure_backoff_max_seconds` | Upper bound of that wait. |
-| `consecutive_invalid_limit` | Consecutive turns failed on invalid envelopes before a bot is degraded in a room. |
+| `consecutive_invalid_limit` | Consecutive turns failed on invalid envelopes before a bot is degraded in a room. `0` keeps the count for `STATUS` and degrades nobody. |
 
 Only `rate_limit_posts` and `rate_limit_words` may vary by thread.
 
@@ -712,7 +712,10 @@ in backlog), while a human or orchestrator mention still starts a turn, which
 is the probe. A normal turn end clears the degraded state and the count. The
 gateway posts one failure notice at the first twice-invalid turn of a streak,
 one more when the bot becomes degraded, and none between. `STATUS` shows
-degraded bots. A restart resets both the count and the state.
+degraded bots. A restart resets both the count and the state. With
+`consecutive_invalid_limit` at `0` the gateway still counts and shows the
+streaks but degrades nobody, which turns the mechanism into measurement only;
+`failure_backoff_seconds` at `0` does the same for backoff.
 
 Both mechanisms are provisional. Section 8 counts backoff episodes and degraded
 trips; if the simulator and the lab show that consecutive failures are rare,
@@ -984,6 +987,8 @@ The simulator gets these tests first; the gateway reuses them.
 - `consecutive_invalid_limit` twice-invalid turns degrade the bot: muted-column
   eligibility, a human or orchestrator mention probes it, a normal end clears
   it; backend failures do not change the count.
+- With `consecutive_invalid_limit: 0`, the streak is counted and shown but no
+  bot is degraded.
 - A failure notice starts no turn, produces no classifier call, counts toward
   catch-up but not the rate limit, and is not delivered to its own bot.
 - Exercise failures at every save/post boundary.
