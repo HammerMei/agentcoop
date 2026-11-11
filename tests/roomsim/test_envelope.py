@@ -108,6 +108,10 @@ class TestInvalidCombinations:
         _, rules = problems('{"replies": [{"to": ["a"], "text": "me"}, {"thread": "unf", "to": ["ghost"], "text": "x"}]}')
         assert rules == [("recipients", "main"), ("recipients", "unf")]
 
+    def test_the_sender_among_other_recipients_is_still_a_recipients_rule(self):
+        _, rules = problems('{"replies": [{"to": ["H", "a"], "text": "and me"}, {"thread": "unf", "done": true}]}')
+        assert rules == [("recipients", "main")]
+
     @pytest.mark.parametrize("body", ['{"thread": "main", "text": "x"}', '{"thread": "main", "text": "x", "to": []}'])
     def test_text_without_recipients_is_a_recipients_rule_not_a_schema_error(self, body):
         structural, rules = problems('{"replies": [' + body + ', {"thread": "unf", "done": true}]}')
@@ -119,10 +123,15 @@ class TestInvalidCombinations:
         '{"replies": [{"thread": {"a": 1}, "done": true}]}',
         '{"replies": [{"control": "mute"}]}',
         '{"replies": [{"done": true}], "schedule": [{"in_seconds": "soon"}]}',
+        '{"replies": [{"done": true}], "schedule": "later"}',
+        '{"replies": [{"done": "false"}]}',  # a truthy string would read as done
     ])
     def test_wrong_types_are_parse_errors_not_crashes(self, text):
         with pytest.raises(ParseError):
             parse_envelope(text)
+
+    def test_a_null_schedule_is_an_empty_one(self):
+        assert parse_envelope('{"replies": [{"done": true}], "schedule": null}').schedule == []
 
     def test_limit_shape_is_checked(self):
         structural, _ = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": "ten"}}},'

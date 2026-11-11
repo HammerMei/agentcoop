@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from tests.roomsim.helpers import FAST, Sandbox, Script, item, replies, reply
 
 ON = FAST
@@ -151,9 +153,10 @@ async def test_a_closed_thread_is_no_catch_up_or_unfinished_candidate_in_either_
         assert sb.trace.count("turn_start", bot="a", source="unfinished") == 0
 
 
-async def test_replay_of_an_already_delivered_mention_starts_no_turn_and_own_posts_seed_the_window():
+@pytest.mark.parametrize("hosted", [None, ["a"]])  # a gateway hosting only the author counts it too
+async def test_replay_of_an_already_delivered_mention_starts_no_turn_and_own_posts_seed_the_window(hosted):
     script = Script().on(reply(["H"], "reply from a"), bot="a")
-    sb = Sandbox(params=ON, script=script)
+    sb = Sandbox(params=ON, script=script, hosted=hosted)
     await sb.human("@a go")
     await sb.run(2)
     before = sb.trace.count("turn_start", bot="a")

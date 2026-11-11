@@ -51,7 +51,10 @@ def parse_envelope(text: str) -> Envelope:
     if not isinstance(data["replies"], list):
         raise ParseError("replies is not a list")
     replies = [_item(raw, i) for i, raw in enumerate(data["replies"])]
-    schedule = [_job(raw) for raw in data.get("schedule", [])]
+    raw_schedule = data.get("schedule")
+    if raw_schedule is not None and not isinstance(raw_schedule, list):
+        raise ParseError("schedule is not a list")
+    schedule = [_job(raw) for raw in raw_schedule or []]
     return Envelope(replies=replies, schedule=schedule)
 
 
@@ -84,8 +87,10 @@ def _item(raw, index: int) -> ReplyItem:
         raise ParseError(f"reply {index}: text must be a string")
     if control is not None and not isinstance(control, dict):
         raise ParseError(f"reply {index}: control must be an object")
-    return ReplyItem(thread=thread, to=list(to) if to is not None else None, text=text, control=control,
-                     done=bool(raw.get("done", False)))
+    done = raw.get("done", False)
+    if not isinstance(done, bool):
+        raise ParseError(f"reply {index}: done must be a boolean")
+    return ReplyItem(thread=thread, to=list(to) if to is not None else None, text=text, control=control, done=done)
 
 
 def _job(raw) -> JobRequest:
@@ -163,8 +168,8 @@ def _check_recipients(item: ReplyItem, ctx: ValidationContext, structural, rules
     if not item.to:
         rules.append(Problem(RECIPIENTS, item.thread, "text without recipients"))
         return
-    if set(item.to) == {ctx.bot}:
-        rules.append(Problem(RECIPIENTS, item.thread, "addresses only the sender"))
+    if ctx.bot in item.to:
+        rules.append(Problem(RECIPIENTS, item.thread, "addresses the sender"))
     for name in item.to:
         if name != ALL and name not in ctx.members:
             rules.append(Problem(RECIPIENTS, item.thread, f"recipient {name!r} is not a member"))

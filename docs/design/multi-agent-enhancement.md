@@ -650,8 +650,8 @@ invalid output fails the turn. Reject an envelope when:
 - `replies` is absent, or a must-reply thread listed in `HINT` has no item;
 - an item has no action, has both `text` and `done`, or has an unsupported
   combination;
-- text lacks recipients, has an empty recipient list, or addresses only the
-  sender;
+- text lacks recipients, has an empty recipient list, or names the sender
+  among its recipients;
 - a recipient is not a room member;
 - a name in an explicit mute/unmute list is not both on the agent list and a
   room member;

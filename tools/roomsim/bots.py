@@ -76,6 +76,7 @@ def turn_hash(turn: TurnInput) -> str:
         "delivered": [(p.seq, p.thread, p.author, p.text) for p in turn.delivered],
         "hint": asdict(turn.hint),
         "job": turn.job_text,
+        **({"error": turn.error} if turn.error else {}),  # a retry prompt carries the error (5.9)
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -102,6 +103,9 @@ class Replayer:
 
     records: list[dict]
     _next: int = 0
+
+    def unused(self) -> int:
+        return len(self.records) - self._next
 
     async def run(self, turn: TurnInput) -> BotOutput:
         if self._next >= len(self.records):

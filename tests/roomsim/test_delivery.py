@@ -240,6 +240,7 @@ async def test_bot_joining_after_mute_all_is_not_muted_and_offline_gateway_may_s
     await sb.human("mute: all")
     sb.room.join(Member("c", "bot"))
     await g3.set_online(replay_after=1)  # the mute is outside the replay window
+    assert sb.trace.last("control_applied", control="mute").age == 0  # a replayed control would show its age
     assert sb.gw.status()["threads"]["main"]["muted"] == ["a", "b"]
     assert g3.status()["threads"].get("main", {}).get("muted", []) == []
     await sb.sim.post("a", "@c your view?")

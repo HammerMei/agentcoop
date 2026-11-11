@@ -34,7 +34,10 @@ def _runner(args, members, room_name):
         return None
     from gateway.agents.claude.adapter import ClaudeBackend
 
-    backend = ClaudeBackend(command=args.claude_command, new_session_args=[], timeout=args.timeout, broker_config=None)
+    # The built-in agent: the operator's configured persona must not reach the bots. A resumed
+    # session keeps the agent it was created with, so the first turn's args are enough.
+    backend = ClaudeBackend(command=args.claude_command, new_session_args=["--agent", "claude"],
+                            timeout=args.timeout, broker_config=None)
     workdir = args.workdir or tempfile.mkdtemp(prefix="roomsim-")
     return BackendBot(backend, workdir, args.timeout, room_name, members)
 
@@ -65,6 +68,10 @@ def main(argv: list[str] | None = None) -> int:
     scenario = load(args.scenario, enforce, recorder or runner)
     sim = asyncio.run(run(scenario))
     print(report(sim, scenario.name))
+    if isinstance(runner, Replayer) and runner.unused():
+        print(f"[ERROR] replay used {len(runner.records) - runner.unused()} of {len(runner.records)} recorded turns",
+              file=sys.stderr)
+        return 1
     if args.record and recorder is not None:
         Path(args.record).write_text(json.dumps(recorder.records, indent=1))
     if args.json:

@@ -50,7 +50,8 @@ async def test_restart_mid_job_turn_puts_the_job_back_to_pending():
     await sb.gw.restart(replay_after=sb.room.last_seq())
     await sb.run(15)
     assert sb.trace.count("turn_dropped", bot="a") == 1
-    assert sb.trace.count("turn_start", bot="a", source="job") == 2  # the sweep found it pending again
+    starts = sb.trace.of("turn_start", bot="a", source="job")
+    assert len(starts) == 2 and starts[1].time == sb.trace.last("turn_dropped").time  # a sweep requested at the drop, not the periodic one
 
 
 async def test_a_human_mention_is_not_hidden_behind_a_held_bot_mention():

@@ -276,12 +276,12 @@ class SimGateway:
         if not self.online:
             return
         copies = [b for b in self.hosted if b != post.author]
-        if not copies:
-            return
         self._thread(post.thread).last_activity = max(self._thread(post.thread).last_activity, post.time)
         if post.kind == "notice":
             return  # recognised before eligibility: no turn, no classifier, not in the window
         self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)
+        if not copies:
+            return  # the gateway's own post: counted (on replay) but no trigger
         if self._apply_controls(post):
             return
         dm = self.sim.room.is_dm  # a 1:1 DM addresses its bot by definition (section 3)
@@ -319,7 +319,8 @@ class SimGateway:
 
     def _trace_control(self, post: Post, control: str, value) -> None:
         self.sim.trace.add(self.now(), "control_applied", gateway=self.name, thread=post.thread,
-                           by=post.author, control=control, value=value, seq=post.seq)
+                           by=post.author, control=control, value=value, seq=post.seq,
+                           age=self.now() - post.time)  # > control TTL only in a replay (5.4)
 
     def _resolve_names(self, names, settings: ThreadSettings, muted_only: bool) -> list[str]:
         bots = self._bots_in_room()
@@ -506,17 +507,21 @@ class SimGateway:
     def _request(self, post: Post, addressed: tuple[str, ...]) -> ClassifierRequest:
         history = self.sim.room.thread_posts(post.thread, newest_first=True)
         history = [p for p in history if p.seq != post.seq]
-        shown = tuple(history[: self.params.classifier_posts])
+        shown = tuple(history[: self.params.classifier_posts or None])  # 0 disables the cap (3.1)
         offered = [self.sim.room.members[b] for b in self._bots_in_room() if not self._not_offered(b, post.thread)]
         return ClassifierRequest(post, addressed, shown, len(history) - len(shown), tuple(offered))
 
     async def _classifier_attempt(self, request: ClassifierRequest, attempt: int) -> None:
         latency = getattr(self.classifier, "latency", 0.0)
-        self.sim.at(latency, self._classifier_result, request, attempt)
+        timeout = self.params.classifier_timeout_seconds
+        timed_out = bool(timeout) and latency > timeout
+        self.sim.at(timeout if timed_out else latency, self._classifier_result, request, attempt, timed_out)
 
-    async def _classifier_result(self, request: ClassifierRequest, attempt: int) -> None:
+    async def _classifier_result(self, request: ClassifierRequest, attempt: int, timed_out: bool = False) -> None:
         post, addressed = request.post, request.addressed
         try:
+            if timed_out:
+                raise ClassifierError(f"timeout after {self.params.classifier_timeout_seconds}s")
             decision = await self.classifier.classify(request)
         except ClassifierError as exc:
             if attempt <= self.params.classifier_retries:
@@ -530,7 +535,8 @@ class SimGateway:
     async def _decided(self, post: Post, addressed: tuple[str, ...], decision: Decision) -> None:
         self.decisions[post.seq] = CachedDecision(decision, self.now())
         self.sim.trace.add(self.now(), "classifier_decision", gateway=self.name, post=post.seq,
-                           add=list(decision.add), remove=list(decision.remove), fallback=decision.fallback)
+                           add=list(decision.add), remove=list(decision.remove), fallback=decision.fallback,
+                           reasons=dict(decision.reasons))
         for bot in self.hosted:
             if bot in decision.add and bot not in addressed and bot != post.author \
                     and post.seq > self.persisted[bot].cursor:
@@ -754,6 +760,7 @@ class SimGateway:
         nothing is committed. A job it was firing goes back to pending so a sweep finds it."""
         if run.job is not None:
             run.job.pending = True
+            self._request_sweep(run.turn.bot, "stale job turn")
         self.sim.trace.add(self.now(), "turn_dropped", gateway=self.name, bot=run.turn.bot,
                            source=run.turn.source, thread=run.turn.starting_thread)
 

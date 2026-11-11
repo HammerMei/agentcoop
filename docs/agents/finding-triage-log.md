@@ -981,3 +981,67 @@ Notes:
 - Spec amendments carried in the PR: §5.7 candidate order, §8.1 count wording.
   Two points left to the owner: invalid-envelope retries without backoff; a live
   measure-only run.
+
+## 2026-11-11 — PR #202 round 1 (Codex on `3f0ae08`, `tools/roomsim/`)
+
+**Increment:** §8.2 row 0 — the simulator, all of section 5, outside the runtime,
+plus the enforcement switch and per-mechanism counts.
+**Chain-check:** 11 findings, one round, no chain (run from the working tree).
+**Rater:** Codex (11 inline, 4×P1 7×P2; the security review did not run — the
+paying account had no credits). Blind second rater: a fresh agent given the
+findings, the method, the constants and the owner's scoping sentence, not the
+verdicts. **Control:** the log's one settled row (#181 r9 F1, `settled:
+implemented`) was slipped in as a twelfth finding. It did not work as a control:
+presented against HEAD, a settled-*implemented* entry can only be found "already
+fixed" (the rater traced it to #182 and DROPped it as `cannot-occur`, correctly
+for HEAD). A control must be a DROP/FILE whose code still exists. **Agreement in
+this round is therefore uncorroborated.** **Cost:** ~25 min author, ~21 min rater
+(169k tokens), ~45 min fixes and tests.
+
+Owner's input this round, verbatim: "let's not too tie up on too many corner case
+with the simulator.. I mainly want to use simulator to get a sense of how well the
+mechanism works, but not intend to use it to exercise all corner cases." Applied
+as a `hits_per_year` factor (what a scenario file can express — the loader has
+only `human`/`archive`/`post`, so restart and replay are API/test-only) and to
+question 2, never as a coined discount. Both raters: it changes no verdict here,
+because every finding but one cleared `cheap`; it would have bitten on F3 and F6
+had `cheap` been refused.
+
+Question 2 passes for all eleven (§5.1, 3.1, 5.9, 8.1, 5.3, 5.11, 5.4).
+
+| | finding | gate | outcome |
+|---|---|---|---|
+| F1 | `"schedule": null` raised `TypeError`, not `ParseError`; the whole run aborted (live model only; loud) | cheap | **FIX** — `null` reads as empty, any other non-list is a schema error |
+| F2 | a gateway hosting only the author returned before `_count_for_rate` on replay: the window after `restart` depended on hosting (5.3; 8.3 "equal lists converge") | cheap (2-line move) | **FIX** — count, then return on no copies; test parametrised on `hosted` |
+| F3 | `classifier_timeout_seconds` was read nowhere; the test named "timeout" exercised errors only (8.3 "timeout … observable") | cheap at the edge (~6 lines), silent | **FIX** — a call slower than the timeout fails at the timeout and is never answered; test gap closed |
+| F4 | `_drop_stale` put the job back to pending and requested no sweep; with `sweep_interval_seconds=0` it never re-fired | cheap | **FIX** — one `_request_sweep`; test pins the second start at the drop time |
+| F5 | `Decision.reasons` reached no trace or report (5.1 "every fallback and reason is logged") | cheap | **FIX** — one field on `classifier_decision` |
+| F6 | `turn_hash` omitted `TurnInput.error`, so a retry turn replayed against a changed prompt | cheap | **FIX** — included only when set, so clean-turn hashes are unchanged. The rater flags this as the one the owner's sentence most plausibly waives; taken because it is the advertised contract and one line |
+| F7 | a replay that used a prefix of the recording exited 0 (silent) | cheap, silent | **FIX** — `[ERROR] replay used N of M recorded turns`, exit 1 |
+| F8 | a control first seen in replay got `last_activity=now`, so a mute older than the TTL stayed for a fresh TTL (5.4) | **not cheap** — the one-line fix (`setdefault(last_activity=post.time)`) is wrong: with a second replayed post inside the TTL of the mute, it expires a mute that §5.4 keeps (rater's trace, verified). Silent | **MAKE IT LOUD** — `age` field on `control_applied` (0 live; > TTL only in a replay). Behaviour not fixed. Rater's score: 0.01–0.1 h/y against 0.2 h/y tax, net ≤ 0 |
+| F9 | `classifier_posts=0` showed nothing instead of everything (3.1 "0 disables") | cheap | **FIX** — `or None` |
+| F10 | `"done": "false"` was truthy; an item with no other action was accepted as done and the cursor saved (silent discard) | cheap, silent | **FIX** — `done` must be a JSON boolean; wrong-types test extended |
+| F11 | `to` listing the sender among others passed; §5.9 said both "never the sender" (contract) and "addresses only the sender" (invalid list) | cheap; layer = §5.9 | **FIX** — code follows the contract sentence; the invalid-list line now says "names the sender among its recipients". Owner's call to reverse |
+
+**Where the two raters differed:** F8 only. Author had it `cheap` with exactly the
+one-line fix the rater showed wrong (checkable: two replayed posts, one thread,
+`_thread()` compares `now()` with the mute's time on the second post). Converged
+by evidence, not deference. Pattern for the file: *a one-line fix in replay
+bookkeeping that changes a §5.4 outcome is not `cheap` — the gate's "correct"
+clause, not its line count, is what fails.*
+
+**Where this differs from Codex's badges:** the three silent ones (F3, F10, F7)
+rank highest here; two carried P2. F1, F2 and F4 carried P1 and are bounded: F1
+fails loudly and needs a live model; F2 and F4 are unreachable from scenario YAML,
+and F4 is a ≤30 s delay under every shipped scenario.
+
+**Adoption:** 10 FIX + 1 MAKE IT LOUD of 11 — near 100 %, which the skill says to
+watch. Every one cleared `cheap` on the touched function (highest C901 in
+`tools/roomsim` is 7) and lands as one assertion in an existing test file; the
+pattern response for envelope types (round 0 F3, this round F1/F10) is the
+extended wrong-types parametrize rather than two more point fixes. 137 tests after
+the round.
+
+Also in the round, not a finding: live bot sessions now start with `--agent claude`
+so the operator's configured persona does not reach the bots (owner's ask; a
+resumed session keeps its agent — probed).

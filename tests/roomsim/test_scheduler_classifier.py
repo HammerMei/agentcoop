@@ -183,6 +183,16 @@ async def test_truncated_history_reports_the_omitted_count_and_profiles_reach_th
     assert (agent.display_name, agent.nickname, agent.profile) == ("A", "a-nick", "a profile")
 
 
+async def test_a_history_cap_of_zero_shows_the_whole_thread():
+    classifier = ScriptedClassifier()
+    sb = Sandbox(params=replace(FAST, classifier_posts=0), classifier=classifier)
+    for i in range(4):
+        await sb.human(f"post {i}")
+    await sb.run(1)
+    request = classifier.calls[-1]
+    assert [p.seq for p in request.history] == [3, 2, 1] and request.omitted == 0
+
+
 async def test_muted_bots_are_not_offered_to_the_classifier():
     classifier = ScriptedClassifier()
     sb = Sandbox(classifier=classifier)
@@ -207,6 +217,27 @@ async def test_timeout_retries_and_fallback_are_observable():
     await sb.run(2)
     decision = sb.trace.last("classifier_decision", post=2)
     assert decision.fallback is None and decision.add == ["b"]
+
+
+async def test_a_classifier_slower_than_its_timeout_is_retried_at_the_timeout_then_falls_back():
+    classifier = ScriptedClassifier(latency=30, default=Decision(add=("b",)))
+    sb = Sandbox(params=replace(FAST, classifier_timeout_seconds=10, classifier_retries=1,
+                               classifier_fallback="everyone"), classifier=classifier)
+    await sb.human("question")
+    await sb.run(21)
+    retry = sb.trace.last("classifier_retry", post=1)
+    assert retry.time == 10 and "timeout" in retry.error
+    decision = sb.trace.last("classifier_decision", post=1)
+    assert decision.time == 20 and decision.fallback == "everyone"
+    assert classifier.calls == []  # a timed-out call never answers
+
+
+async def test_classifier_reasons_reach_the_trace():
+    classifier = ScriptedClassifier(default=Decision(add=("b",), reasons={"b": "asked for a reviewer"}))
+    sb = Sandbox(classifier=classifier)
+    await sb.human("question")
+    await sb.run(1)
+    assert sb.trace.last("classifier_decision", post=1).reasons == {"b": "asked for a reviewer"}
 
 
 async def test_addressed_or_everyone_fallback_matches_current_behaviour_for_bot_posts():

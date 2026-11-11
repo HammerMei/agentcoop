@@ -146,3 +146,16 @@ async def test_recorded_run_replays_to_the_same_trace_and_a_drifted_replay_fails
     with pytest.raises(ReplayMismatch):
         await drifted.human("@a start, but differently")  # the first turn starts on the post
         await drifted.run(5)
+    longer = Replayer(recorder.records + [recorder.records[-1]])  # a recording with one more turn than the run
+    shorter = build(longer)
+    await shorter.human("@a start")
+    await shorter.run(5)
+    assert longer.unused() == 1  # the CLI turns this into an [ERROR] and a non-zero exit
+
+
+def test_turn_hash_covers_the_retry_error():
+    from tools.roomsim.bots import turn_hash
+    from tools.roomsim.model import Hint, TurnInput
+    first = TurnInput("a", "addressed", "main", (), Hint("addressed", "main", ()))
+    retry = replace(first, error="schema@main: done must be a boolean")
+    assert turn_hash(first) != turn_hash(retry)
