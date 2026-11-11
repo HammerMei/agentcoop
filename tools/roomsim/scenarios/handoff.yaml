@@ -1,0 +1,19 @@
+# Spec section 6.1: H asks a to run the migration and b to deploy when a is done.
+name: handoff
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: a, role: bot, display_name: Alpha, profile: "runs database migrations"}
+  - {username: b, role: bot, display_name: Bravo, profile: "deploys the backend"}
+  - {username: c, role: bot, display_name: Charlie, profile: "watches production and comments when asked"}
+params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
+         catch_up_post_threshold: 3, catch_up_age_seconds: 120}
+events:
+  - {at: 0, human: H, text: "@a run the migration; @b, when a is done, deploy."}
+bots:
+  a:
+    - {source: addressed, once: true, reply: {replies: [{to: [H, b], text: "migration complete, b go ahead"}]}}
+  b:
+    - {when_from: a, once: true, reply: {replies: [{to: [H, a], text: "deployed"}]}}
+    - {source: addressed, once: true, reply: {replies: [{done: true}], schedule: [{in_seconds: 1800, text: "has a finished the migration?"}]}}
+horizon: 300
