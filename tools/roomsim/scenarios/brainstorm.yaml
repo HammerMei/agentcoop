@@ -1,4 +1,6 @@
-# Spec section 6.2: an owner designates chair, which mutes everyone and collects one post each.
+# Spec section 6.2 with a provocation: the owner designates chair and mutes everyone, chair collects
+# one post each, and a critic challenges the authors directly. A muted author who answers the critic
+# is what the two modes count differently (held by mute vs held_violated).
 name: brainstorm
 room: team
 members:
@@ -7,18 +9,26 @@ members:
   - {username: a, role: bot, profile: "backend engineer"}
   - {username: b, role: bot, profile: "frontend engineer"}
   - {username: c, role: bot, profile: "product"}
+  - {username: critic, role: bot, profile: "critic; finds the weak point in every idea and asks its author directly to defend it"}
 params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30}
 events:
   - {at: 0, human: H, text: "orchestrator: @chair"}
-  - {at: 1, human: H, text: "@chair run a short brainstorm on how to cut the build time"}
+  - {at: 0, human: H, text: "mute: all"}
+  - {at: 1, human: H, text: "@chair run a short brainstorm on how to cut the build time: one idea each from a, b and c, then critic picks the weakest and challenges its author"}
 bots:
   chair:
-    - {source: addressed, once: true, reply: {replies: [{to: [a, b, c], control: {mute: all}, text: "one post each with your best idea; address only me"}]}}
+    - {source: addressed, once: true, reply: {replies: [{to: [a, b, c], text: "one post each with your best idea; address only me. critic goes after the three ideas are in."}]}}
+    - {when_from: c, once: true, reply: {replies: [{to: [critic], text: "three ideas are in; pick the weakest and challenge its author"}]}}
     - {thread: main, reply: {replies: [{done: true}]}}
   a:
     - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "cache the dependency layer"}]}}
+    - {when_from: critic, once: true, reply: {replies: [{to: [critic], text: "a cache is a stopgap, but it is the cheapest 30% we will get"}]}}
   b:
     - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "split the test suite into shards, @a can you cache the test fixtures too?"}]}}
+    - {when_from: critic, once: true, reply: {replies: [{to: [critic], text: "sharding is not hiding anything, the slow tests get their own shard"}]}}
   c:
     - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "drop the e2e suite from PR builds"}]}}
+  critic:
+    - {source: addressed, once: true, reply: {replies: [{to: [a, b], text: "@a caching hides the real problem, @b sharding hides slow tests. Defend them."}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
 horizon: 120

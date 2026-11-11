@@ -34,9 +34,11 @@ def _runner(args, members, room_name):
         return None
     from gateway.agents.claude.adapter import ClaudeBackend
 
-    # The built-in agent: the operator's configured persona must not reach the bots. A resumed
-    # session keeps the agent it was created with, so the first turn's args are enough.
-    backend = ClaudeBackend(command=args.claude_command, new_session_args=["--agent", "claude"],
+    # The built-in agent and a cheap model. These reach the first process only: the adapter
+    # resumes with the system prompt snapshot off, so a later turn re-applies the operator's
+    # `agent` setting unless the run uses an isolated --config-dir.
+    backend = ClaudeBackend(command=args.claude_command,
+                            new_session_args=["--agent", "claude", "--model", args.claude_model],
                             timeout=args.timeout, broker_config=None)
     workdir = args.workdir or tempfile.mkdtemp(prefix="roomsim-")
     return BackendBot(backend, workdir, args.timeout, room_name, members)
@@ -52,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", help="write posts, trace and status to this JSON file")
     parser.add_argument("--workdir", help="working directory for live agent sessions")
     parser.add_argument("--claude-command", default="claude")
+    parser.add_argument("--claude-model", default="sonnet", help="model for the bot sessions (sonnet, haiku, ...)")
     parser.add_argument("--config-dir", help="CLAUDE_CONFIG_DIR for the bot sessions (a lab login, not the operator's)")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")

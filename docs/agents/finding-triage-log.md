@@ -1044,7 +1044,7 @@ the round.
 
 Also in the round, not a finding: live bot sessions now start with `--agent claude`
 so the operator's configured persona does not reach the first turn (owner's ask).
-It does not cover later turns: `claude --resume` runs without `--agent` and loads
-the `agent` setting again — the brainstorm live run's session log shows the full
+It does not cover later turns: the adapter resumes with `--system-prompt-snapshot
+off` and without `--agent`, so the system prompt is rebuilt and the `agent` setting applies again — the brainstorm live run's session log shows the full
 persona in the resumed turn's system prompt. A self-report probe had said otherwise;
 the request shape in the log is the evidence, not the model's answer.
