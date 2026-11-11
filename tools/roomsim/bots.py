@@ -128,8 +128,10 @@ class BackendBot:
         room: str,
         members: list[Member],
         clock: Callable[[], float] = _time.monotonic,
+        env: dict[str, str] | None = None,
     ) -> None:
         self.backend = backend
+        self.env = env
         self.working_directory = working_directory
         self.timeout = timeout
         self.room = room
@@ -154,7 +156,8 @@ class BackendBot:
             if fresh:
                 intro = render_intro(self.members[turn.bot], self.room, list(self.members.values()))
                 prompt = f"{intro}\n\n{prompt}"
-            response = await self.backend.send(session_id, prompt, self.working_directory, self.timeout)
+            response = await self.backend.send(session_id, prompt, self.working_directory, self.timeout,
+                                               env=self.env)
         except Exception as exc:  # the backend failed: a process error, timeout, credentials
             return BotOutput(text="", failed=True, error=f"{type(exc).__name__}: {exc}",
                              duration_seconds=max(self._clock() - started, 0.0))
@@ -164,6 +167,8 @@ class BackendBot:
             duration_seconds=max(self._clock() - started, 0.0),
             input_tokens=usage.input_tokens if usage else 0,
             output_tokens=usage.output_tokens if usage else 0,
+            cache_read_tokens=usage.cache_read_tokens if usage else 0,
+            cache_write_tokens=usage.cache_write_tokens if usage else 0,
             cost_usd=response.cost_usd or 0.0,
             failed=response.is_error,
             error=response.text if response.is_error else "",

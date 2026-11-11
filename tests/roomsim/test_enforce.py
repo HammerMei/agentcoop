@@ -14,7 +14,9 @@ OFF = replace(FAST, enforce=False)
 
 
 def rules(sb):
-    return {m: (c["opportunities"], c["complied"], c["violated"], c["blocked"]) for m, c in sb.gw.status()["rules"].items()}
+    """(opportunities, complied, violated, rejected, held) per mechanism."""
+    return {m: (c["opportunities"], c["complied"], c["violated"], c["rejected"], c["held"])
+            for m, c in sb.gw.status()["rules"].items()}
 
 
 async def test_a_muted_bot_mention_is_held_when_enforced_and_runs_closed_when_not():
@@ -24,7 +26,7 @@ async def test_a_muted_bot_mention_is_held_when_enforced_and_runs_closed_when_no
     await on.sim.post("b", "@a what do you think?")
     await on.run(2)
     assert on.trace.last("turn_held", bot="a").gate == "mute" and on.posts_by("a") == []
-    assert rules(on)["mute"] == (1, 0, 0, 1)
+    assert rules(on)["mute"] == (1, 0, 0, 0, 1)  # held: the bot never chose
 
     off = Sandbox(params=OFF, script=script)
     await off.human("mute: @a")
@@ -33,7 +35,7 @@ async def test_a_muted_bot_mention_is_held_when_enforced_and_runs_closed_when_no
     turn = [t for t in off.bot.turns if t.bot == "a"][0]  # a's reply then started b's turn
     assert turn.hint.group_of("main").group == "closed" and turn.hint.group_of("main").closed_by == ("mute",)
     assert len(off.posts_by("a")) == 1  # posted anyway, counted as a violation
-    assert rules(off)["mute"] == (1, 0, 1, 0)
+    assert rules(off)["mute"] == (1, 0, 1, 0, 0)
 
 
 async def test_a_compliant_bot_scores_complied_in_the_measure_only_mode():
@@ -42,7 +44,7 @@ async def test_a_compliant_bot_scores_complied_in_the_measure_only_mode():
     await off.sim.post("b", "@a what do you think?")
     await off.run(2)
     assert off.posts_by("a") == []
-    assert rules(off)["mute"] == (1, 1, 0, 0)
+    assert rules(off)["mute"] == (1, 1, 0, 0, 0)
 
 
 async def test_rule_problems_are_posted_and_counted_when_not_enforced():
@@ -52,7 +54,7 @@ async def test_rule_problems_are_posted_and_counted_when_not_enforced():
     await off.run(2)
     assert off.trace.last("turn_end", bot="a").outcome == "normal"
     assert [p.text for p in off.posts_by("a")] == ["mute: @b", "@a talking to myself"]
-    assert rules(off)["authority"] == (1, 0, 1, 0) and rules(off)["recipients"] == (1, 0, 1, 0)
+    assert rules(off)["authority"] == (1, 0, 1, 0, 0) and rules(off)["recipients"] == (1, 0, 1, 0, 0)
     on = Sandbox(params=ON, script=script)
     await on.human("@a go")
     await on.run(2)
@@ -96,5 +98,31 @@ async def test_the_same_scenario_yields_comparable_counts_in_both_modes():
         await sb.human("@a go")
         await sb.run(3)
         counts[name] = rules(sb)
-    assert counts["on"]["rate_posts"] == (1, 0, 0, 1)
-    assert counts["off"]["rate_posts"] == (1, 0, 1, 0)
+    assert counts["on"]["rate_posts"] == (1, 0, 0, 0, 1)
+    assert counts["off"]["rate_posts"] == (1, 0, 1, 0, 0)
+
+
+async def test_a_turn_that_fails_on_a_rule_is_counted_as_rejected():
+    """The worst offender must show in the table: enforced, a bot that keeps writing in a
+    closed thread fails its turn and still counts one rejected opportunity per cause."""
+    script = Script().on(replies(item(thread="main", to=["H"], text="still talking"), item(thread="t2", done=True)), bot="a")
+    on = Sandbox(params=ON, script=script)
+    await on.human("mute: @a")
+    await on.human("news in main")
+    await on.human("@a hello", "t2")  # delivers main closed
+    await on.run(3)
+    assert on.trace.last("turn_end", bot="a").outcome == "invalid"
+    assert rules(on)["mute"] == (1, 0, 0, 1, 0)
+    assert rules(on)["must_reply"][3] == 0  # t2 was answered
+
+
+async def test_replay_of_an_already_delivered_mention_starts_no_turn_and_own_posts_seed_the_window():
+    script = Script().on(reply(["H"], "reply from a"), bot="a")
+    sb = Sandbox(params=ON, script=script)
+    await sb.human("@a go")
+    await sb.run(2)
+    before = sb.trace.count("turn_start", bot="a")
+    await sb.gw.restart(replay_after=0)  # replays the mention a already answered, and a's own reply
+    await sb.run(2)
+    assert sb.trace.count("turn_start", bot="a") == before
+    assert sb.gw.status()["threads"]["main"]["recent_posts"] == 1  # a's own post seeded the window

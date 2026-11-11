@@ -6,6 +6,10 @@ turn through the gateway's ``ClaudeBackend`` with the permission broker off, one
 session per bot; its wall-clock turn durations become simulated durations. ``--record``
 stores every turn's input hash and output so ``--replay`` reproduces the run without a
 model and fails loudly if the scenario has drifted.
+
+A live bot session inherits the operator's Claude Code configuration (user-level
+instructions, hooks, memory) unless ``--config-dir`` points ``CLAUDE_CONFIG_DIR`` at a
+directory set up for the lab; the CLI must be logged in there once, interactively.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -44,9 +49,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", help="write posts, trace and status to this JSON file")
     parser.add_argument("--workdir", help="working directory for live agent sessions")
     parser.add_argument("--claude-command", default="claude")
+    parser.add_argument("--config-dir", help="CLAUDE_CONFIG_DIR for the bot sessions (a lab login, not the operator's)")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")
     args = parser.parse_args(argv)
+    if args.config_dir:
+        os.environ["CLAUDE_CONFIG_DIR"] = str(Path(args.config_dir).expanduser())
 
     enforce = None if args.enforce is None else args.enforce == "on"
     preview = load(args.scenario, enforce)

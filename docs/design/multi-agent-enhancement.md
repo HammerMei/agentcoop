@@ -931,9 +931,11 @@ an agent could have obeyed by itself: mute, rate and cooldown closure, control
 authority, the must-reply group, recipients. Backoff, the degraded state, one
 turn per bot, the cursor and the failure notice stay on, because a bot cannot
 obey those alone. For each such rule the run counts opportunities, and whether
-the bot complied, violated (enforcement off) or was blocked (enforcement on).
-Running one scenario in both modes puts the two numbers side by side: what the
-agents follow on their own, and what the gateway has to enforce. The comparison
+the bot complied, violated (enforcement off), wrote a reply the gateway rejected
+(enforcement on), or was held before it could choose (enforcement on). Running
+one scenario in both modes puts violated and rejected side by side: what the
+agents follow on their own, and what the gateway has to enforce. Held turns are
+the gateway's own work and have no counterpart with enforcement off. The comparison
 is for live runs; a recording replays in the mode it was made in.
 People review each transcript for exchanges that read incorrectly, revise the
 relevant rule in section 5, and rerun the scenario. This feedback loop is the

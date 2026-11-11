@@ -112,10 +112,16 @@ class CachedDecision:
 
 @dataclass
 class RuleCount:
+    """Per mechanism: ``held`` turns the gateway never started (the bot chose nothing);
+    ``rejected`` envelopes the bot wrote and the gateway refused (enforced); ``violated``
+    envelopes the bot wrote and the gateway let through (not enforced); ``complied``
+    the bot obeyed on its own. Only ``rejected`` compares with ``violated``."""
+
     opportunities: int = 0
     complied: int = 0
     violated: int = 0
-    blocked: int = 0
+    rejected: int = 0
+    held: int = 0
 
 
 @dataclass
@@ -128,7 +134,10 @@ class TurnRun:
     posts: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
     cost_usd: float = 0.0
+    last_env: Envelope = field(default_factory=Envelope)
 
 
 # ── the gateway ─────────────────────────────────────────────────────────────
@@ -158,14 +167,15 @@ class SimGateway:
         self.persisted: dict[str, BotPersisted] = {b: BotPersisted() for b in hosted}
         self.volatile: dict[str, BotVolatile] = {b: BotVolatile() for b in hosted}
         self.decisions: dict[int, CachedDecision] = {}
+        self.replaying = False
         self.rules: dict[str, RuleCount] = {}
         self.totals: dict[str, dict[str, int]] = {b: self._zero_totals() for b in hosted}
         self._job_seq = 0
 
     @staticmethod
     def _zero_totals() -> dict[str, int]:
-        return {"turns": 0, "posts": 0, "words": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0,
-                "sweeps": 0, "failures": 0, "invalid": 0}
+        return {"turns": 0, "posts": 0, "words": 0, "tokens_in": 0, "tokens_out": 0, "cache_read": 0,
+                "cache_write": 0, "cost_usd": 0.0, "sweeps": 0, "failures": 0, "invalid": 0}
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -188,8 +198,17 @@ class SimGateway:
         """Reconnect: posts after ``replay_after`` are replayed as new triggers; earlier
         ones were missed (section 5.6)."""
         self.online = True
-        for post in self.sim.room.after(replay_after):
-            await self.on_post(post)
+        await self._replay(replay_after)
+
+    async def _replay(self, replay_after: int) -> None:
+        """Replayed posts are new triggers for what is still undelivered and seed the rate
+        window, own posts included, since none of them was counted at post time (5.3)."""
+        self.replaying = True
+        try:
+            for post in self.sim.room.after(replay_after):
+                await self.on_post(post)
+        finally:
+            self.replaying = False
 
     async def restart(self, replay_after: int) -> None:
         """Keep persisted state, reset in-memory state, replay recent posts to seed the
@@ -198,8 +217,7 @@ class SimGateway:
         self.volatile = {b: BotVolatile() for b in self.hosted}
         self.decisions = {}
         self.online = True
-        for post in self.sim.room.after(replay_after):
-            await self.on_post(post)
+        await self._replay(replay_after)
 
     # ── helpers over state ──────────────────────────────────────────────────
 
@@ -255,10 +273,11 @@ class SimGateway:
         if self._apply_controls(post):
             return
         self._count_for_rate(post)
-        addressed = tuple(b for b in copies if post.addresses(b))
+        addressed = tuple(b for b in copies if post.addresses(b) and post.seq > self.persisted[b].cursor)
         for bot in addressed:
             await self._try_start(bot, "addressed", post.thread, trigger=post)
-        await self._classify(post, addressed)
+        if any(post.seq > self.persisted[b].cursor for b in copies):
+            await self._classify(post, addressed)
 
     # step 1 — AUTHORITY / SETTINGS
     def _apply_controls(self, post: Post) -> bool:
@@ -330,7 +349,7 @@ class SimGateway:
             for bot in list(state.held_by_rate):
                 self._request_sweep(bot, "human post")
             state.held_by_rate.clear()
-        elif post.kind == "bot" and post.author in self.agents and post.author not in self.hosted:
+        elif post.kind == "bot" and post.author in self.agents and (post.author not in self.hosted or self.replaying):
             if not self.is_orchestrator(post.author, post.thread):
                 state.recent.append((post.time, post.author, post.words))
 
@@ -426,7 +445,7 @@ class SimGateway:
             for cause in holds:
                 if (key, cause) not in self.volatile[bot].counted_holds:
                     self.volatile[bot].counted_holds.add((key, cause))
-                    self._count_rule(bot, thread, cause, "blocked")
+                    self._count_rule(bot, thread, cause, "held")
             self._held(bot, source, thread, holds[0], job)
             return False
         self.volatile[bot].counted_holds.clear()
@@ -680,6 +699,8 @@ class SimGateway:
     def _account(run: TurnRun, output: BotOutput) -> None:
         run.tokens_in += output.input_tokens
         run.tokens_out += output.output_tokens
+        run.cache_read += output.cache_read_tokens
+        run.cache_write += output.cache_write_tokens
         run.cost_usd += output.cost_usd
 
     # ── step 8/9: output, posting, commit ───────────────────────────────────
@@ -695,6 +716,7 @@ class SimGateway:
         except ParseError as exc:
             structural, rules, env = [Problem("schema", None, str(exc))], [], Envelope()
         run.problems.update((p.mechanism, p.thread) for p in rules)
+        run.last_env = env
         rejected = structural + (rules if self.params.enforce else [])
         if rejected:
             await self._invalid(run, rejected, output)
@@ -735,7 +757,7 @@ class SimGateway:
         self._commit(run, env, posted_threads)
         for request in env.schedule:
             self.schedule_job(bot, request.thread or run.turn.starting_thread, request.text, request.in_seconds)
-        self._count_turn_rules(run, env)
+        self._count_turn_rules(run)
         self._finish(run, "normal")
 
     async def _post_replies(self, run: TurnRun, env: Envelope) -> set[str]:
@@ -788,6 +810,8 @@ class SimGateway:
         state.running = False
         self.totals[bot]["tokens_in"] += run.tokens_in
         self.totals[bot]["tokens_out"] += run.tokens_out
+        self.totals[bot]["cache_read"] += run.cache_read
+        self.totals[bot]["cache_write"] += run.cache_write
         self.totals[bot]["cost_usd"] += run.cost_usd
         if outcome == "normal":
             state.retry_after, state.backoff_level, state.backoff_notice_sent = 0.0, 0, False
@@ -833,6 +857,7 @@ class SimGateway:
             state.degraded = True
             self.sim.trace.add(self.now(), "degraded", gateway=self.name, bot=bot, streak=state.invalid_streak)
             await self._notice(bot, run.turn.starting_thread, "degraded")
+        self._count_turn_rules(run)  # a turn that failed on a rule is the worst offender
         self._finish(run, "invalid")
 
     async def _notice(self, bot: str, thread: str, cause: str) -> None:
@@ -851,11 +876,12 @@ class SimGateway:
         self.sim.trace.add(self.now(), "rule", gateway=self.name, bot=bot, thread=thread,
                            mechanism=mechanism, outcome=outcome)
 
-    def _count_turn_rules(self, run: TurnRun, env: Envelope) -> None:
+    def _count_turn_rules(self, run: TurnRun) -> None:
         """One count per opportunity the turn had, from the problems seen across its
-        attempts: ``blocked`` when enforced, ``violated`` when not, else ``complied``."""
+        attempts: ``rejected`` when enforced, ``violated`` when not, else ``complied``."""
         bot = run.turn.bot
-        broke = "blocked" if self.params.enforce else "violated"
+        env = run.last_env
+        broke = "rejected" if self.params.enforce else "violated"
         for group in run.turn.hint.threads:
             if group.group == "closed":
                 for cause in group.closed_by:

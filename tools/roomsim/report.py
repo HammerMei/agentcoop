@@ -3,10 +3,12 @@ totals, and the rule table that the enforcement toggle exists for.
 
 The rule table has one row per mechanism: ``opportunities`` is how often a bot faced
 the rule; ``complied`` how often it obeyed on its own; ``violated`` how often it broke
-it when nothing stopped it (``enforce: false``); ``blocked`` how often the gateway
-stopped it (``enforce: true``). The same scenario run in both modes gives the two
-numbers the design wants side by side: what agents follow by themselves, and what the
-gateway has to enforce.
+it when nothing stopped it (``enforce: false``); ``rejected`` how often it wrote a reply
+the gateway refused (``enforce: true``); ``held`` how often the gateway never started
+the turn, so the bot chose nothing. The same scenario run in both modes gives the two
+numbers the design wants side by side, ``violated`` against ``rejected``: what agents
+follow by themselves, and what the gateway has to enforce. ``held`` is the gateway's
+own work and has no counterpart in the other mode.
 """
 
 from __future__ import annotations
@@ -47,12 +49,14 @@ def transcript(sim: Simulation, show_rules: bool = False) -> str:
 
 
 def totals(gateways: Iterable[SimGateway]) -> str:
-    head = "| gateway | bot | turns | posts | words | tokens in | tokens out | cost USD | sweeps | failures | invalid |"
-    rows = [head, "|" + "---|" * 11]
+    head = ("| gateway | bot | turns | posts | words | tokens in | tokens out | cache read | cache write "
+            "| cost USD | sweeps | failures | invalid |")
+    rows = [head, "|" + "---|" * 13]
     for gw in gateways:
         for bot, t in gw.totals.items():
             rows.append(f"| {gw.name} | {bot} | {t['turns']} | {t['posts']} | {t['words']} | {t['tokens_in']} "
-                        f"| {t['tokens_out']} | {t['cost_usd']:.4f} | {t['sweeps']} | {t['failures']} | {t['invalid']} |")
+                        f"| {t['tokens_out']} | {t['cache_read']} | {t['cache_write']} | {t['cost_usd']:.4f} "
+                        f"| {t['sweeps']} | {t['failures']} | {t['invalid']} |")
     return "\n".join(rows)
 
 
@@ -60,13 +64,13 @@ def rules(gateways: Iterable[SimGateway]) -> str:
     merged: dict[str, dict[str, int]] = {}
     for gw in gateways:
         for mechanism, count in gw.rules.items():
-            row = merged.setdefault(mechanism, {"opportunities": 0, "complied": 0, "violated": 0, "blocked": 0})
+            row = merged.setdefault(mechanism, {"opportunities": 0, "complied": 0, "violated": 0, "rejected": 0, "held": 0})
             for key in row:
                 row[key] += getattr(count, key)
-    lines = ["| mechanism | opportunities | complied | violated | blocked |", "|---|---|---|---|---|"]
+    lines = ["| mechanism | opportunities | complied | violated | rejected | held |", "|---|---|---|---|---|---|"]
     for mechanism in sorted(merged):
         r = merged[mechanism]
-        lines.append(f"| {mechanism} | {r['opportunities']} | {r['complied']} | {r['violated']} | {r['blocked']} |")
+        lines.append(f"| {mechanism} | {r['opportunities']} | {r['complied']} | {r['violated']} | {r['rejected']} | {r['held']} |")
     return "\n".join(lines)
 
 
