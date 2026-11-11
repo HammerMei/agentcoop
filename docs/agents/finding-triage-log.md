@@ -1043,5 +1043,8 @@ extended wrong-types parametrize rather than two more point fixes. 137 tests aft
 the round.
 
 Also in the round, not a finding: live bot sessions now start with `--agent claude`
-so the operator's configured persona does not reach the bots (owner's ask; a
-resumed session keeps its agent — probed).
+so the operator's configured persona does not reach the first turn (owner's ask).
+It does not cover later turns: `claude --resume` runs without `--agent` and loads
+the `agent` setting again — the brainstorm live run's session log shows the full
+persona in the resumed turn's system prompt. A self-report probe had said otherwise;
+the request shape in the log is the evidence, not the model's answer.
