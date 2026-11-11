@@ -114,7 +114,7 @@ Each definition below uses only ordinary language or terms defined above it.
 | **post** | One platform message written by a human or bot. |
 | **bot** | An agent's presence on one chat server. Within one room, that presence is a watcher. |
 | **thread** | A platform thread, or all top-level room posts treated as one thread. The rules below apply per thread. |
-| **addressed** | A post mentions a bot. Human posts may use `@bot`, `@all`, or a room-wide mention. Bot posts use only mentions the platform recorded on their post. A bare name is not an address. A 1:1 DM addresses its bot by definition. |
+| **addressed** | A post mentions a bot. Human posts may use `@bot`, `@all`, or a room-wide mention. Bot posts use only mentions the platform recorded on their post. A bare name is not an address, and a name on a control line (`mute: @a`) is the control's target, not an address. A 1:1 DM addresses its bot by definition. |
 | **scheduled job** | A reminder a bot creates through the existing scheduler. It fires at a chosen time for that bot in one thread, without a new platform post. |
 | **classifier** | A small model that chooses which additional bots should speak for a post. It never writes a reply or removes an addressed bot. |
 | **rate limit** | A per-thread post and word allowance. Once reached, it delays further bot invocations unless their source is exempt. |
@@ -698,7 +698,9 @@ failure doubles the wait, up to `failure_backoff_max_seconds`. While that time
 is in the future the bot is treated as under cooldown: no sweep, classifier, or
 bot-mention turn starts, and a scheduled job that falls due waits for the
 backoff to end without counting as a job retry. A human or orchestrator mention
-still starts a turn. One normal turn end clears the backoff. The gateway posts
+that arrives during the backoff still starts a turn; the sweeper's retry of the
+failed turn waits for the backoff like any other sweep-started turn. One normal
+turn end clears the backoff. The gateway posts
 one failure notice at the first failure of an episode and none during the
 backoff. `STATUS` shows the backoff and the next retry time.
 
@@ -709,8 +711,9 @@ failed on a second invalid envelope. Backend failures neither add to nor reset
 the count. At `consecutive_invalid_limit` the bot is degraded in that room: it
 is eligible as in the muted column of `TURN_ELIGIBILITY` (the sweeper skips it,
 the classifier is not offered it, a bot mention starts nothing, its jobs wait
-in backlog), while a human or orchestrator mention still starts a turn, which
-is the probe. A normal turn end clears the degraded state and the count. The
+in backlog), while a new human or orchestrator mention still starts a turn,
+which is the probe; the sweeper does not retry the post whose turn failed. A
+normal turn end clears the degraded state and the count. The
 gateway posts one failure notice at the first twice-invalid turn of a streak,
 one more when the bot becomes degraded, and none between. `STATUS` shows
 degraded bots. A restart resets both the count and the state. With
@@ -921,6 +924,17 @@ the current OpenCode adapter targets opencode 1.x. Conclusions about how well
 models follow these rules are provisional until a second model has run.
 Scripted human events enter at fixed steps. Output should include an annotated transcript and per-bot totals for
 turns, posts, words, tokens, context size, classifier decisions, and sweeps.
+
+The simulator has an enforcement switch. With enforcement off it keeps every
+threshold and every `HINT` but holds no turn and rejects no envelope for a rule
+an agent could have obeyed by itself: mute, rate and cooldown closure, control
+authority, the must-reply group, recipients. Backoff, the degraded state, one
+turn per bot, the cursor and the failure notice stay on, because a bot cannot
+obey those alone. For each such rule the run counts opportunities, and whether
+the bot complied, violated (enforcement off) or was blocked (enforcement on).
+Running one scenario in both modes puts the two numbers side by side: what the
+agents follow on their own, and what the gateway has to enforce. The comparison
+is for live runs; a recording replays in the mode it was made in.
 People review each transcript for exchanges that read incorrectly, revise the
 relevant rule in section 5, and rerun the scenario. This feedback loop is the
 purpose of building the simulator first.
@@ -960,7 +974,7 @@ input. Keep that separate from operational outcomes, including:
 
 | # | Increment | Main mechanisms |
 |---|---|---|
-| 0 | Simulator and scenarios | All section 5 mechanics, outside the gateway runtime; backend adapters imported |
+| 0 | Simulator and scenarios | All section 5 mechanics, outside the gateway runtime; backend adapters imported; the enforcement switch and per-rule counts |
 | 1 | Deliver, do not drop | Cursor, multi-thread envelope, canonical form, failure notice and failure counters, settings persistence |
 | 2 | Bot-sender eligibility and mute | Eligibility table, mute, authority |
 | 3 | Rate and cooldown | Rate state, exemptions, orchestrator, agent-list checks, hints |
