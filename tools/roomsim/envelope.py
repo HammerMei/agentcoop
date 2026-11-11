@@ -75,21 +75,26 @@ def _item(raw, index: int) -> ReplyItem:
     to = raw.get("to")
     if isinstance(to, str):
         to = [to]
-    return ReplyItem(
-        thread=raw.get("thread"),
-        to=list(to) if to is not None else None,
-        text=raw.get("text"),
-        control=raw.get("control"),
-        done=bool(raw.get("done", False)),
-    )
+    if to is not None and not (isinstance(to, list) and all(isinstance(n, str) for n in to)):
+        raise ParseError(f"reply {index}: to must be a list of usernames")
+    thread, text, control = raw.get("thread"), raw.get("text"), raw.get("control")
+    if thread is not None and not isinstance(thread, str):
+        raise ParseError(f"reply {index}: thread must be a string")
+    if text is not None and not isinstance(text, str):
+        raise ParseError(f"reply {index}: text must be a string")
+    if control is not None and not isinstance(control, dict):
+        raise ParseError(f"reply {index}: control must be an object")
+    return ReplyItem(thread=thread, to=list(to) if to is not None else None, text=text, control=control,
+                     done=bool(raw.get("done", False)))
 
 
 def _job(raw) -> JobRequest:
-    if not isinstance(raw, dict) or "in_seconds" not in raw:
-        raise ParseError("schedule entry needs in_seconds")
-    return JobRequest(
-        in_seconds=float(raw["in_seconds"]), text=str(raw.get("text", "")), thread=raw.get("thread")
-    )
+    if not isinstance(raw, dict) or not isinstance(raw.get("in_seconds"), (int, float)):
+        raise ParseError("schedule entry needs a numeric in_seconds")
+    thread = raw.get("thread")
+    if thread is not None and not isinstance(thread, str):
+        raise ParseError("schedule entry: thread must be a string")
+    return JobRequest(in_seconds=float(raw["in_seconds"]), text=str(raw.get("text", "")), thread=thread)
 
 
 # ── validation ──────────────────────────────────────────────────────────────
@@ -156,7 +161,7 @@ def _shape_ok(item: ReplyItem, structural: list[Problem]) -> bool:
 
 def _check_recipients(item: ReplyItem, ctx: ValidationContext, structural, rules) -> None:
     if not item.to:
-        structural.append(Problem("schema", item.thread, "text without recipients"))
+        rules.append(Problem(RECIPIENTS, item.thread, "text without recipients"))
         return
     if set(item.to) == {ctx.bot}:
         rules.append(Problem(RECIPIENTS, item.thread, "addresses only the sender"))
@@ -177,8 +182,15 @@ def _check_control(item: ReplyItem, ctx: ValidationContext, structural, rules) -
     for key in ("mute", "unmute"):
         if key in control:
             _check_name_list(control[key], key, item.thread, ctx, structural)
+    if "limit" in control and not _limit_ok(control["limit"]):
+        structural.append(Problem("schema", item.thread, "limit must map posts/words to integers"))
     if item.thread not in ctx.orchestrator_in:
         rules.append(Problem(AUTHORITY, item.thread, "control from a non-orchestrator"))
+
+
+def _limit_ok(value) -> bool:
+    return isinstance(value, dict) and bool(value) and set(value) <= {"posts", "words"} \
+        and all(isinstance(v, int) and v >= 0 for v in value.values())
 
 
 def _check_name_list(value, key: str, thread: str | None, ctx: ValidationContext, structural) -> None:

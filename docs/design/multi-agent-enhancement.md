@@ -498,9 +498,12 @@ of its turns ends, when it becomes free, and when a control or human post
 requests one (`MUTE`, `RATE_LIMIT`). Sweeps for different bots or rooms may run
 in parallel. It considers, in this order:
 
-1. the oldest backlog post that currently addresses or selects the bot;
+1. backlog posts that currently address or select the bot, oldest first, each
+   checked against the turn table so a held older post (a bot's mention of a
+   muted bot) cannot hide a newer human mention behind it;
 2. unfinished threads that have become open;
-3. threads due for catch-up.
+3. a scheduled-job firing held in backlog (`MUTE`, `FAILURE_NOTICE`);
+4. threads due for catch-up.
 
 The sweep chooses its candidate list once, then rechecks each candidate before
 starting a turn. Because the first turn delivers the entire room backlog, later
@@ -932,10 +935,12 @@ authority, the must-reply group, recipients. Backoff, the degraded state, one
 turn per bot, the cursor and the failure notice stay on, because a bot cannot
 obey those alone. For each such rule the run counts opportunities, and whether
 the bot complied, violated (enforcement off), wrote a reply the gateway rejected
-(enforcement on), or was held before it could choose (enforcement on). Running
-one scenario in both modes puts violated and rejected side by side: what the
-agents follow on their own, and what the gateway has to enforce. Held turns are
-the gateway's own work and have no counterpart with enforcement off. The comparison
+(enforcement on), or was held before it could choose (enforcement on); a turn
+that enforcement off let run where enforcement on would have held it is counted
+apart, by whether the bot stayed silent in that thread. Running one scenario in
+both modes puts violated beside rejected, and the held turns beside what the
+bots did when not held: what the agents follow on their own, and what the
+gateway has to enforce. The comparison
 is for live runs; a recording replays in the mode it was made in.
 People review each transcript for exchanges that read incorrectly, revise the
 relevant rule in section 5, and rerun the scenario. This feedback loop is the

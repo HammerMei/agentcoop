@@ -71,13 +71,22 @@ class Simulation:
         self.gateways.append(gateway)
         gateway.start()
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
-        """Append a post and deliver it to every gateway, in server order."""
+    def append(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
+        """Append a post in server order without delivering it yet. A gateway posting
+        for its own bot counts the post before the other gateways see it (5.3)."""
         post = self.room.post(self.clock, author, text, thread, kind)
         self.trace.add(self.clock, "post", seq=post.seq, thread=thread, author=author,
                        post_kind=post.kind, mentions=sorted(post.mentions))
+        return post
+
+    async def deliver(self, post: Post) -> None:
         for gateway in self.gateways:
             await gateway.on_post(post)
+
+    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
+        """Append a post and deliver it to every gateway."""
+        post = self.append(author, text, thread, kind)
+        await self.deliver(post)
         return post
 
     def human(self, delay: float, author: str, text: str, thread: str = MAIN_THREAD) -> None:

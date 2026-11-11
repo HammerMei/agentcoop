@@ -65,8 +65,6 @@ class TestInvalidCombinations:
         [
             ('{"thread": "main"}', "item has no action"),
             ('{"thread": "main", "done": true, "text": "x", "to": ["H"]}', "done with text or control"),
-            ('{"thread": "main", "text": "x"}', "text without recipients"),
-            ('{"thread": "main", "text": "x", "to": []}', "text without recipients"),
             ('{"thread": "main", "text": "   ", "to": ["H"]}', "empty text"),
             ('{"thread": "zzz", "done": true}', "thread not delivered nor listed"),
             ('{"thread": "opt", "control": {"mute": []}}', "mute list is empty"),
@@ -109,6 +107,27 @@ class TestInvalidCombinations:
     def test_recipient_rules(self):
         _, rules = problems('{"replies": [{"to": ["a"], "text": "me"}, {"thread": "unf", "to": ["ghost"], "text": "x"}]}')
         assert rules == [("recipients", "main"), ("recipients", "unf")]
+
+    @pytest.mark.parametrize("body", ['{"thread": "main", "text": "x"}', '{"thread": "main", "text": "x", "to": []}'])
+    def test_text_without_recipients_is_a_recipients_rule_not_a_schema_error(self, body):
+        structural, rules = problems('{"replies": [' + body + ', {"thread": "unf", "done": true}]}')
+        assert structural == [] and rules == [("recipients", "main")]
+
+    @pytest.mark.parametrize("text", [
+        '{"replies": [{"to": 5, "text": "x"}]}',
+        '{"replies": [{"to": ["H"], "text": ["x"]}]}',
+        '{"replies": [{"thread": {"a": 1}, "done": true}]}',
+        '{"replies": [{"control": "mute"}]}',
+        '{"replies": [{"done": true}], "schedule": [{"in_seconds": "soon"}]}',
+    ])
+    def test_wrong_types_are_parse_errors_not_crashes(self, text):
+        with pytest.raises(ParseError):
+            parse_envelope(text)
+
+    def test_limit_shape_is_checked(self):
+        structural, _ = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": "ten"}}},'
+                                 ' {"done": true}, {"thread": "unf", "done": true}]}')
+        assert [s[2] for s in structural] == ["limit must map posts/words to integers"]
 
     def test_thread_defaults_to_the_starting_thread(self):
         env = parse_envelope('{"replies": [{"to": ["H"], "text": "x"}, {"thread": "unf", "done": true}]}')

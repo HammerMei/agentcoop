@@ -99,6 +99,9 @@ class BotVolatile:
     previous_failure: str | None = None
     refused: tuple[str, ...] = ()
     expired_decisions: set[int] = field(default_factory=set)
+    # Bumped by restart; a turn that ends under an older generation belonged to the
+    # process that died, and its output is dropped (the replayed turn answers instead).
+    generation: int = 0
     # (trigger seq or thread, cause) holds already counted as blocked, so a hold the
     # periodic sweep finds again is one opportunity, not one per sweep.
     counted_holds: set[tuple[object, str]] = field(default_factory=set)
@@ -112,16 +115,22 @@ class CachedDecision:
 
 @dataclass
 class RuleCount:
-    """Per mechanism: ``held`` turns the gateway never started (the bot chose nothing);
-    ``rejected`` envelopes the bot wrote and the gateway refused (enforced); ``violated``
-    envelopes the bot wrote and the gateway let through (not enforced); ``complied``
-    the bot obeyed on its own. Only ``rejected`` compares with ``violated``."""
+    """Per mechanism. Two pairs compare across modes:
+
+    - ``rejected`` (enforced: the bot wrote a reply the gateway refused) against
+      ``violated`` (not enforced: the gateway let it through); ``complied`` is the bot
+      obeying on its own in a thread it was not started for;
+    - ``held`` (enforced: the gateway never started the turn) against
+      ``held_complied`` / ``held_violated`` (not enforced: the turn ran for a thread the
+      rule would have held, and the bot stayed silent there or did not)."""
 
     opportunities: int = 0
     complied: int = 0
     violated: int = 0
     rejected: int = 0
     held: int = 0
+    held_complied: int = 0
+    held_violated: int = 0
 
 
 @dataclass
@@ -137,7 +146,9 @@ class TurnRun:
     cache_read: int = 0
     cache_write: int = 0
     cost_usd: float = 0.0
-    last_env: Envelope = field(default_factory=Envelope)
+    generation: int = 0
+    # (thread, "control" | "text") items the bot wrote on any attempt: what it tried.
+    items_seen: set[tuple[str, str]] = field(default_factory=set)
 
 
 # ── the gateway ─────────────────────────────────────────────────────────────
@@ -214,7 +225,7 @@ class SimGateway:
         """Keep persisted state, reset in-memory state, replay recent posts to seed the
         rate window (section 5.3) and as new triggers (section 5.6)."""
         self.thread_state = {}
-        self.volatile = {b: BotVolatile() for b in self.hosted}
+        self.volatile = {b: BotVolatile(generation=v.generation + 1) for b, v in self.volatile.items()}
         self.decisions = {}
         self.online = True
         await self._replay(replay_after)
@@ -270,10 +281,11 @@ class SimGateway:
         self._thread(post.thread).last_activity = max(self._thread(post.thread).last_activity, post.time)
         if post.kind == "notice":
             return  # recognised before eligibility: no turn, no classifier, not in the window
+        self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)
         if self._apply_controls(post):
             return
-        self._count_for_rate(post)
-        addressed = tuple(b for b in copies if post.addresses(b) and post.seq > self.persisted[b].cursor)
+        dm = self.sim.room.is_dm  # a 1:1 DM addresses its bot by definition (section 3)
+        addressed = tuple(b for b in copies if (dm or post.addresses(b)) and post.seq > self.persisted[b].cursor)
         for bot in addressed:
             await self._try_start(bot, "addressed", post.thread, trigger=post)
         if any(post.seq > self.persisted[b].cursor for b in copies):
@@ -385,6 +397,8 @@ class SimGateway:
         return causes
 
     def _in_cooldown(self, bot: str, thread: str) -> bool:
+        if self.is_orchestrator(bot, thread):
+            return False  # always exempt from rate and cooldown gates (4.1)
         last = self.volatile[bot].last_post.get(thread)
         return bool(self.params.cooldown_seconds) and last is not None \
             and self.now() - last < self.params.cooldown_seconds
@@ -448,7 +462,8 @@ class SimGateway:
                     self._count_rule(bot, thread, cause, "held")
             self._held(bot, source, thread, holds[0], job)
             return False
-        self.volatile[bot].counted_holds.clear()
+        key = trigger.seq if trigger is not None else thread
+        self.volatile[bot].counted_holds = {k for k in self.volatile[bot].counted_holds if k[0] != key}
         await self._start_turn(bot, source, thread, trigger, job, hwm, held_by=tuple(holds))
         return True
 
@@ -468,7 +483,8 @@ class SimGateway:
             return
         self.decisions[post.seq] = CachedDecision()
         self.sim.trace.add(self.now(), "classifier_call", gateway=self.name, post=post.seq)
-        await self._classifier_attempt(post, self._all_addressed(post), 1)
+        request = self._request(post, self._all_addressed(post))  # what the classifier sees is fixed now
+        await self._classifier_attempt(request, 1)
 
     def _classifier_applies(self, post: Post) -> bool:
         if self.classifier is None or not self.params.classifier_enabled or post.seq in self.decisions:
@@ -476,9 +492,13 @@ class SimGateway:
         if self.sim.room.is_dm or (post.controls and is_control_only(post.text)):
             return False
         bots = [b for b in self._bots_in_room() if b != post.author]
-        if self.params.enforce and all(self.is_muted(b, post.thread) for b in bots):
-            return False
-        return True
+        return not all(self._not_offered(b, post.thread) for b in bots)
+
+    def _not_offered(self, bot: str, thread: str) -> bool:
+        """Muted and degraded bots are not offered to the classifier (5.2, 5.10). This is
+        gateway work the bot cannot influence, so it is the same in both enforce modes."""
+        degraded = bot in self.volatile and self.volatile[bot].degraded
+        return self.is_muted(bot, thread) or degraded
 
     def _all_addressed(self, post: Post) -> tuple[str, ...]:
         return tuple(b for b in self._bots_in_room() if post.addresses(b) and b != post.author)
@@ -487,25 +507,22 @@ class SimGateway:
         history = self.sim.room.thread_posts(post.thread, newest_first=True)
         history = [p for p in history if p.seq != post.seq]
         shown = tuple(history[: self.params.classifier_posts])
-        offered = [
-            self.sim.room.members[b]
-            for b in self._bots_in_room()
-            if not (self.params.enforce and self.is_muted(b, post.thread))
-        ]
+        offered = [self.sim.room.members[b] for b in self._bots_in_room() if not self._not_offered(b, post.thread)]
         return ClassifierRequest(post, addressed, shown, len(history) - len(shown), tuple(offered))
 
-    async def _classifier_attempt(self, post: Post, addressed: tuple[str, ...], attempt: int) -> None:
+    async def _classifier_attempt(self, request: ClassifierRequest, attempt: int) -> None:
         latency = getattr(self.classifier, "latency", 0.0)
-        self.sim.at(latency, self._classifier_result, post, addressed, attempt)
+        self.sim.at(latency, self._classifier_result, request, attempt)
 
-    async def _classifier_result(self, post: Post, addressed: tuple[str, ...], attempt: int) -> None:
+    async def _classifier_result(self, request: ClassifierRequest, attempt: int) -> None:
+        post, addressed = request.post, request.addressed
         try:
-            decision = await self.classifier.classify(self._request(post, addressed))
+            decision = await self.classifier.classify(request)
         except ClassifierError as exc:
             if attempt <= self.params.classifier_retries:
                 self.sim.trace.add(self.now(), "classifier_retry", gateway=self.name, post=post.seq,
                                    attempt=attempt, error=str(exc))
-                await self._classifier_attempt(post, addressed, attempt + 1)
+                await self._classifier_attempt(request, attempt + 1)
                 return
             decision = fallback_decision(self.params.classifier_fallback, post, addressed, self._bots_in_room())
         await self._decided(post, addressed, decision)
@@ -550,17 +567,19 @@ class SimGateway:
                 return
 
     def _candidates(self, bot: str) -> list[tuple[str, object]]:
+        """Section 5.7's order: backlog posts that address or select the bot, oldest
+        first (every one, so a held older post cannot mask a newer human mention);
+        unfinished threads; job firings held in backlog; threads due for catch-up.
+        Each candidate is rechecked by ``_try_start``, which holds or starts it."""
         found: list[tuple[str, object]] = []
-        for job in self.persisted[bot].jobs.values():
-            if job.pending:
-                found.append(("job", job.id))
         for post in self._backlog(bot):
             if post.kind != "notice" and (post.addresses(bot) or self._decision_for(bot, post)):
                 found.append(("post", post.seq))
-                break
-        for thread in sorted(self.persisted[bot].unfinished):
-            if not self._closed_by(bot, thread):
-                found.append(("unfinished", thread))
+        # An unfinished thread is a candidate once it "has become open" (5.7), and a
+        # thread is due for catch-up only when open and out of cooldown: a closed one
+        # is not held, it is not a candidate, in either enforce mode.
+        found += [("unfinished", t) for t in sorted(self.persisted[bot].unfinished) if not self._closed_by(bot, t)]
+        found += [("job", j.id) for j in self.persisted[bot].jobs.values() if j.pending]
         found += [("catch-up", t) for t in self._due_threads(bot)]
         return found
 
@@ -570,9 +589,7 @@ class SimGateway:
             by_thread.setdefault(post.thread, []).append(post)
         due = []
         for thread, posts in by_thread.items():
-            if self._closed_by(bot, thread) and self.params.enforce:
-                continue
-            if self._in_cooldown(bot, thread) and self.params.enforce:
+            if self._closed_by(bot, thread) or self._in_cooldown(bot, thread):
                 continue
             count_hit = self.params.catch_up_post_threshold and len(posts) >= self.params.catch_up_post_threshold
             age_hit = self.params.catch_up_age_seconds and \
@@ -620,11 +637,15 @@ class SimGateway:
         job.pending = True
         await self._try_start(bot, "job", job.thread, job=job, hwm=self.sim.room.last_seq())
 
-    def _job_failed(self, bot: str, job: Job) -> None:
+    async def _job_failed(self, bot: str, job: Job) -> None:
+        """Retry under the backoff; after ``follow_up_retry_cap`` failed retries post a
+        notice and stop (5.11). ``0`` disables the cap (3.1)."""
         job.retries += 1
-        if job.retries >= self.params.follow_up_retry_cap:
+        cap = self.params.follow_up_retry_cap
+        if cap and job.retries > cap:
             self.persisted[bot].jobs.pop(job.id, None)
             self.sim.trace.add(self.now(), "job_capped", gateway=self.name, bot=bot, job=job.id, thread=job.thread)
+            await self._notice(bot, job.thread, "scheduled job gave up")
             return
         job.pending = True
         self.sim.trace.add(self.now(), "job_retry", gateway=self.name, bot=bot, job=job.id,
@@ -688,7 +709,8 @@ class SimGateway:
                            delivered=[p.seq for p in delivered])
         if job is not None:
             job.pending = False
-        await self._invoke(TurnRun(turn, job, through if through is not None else self.persisted[bot].cursor))
+        await self._invoke(TurnRun(turn, job, through if through is not None else self.persisted[bot].cursor,
+                                   generation=state.generation))
 
     async def _invoke(self, run: TurnRun) -> None:
         output = await self.runner.run(run.turn)
@@ -707,6 +729,9 @@ class SimGateway:
 
     async def _end_turn(self, run: TurnRun, output: BotOutput) -> None:
         bot = run.turn.bot
+        if run.generation != self.volatile[bot].generation:
+            self._drop_stale(run)
+            return
         if output.failed:
             await self._backend_failure(run, output.error)
             return
@@ -716,12 +741,21 @@ class SimGateway:
         except ParseError as exc:
             structural, rules, env = [Problem("schema", None, str(exc))], [], Envelope()
         run.problems.update((p.mechanism, p.thread) for p in rules)
-        run.last_env = env
+        run.items_seen.update((i.thread, "control") for i in env.replies if i.control is not None)
+        run.items_seen.update((i.thread, "text") for i in env.replies if i.text is not None)
         rejected = structural + (rules if self.params.enforce else [])
         if rejected:
             await self._invalid(run, rejected, output)
             return
         await self._accept(run, env)
+
+    def _drop_stale(self, run: TurnRun) -> None:
+        """The process that ran this turn died (``restart``); its output is not posted and
+        nothing is committed. A job it was firing goes back to pending so a sweep finds it."""
+        if run.job is not None:
+            run.job.pending = True
+        self.sim.trace.add(self.now(), "turn_dropped", gateway=self.name, bot=run.turn.bot,
+                           source=run.turn.source, thread=run.turn.starting_thread)
 
     def _validation_context(self, bot: str) -> ValidationContext:
         room = self.sim.room
@@ -774,12 +808,13 @@ class SimGateway:
                     item.done = True
                     continue
             try:
-                post = await self.sim.post(bot, canonical_text(item), item.thread, kind="bot")
+                post = self.sim.append(bot, canonical_text(item), item.thread, kind="bot")
             except RefusedPost:
                 refused.append(item.thread)
                 self.sim.trace.add(self.now(), "refused", gateway=self.name, bot=bot, thread=item.thread)
                 continue
-            self._count_own_post(bot, post)
+            self._count_own_post(bot, post)  # before any gateway, this one included, receives it
+            await self.sim.deliver(post)
             posted.add(item.thread)
             run.posts += 1
             self.totals[bot]["posts"] += 1
@@ -795,6 +830,8 @@ class SimGateway:
             self.sim.trace.add(self.now(), "cursor_saved", gateway=self.name, bot=bot, seq=run.hwm)
         answered = {i.thread for i in env.replies}
         for group in run.turn.hint.threads:
+            if group.thread in self.sim.room.archived:
+                continue  # removed while the turn ran: it can no longer be answered (5.4)
             if group.group == "closed" and group.thread not in answered and group.thread not in state.unfinished:
                 state.unfinished.add(group.thread)
                 self.sim.trace.add(self.now(), "unfinished_added", gateway=self.name, bot=bot, thread=group.thread)
@@ -828,7 +865,7 @@ class SimGateway:
         self.totals[bot]["failures"] += 1
         state.previous_failure = f"backend failure ({error})"
         if run.job is not None:
-            self._job_failed(bot, run.job)
+            await self._job_failed(bot, run.job)
         if self.params.failure_backoff_seconds:
             wait = min(self.params.failure_backoff_seconds * 2 ** state.backoff_level,
                        self.params.failure_backoff_max_seconds or float("inf"))
@@ -848,7 +885,7 @@ class SimGateway:
         state.invalid_streak += 1
         state.previous_failure = f"invalid envelope ({reasons})"
         if run.job is not None:
-            self._job_failed(bot, run.job)
+            await self._job_failed(bot, run.job)
         limit = self.params.consecutive_invalid_limit
         if not state.invalid_notice_sent:
             state.invalid_notice_sent = True
@@ -877,26 +914,28 @@ class SimGateway:
                            mechanism=mechanism, outcome=outcome)
 
     def _count_turn_rules(self, run: TurnRun) -> None:
-        """One count per opportunity the turn had, from the problems seen across its
-        attempts: ``rejected`` when enforced, ``violated`` when not, else ``complied``."""
+        """One count per opportunity the turn had, from the problems and items seen across
+        its attempts: ``rejected`` when enforced, ``violated`` when not, else ``complied``.
+        The starting thread closed by a rule exists only with enforcement off (the turn
+        ran where the rule would have held it) and is counted apart, as ``held_*``."""
         bot = run.turn.bot
-        env = run.last_env
+        starting = run.turn.starting_thread
         broke = "rejected" if self.params.enforce else "violated"
         for group in run.turn.hint.threads:
             if group.group == "closed":
                 for cause in group.closed_by:
-                    self._count_rule(bot, group.thread, cause,
-                                     broke if (cause, group.thread) in run.problems else "complied")
+                    problem = (cause, group.thread) in run.problems
+                    if group.thread == starting:
+                        outcome = "held_violated" if problem else "held_complied"
+                    else:
+                        outcome = broke if problem else "complied"
+                    self._count_rule(bot, group.thread, cause, outcome)
             elif group.group == "must-reply":
                 self._count_rule(bot, group.thread, "must_reply",
                                  broke if ("must_reply", group.thread) in run.problems else "complied")
-        for item in env.replies:
-            if item.control is not None:
-                self._count_rule(bot, item.thread, "authority",
-                                 broke if ("authority", item.thread) in run.problems else "complied")
-            if item.text is not None:
-                self._count_rule(bot, item.thread, "recipients",
-                                 broke if ("recipients", item.thread) in run.problems else "complied")
+        for thread, kind in sorted(run.items_seen):
+            mechanism = "authority" if kind == "control" else "recipients"
+            self._count_rule(bot, thread, mechanism, broke if (mechanism, thread) in run.problems else "complied")
 
     # ── STATUS ──────────────────────────────────────────────────────────────
 

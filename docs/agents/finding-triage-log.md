@@ -940,3 +940,44 @@ Notes:
 
 **Status: settled for this PR** — closed by the stop rule and an owner decision,
 not by a clean round. The ten findings are decided; none is open.
+
+## 2026-11-10 — PR #202 round 0 (internal review before Codex, `tools/roomsim/`)
+
+**Increment:** §8.2 row 0 — the simulator, all of section 5, outside the runtime.
+**Rater:** one internal reviewer (three lenses: spec-vs-code, event ordering,
+rule-count correctness), probes run against scripted sandboxes. No blind second
+rater and no control for this round: every finding passed the `cheap` gate or was
+a spec reading, so nothing was scored. **Cost:** ~10 min reviewer, ~40 min fixes.
+
+Question 2 passes for every finding: the increment owns all of section 5.
+
+| | finding | gate | outcome |
+|---|---|---|---|
+| F1 | a gateway counted its own post after the other gateways received it; the same scenario traced differently by hosting (5.3, 8.3 "equal lists converge") | cheap | **FIX** — `Simulation.append`/`deliver` split; own post counted between |
+| F2 | `restart` mid-turn left the dead turn's end event on the heap: two concurrent turns, a duplicate reply | cheap (one counter) | **FIX** — per-bot generation; a stale end is dropped, its job goes back to pending |
+| F3 | parseable output with wrong types crashed the run and left `running=True` | cheap | **FIX** — type checks raise `ParseError`; `limit` shape validated |
+| F4 | a thread archived during a turn re-entered the unfinished set | cheap | **FIX** |
+| F5 | `counted_holds.clear()` on any start re-counted unrelated holds | cheap | **FIX** — only the started key is dropped |
+| F6 | the sweep tried only the oldest addressing post; a held bot mention hid a newer human mention (4.1 row 1) | cheap | **FIX** + §5.7 item 1 reworded ("each checked against the turn table") |
+| F7 | the orchestrator was held by cooldown (4.1) | cheap | **FIX** |
+| F8 | an owner's control-only post neither cleared the window nor released held bots (5.3) | cheap | **FIX** — clear before the control-only return |
+| F9 | job cap: no notice, off by one, `0` dropped the job (3.1, 5.11) | cheap | **FIX** |
+| F10 | a degraded bot was still offered to the classifier (5.10) | cheap | **FIX** — and mode-independent (F16c) |
+| F11 | pending jobs came before addressing posts in the sweep order; 5.7 lists no jobs | cheap | **FIX** — after unfinished, before catch-up; §5.7 item 3 added |
+| F12 | a DM post without `@` started no turn (section 3) | cheap | **FIX** |
+| F13 | the classifier request was built at result time, so later posts leaked in | cheap | **FIX** — built at call time |
+| F14 | a new human mention held by `one_turn` behind a turn that then failed waits for the backoff | — | **DROP** — the §5.10 text written in this PR says "like any other sweep-started turn"; the backoff is about the backend, not the trigger. Reversal: a lab transcript where a human's follow-up mention sits unanswered through a backoff and the human notices |
+| F15 | enforcement off counted a turn started where enforcement on would have held it as `violated`, whose counterpart is `held`, not `rejected` | cheap (two columns) | **FIX** — `held_complied` / `held_violated`; report and §8.1 reworded |
+| F16 | denominators differed by mode: catch-up/unfinished filters, classifier offers, items dropped between attempts, missing `to` structural | cheap | **FIX** — classifier offers and candidate filters mode-independent (a closed thread is not a candidate in either mode, per 5.7's wording; my first fix re-offered it every sweep and looped); items counted across attempts; missing `to` is a `recipients` rule |
+
+Notes:
+- F1 and F6 are the ones with an operator-visible consequence in a live room (a
+  hold that depends on hosting; a human mention that waits for a second mention).
+  Both were invisible to the 106 tests because every test hosted all bots on one
+  gateway and addressed a bot once at a time.
+- Tests that passed by sharing a bug (reviewer's list): `test_enforce.py` parity
+  assertions, `test_scheduler_classifier.py` cap count, `test_envelope.py` `to`
+  as structural — all rewritten with the fix. 128 tests after the round.
+- Spec amendments carried in the PR: §5.7 candidate order, §8.1 count wording.
+  Two points left to the owner: invalid-envelope retries without backoff; a live
+  measure-only run.

@@ -22,10 +22,49 @@ async def test_jobs_fire_in_their_thread_retry_failed_turns_and_stop_at_the_cap(
     fired = sb.trace.last("turn_start", bot="a", source="job")
     assert fired.thread == "t1" and sb.bot.turns[-1].job_text == "check on b"
     assert sb.trace.last("job_retry", bot="a").retries == 1
-    await sb.run(20)  # retried after the backoff, fails again: cap reached
+    await sb.run(40)  # two retries under the backoff fail: the cap of 2 retries is reached
     assert sb.trace.count("job_capped", bot="a") == 1
-    assert sb.trace.count("turn_start", bot="a", source="job") == 2
+    assert sb.trace.count("turn_start", bot="a", source="job") == 3  # first firing + 2 retries
+    assert sb.trace.count("notice", bot="a", cause="scheduled job gave up") == 1
     assert sb.gw.status()["bots"]["a"]["jobs"] == 0
+
+
+async def test_a_cap_of_zero_never_gives_up():
+    script = Script().on(SCHEDULE, bot="a", source="addressed", once=True).on(fail(), bot="a", source="job")
+    sb = Sandbox(params=replace(FAST, follow_up_retry_cap=0, failure_backoff_seconds=5, failure_backoff_max_seconds=5),
+                 script=script)
+    await sb.human("@a wait")
+    await sb.run(60)
+    assert sb.trace.count("job_capped") == 0 and sb.trace.count("job_retry", bot="a") >= 5
+
+
+async def test_a_degraded_bot_is_not_offered_to_the_classifier():
+    classifier = ScriptedClassifier()
+    sb = Sandbox(params=replace(FAST, consecutive_invalid_limit=1), classifier=classifier,
+                 script=Script().on("garbage", bot="a"))
+    await sb.human("@a go")
+    await sb.run(3)
+    assert sb.gw.status()["bots"]["a"]["degraded"]
+    await sb.human("anyone?")
+    await sb.run(1)
+    assert [m.username for m in classifier.calls[-1].agents] == ["b", "c"]
+
+
+async def test_a_dm_post_without_a_mention_addresses_the_bot():
+    dm = Sandbox(bots=("a",), is_dm=True, script=Script().on(reply(["H"], "hi back"), bot="a"))
+    await dm.human("hello there")
+    await dm.run(2)
+    assert dm.trace.last("turn_start", bot="a").exempt is True and len(dm.posts_by("a")) == 1
+
+
+async def test_the_classifier_sees_the_thread_as_it_was_when_the_post_arrived():
+    classifier = ScriptedClassifier(latency=5.0)
+    sb = Sandbox(classifier=classifier)
+    await sb.human("first")
+    await sb.human("second, before the decision on the first")
+    await sb.run(6)
+    first_request = next(c for c in classifier.calls if c.post.seq == 1)
+    assert [p.seq for p in first_request.history] == []
 
 
 async def test_a_job_firing_is_not_a_post_but_its_visible_reply_is():

@@ -14,8 +14,9 @@ OFF = replace(FAST, enforce=False)
 
 
 def rules(sb):
-    """(opportunities, complied, violated, rejected, held) per mechanism."""
-    return {m: (c["opportunities"], c["complied"], c["violated"], c["rejected"], c["held"])
+    """(opportunities, complied, violated, rejected, held, held_complied, held_violated) per mechanism."""
+    return {m: (c["opportunities"], c["complied"], c["violated"], c["rejected"], c["held"],
+                c["held_complied"], c["held_violated"])
             for m, c in sb.gw.status()["rules"].items()}
 
 
@@ -26,7 +27,7 @@ async def test_a_muted_bot_mention_is_held_when_enforced_and_runs_closed_when_no
     await on.sim.post("b", "@a what do you think?")
     await on.run(2)
     assert on.trace.last("turn_held", bot="a").gate == "mute" and on.posts_by("a") == []
-    assert rules(on)["mute"] == (1, 0, 0, 0, 1)  # held: the bot never chose
+    assert rules(on)["mute"] == (1, 0, 0, 0, 1, 0, 0)  # held: the bot never chose
 
     off = Sandbox(params=OFF, script=script)
     await off.human("mute: @a")
@@ -34,8 +35,8 @@ async def test_a_muted_bot_mention_is_held_when_enforced_and_runs_closed_when_no
     await off.run(2)
     turn = [t for t in off.bot.turns if t.bot == "a"][0]  # a's reply then started b's turn
     assert turn.hint.group_of("main").group == "closed" and turn.hint.group_of("main").closed_by == ("mute",)
-    assert len(off.posts_by("a")) == 1  # posted anyway, counted as a violation
-    assert rules(off)["mute"] == (1, 0, 1, 0, 0)
+    assert len(off.posts_by("a")) == 1  # posted anyway: the counterpart of the enforced hold
+    assert rules(off)["mute"] == (1, 0, 0, 0, 0, 0, 1)
 
 
 async def test_a_compliant_bot_scores_complied_in_the_measure_only_mode():
@@ -44,7 +45,7 @@ async def test_a_compliant_bot_scores_complied_in_the_measure_only_mode():
     await off.sim.post("b", "@a what do you think?")
     await off.run(2)
     assert off.posts_by("a") == []
-    assert rules(off)["mute"] == (1, 1, 0, 0, 0)
+    assert rules(off)["mute"] == (1, 0, 0, 0, 0, 1, 0)
 
 
 async def test_rule_problems_are_posted_and_counted_when_not_enforced():
@@ -54,7 +55,7 @@ async def test_rule_problems_are_posted_and_counted_when_not_enforced():
     await off.run(2)
     assert off.trace.last("turn_end", bot="a").outcome == "normal"
     assert [p.text for p in off.posts_by("a")] == ["mute: @b", "@a talking to myself"]
-    assert rules(off)["authority"] == (1, 0, 1, 0, 0) and rules(off)["recipients"] == (1, 0, 1, 0, 0)
+    assert rules(off)["authority"] == (1, 0, 1, 0, 0, 0, 0) and rules(off)["recipients"] == (1, 0, 1, 0, 0, 0, 0)
     on = Sandbox(params=ON, script=script)
     await on.human("@a go")
     await on.run(2)
@@ -98,8 +99,8 @@ async def test_the_same_scenario_yields_comparable_counts_in_both_modes():
         await sb.human("@a go")
         await sb.run(3)
         counts[name] = rules(sb)
-    assert counts["on"]["rate_posts"] == (1, 0, 0, 0, 1)
-    assert counts["off"]["rate_posts"] == (1, 0, 1, 0, 0)
+    assert counts["on"]["rate_posts"] == (1, 0, 0, 0, 1, 0, 0)
+    assert counts["off"]["rate_posts"] == (1, 0, 0, 0, 0, 0, 1)
 
 
 async def test_a_turn_that_fails_on_a_rule_is_counted_as_rejected():
@@ -112,8 +113,42 @@ async def test_a_turn_that_fails_on_a_rule_is_counted_as_rejected():
     await on.human("@a hello", "t2")  # delivers main closed
     await on.run(3)
     assert on.trace.last("turn_end", bot="a").outcome == "invalid"
-    assert rules(on)["mute"] == (1, 0, 0, 1, 0)
+    assert rules(on)["mute"] == (1, 0, 0, 1, 0, 0, 0)
     assert rules(on)["must_reply"][3] == 0  # t2 was answered
+
+
+async def test_a_control_rejected_on_the_first_attempt_is_counted_even_when_dropped_on_the_second():
+    script = Script().on(replies(item(control={"mute": ["b"]}), item(done=True)), bot="a", once=True) \
+        .on(replies(item(done=True)), bot="a")
+    on = Sandbox(params=ON, script=script)
+    await on.human("@a go")
+    await on.run(3)
+    assert on.trace.last("turn_end", bot="a").outcome == "normal"
+    assert rules(on)["authority"] == (1, 0, 0, 1, 0, 0, 0)
+
+
+async def test_text_without_recipients_is_posted_bare_and_counted_when_not_enforced():
+    off = Sandbox(params=OFF, script=Script().on(replies(item(text="to nobody")), bot="a"))
+    await off.human("@a go")
+    await off.run(2)
+    assert [p.text for p in off.posts_by("a")] == ["to nobody"]
+    assert rules(off)["recipients"] == (1, 0, 1, 0, 0, 0, 0)
+
+
+async def test_a_closed_thread_is_no_catch_up_or_unfinished_candidate_in_either_mode():
+    """Spec 5.7: catch-up needs an open thread and an unfinished thread is a candidate once
+    it has become open. Both modes therefore see the same (empty) candidate list, and
+    the measure-only mode does not loop on a closed unfinished thread."""
+    for params in (replace(ON, catch_up_post_threshold=1, catch_up_age_seconds=0),
+                   replace(OFF, catch_up_post_threshold=1, catch_up_age_seconds=0)):
+        sb = Sandbox(params=params, bots=("a", "b"))
+        await sb.human("mute: @a")
+        await sb.human("news for a")
+        await sb.sim.post("b", "@a what do you think?")  # the one opportunity: a bot mention
+        await sb.run(25)
+        assert sb.trace.count("turn_start", bot="a") == (0 if params.enforce else 1)
+        assert "mute" in rules(sb) and rules(sb)["mute"][0] == 1
+        assert sb.trace.count("turn_start", bot="a", source="unfinished") == 0
 
 
 async def test_replay_of_an_already_delivered_mention_starts_no_turn_and_own_posts_seed_the_window():

@@ -5,10 +5,12 @@ The rule table has one row per mechanism: ``opportunities`` is how often a bot f
 the rule; ``complied`` how often it obeyed on its own; ``violated`` how often it broke
 it when nothing stopped it (``enforce: false``); ``rejected`` how often it wrote a reply
 the gateway refused (``enforce: true``); ``held`` how often the gateway never started
-the turn, so the bot chose nothing. The same scenario run in both modes gives the two
-numbers the design wants side by side, ``violated`` against ``rejected``: what agents
-follow by themselves, and what the gateway has to enforce. ``held`` is the gateway's
-own work and has no counterpart in the other mode.
+the turn, so the bot chose nothing. With enforcement off that same turn runs with its
+starting thread marked closed, and the bot's choice there is ``held, complied`` or
+``held, violated``. The same scenario run in both modes gives two pairs side by side:
+``violated`` against ``rejected``, and ``held`` against ``held, complied`` plus
+``held, violated``: what agents follow by themselves, and what the gateway has to
+enforce.
 """
 
 from __future__ import annotations
@@ -64,13 +66,16 @@ def rules(gateways: Iterable[SimGateway]) -> str:
     merged: dict[str, dict[str, int]] = {}
     for gw in gateways:
         for mechanism, count in gw.rules.items():
-            row = merged.setdefault(mechanism, {"opportunities": 0, "complied": 0, "violated": 0, "rejected": 0, "held": 0})
+            row = merged.setdefault(mechanism, {"opportunities": 0, "complied": 0, "violated": 0, "rejected": 0,
+                                               "held": 0, "held_complied": 0, "held_violated": 0})
             for key in row:
                 row[key] += getattr(count, key)
-    lines = ["| mechanism | opportunities | complied | violated | rejected | held |", "|---|---|---|---|---|---|"]
+    lines = ["| mechanism | opportunities | complied | violated | rejected | held | held, complied | held, violated |",
+             "|---|---|---|---|---|---|---|---|"]
     for mechanism in sorted(merged):
         r = merged[mechanism]
-        lines.append(f"| {mechanism} | {r['opportunities']} | {r['complied']} | {r['violated']} | {r['rejected']} | {r['held']} |")
+        lines.append(f"| {mechanism} | {r['opportunities']} | {r['complied']} | {r['violated']} | {r['rejected']} "
+                     f"| {r['held']} | {r['held_complied']} | {r['held_violated']} |")
     return "\n".join(lines)
 
 
