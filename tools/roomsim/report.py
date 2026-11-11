@@ -47,12 +47,12 @@ def transcript(sim: Simulation, show_rules: bool = False) -> str:
 
 
 def totals(gateways: Iterable[SimGateway]) -> str:
-    head = "| gateway | bot | turns | posts | words | tokens in | tokens out | sweeps | failures | invalid |"
-    rows = [head, "|" + "---|" * 10]
+    head = "| gateway | bot | turns | posts | words | tokens in | tokens out | cost USD | sweeps | failures | invalid |"
+    rows = [head, "|" + "---|" * 11]
     for gw in gateways:
         for bot, t in gw.totals.items():
             rows.append(f"| {gw.name} | {bot} | {t['turns']} | {t['posts']} | {t['words']} | {t['tokens_in']} "
-                        f"| {t['tokens_out']} | {t['sweeps']} | {t['failures']} | {t['invalid']} |")
+                        f"| {t['tokens_out']} | {t['cost_usd']:.4f} | {t['sweeps']} | {t['failures']} | {t['invalid']} |")
     return "\n".join(rows)
 
 

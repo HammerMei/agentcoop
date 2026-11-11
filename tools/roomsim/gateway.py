@@ -128,6 +128,7 @@ class TurnRun:
     posts: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    cost_usd: float = 0.0
 
 
 # ── the gateway ─────────────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ class SimGateway:
 
     @staticmethod
     def _zero_totals() -> dict[str, int]:
-        return {"turns": 0, "posts": 0, "words": 0, "tokens_in": 0, "tokens_out": 0,
+        return {"turns": 0, "posts": 0, "words": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0,
                 "sweeps": 0, "failures": 0, "invalid": 0}
 
     # ── lifecycle ───────────────────────────────────────────────────────────
@@ -672,9 +673,14 @@ class SimGateway:
 
     async def _invoke(self, run: TurnRun) -> None:
         output = await self.runner.run(run.turn)
+        self._account(run, output)
+        self.sim.at(output.duration_seconds, self._end_turn, run, output)
+
+    @staticmethod
+    def _account(run: TurnRun, output: BotOutput) -> None:
         run.tokens_in += output.input_tokens
         run.tokens_out += output.output_tokens
-        self.sim.at(output.duration_seconds, self._end_turn, run, output)
+        run.cost_usd += output.cost_usd
 
     # ── step 8/9: output, posting, commit ───────────────────────────────────
 
@@ -720,8 +726,7 @@ class SimGateway:
     async def _invoke_retry(self, run: TurnRun, error: str) -> None:
         """Return the schema error to the same session once (section 5.9)."""
         output = await self.runner.run(_with_error(run.turn, error))
-        run.tokens_in += output.input_tokens
-        run.tokens_out += output.output_tokens
+        self._account(run, output)
         self.sim.at(output.duration_seconds, self._end_turn, run, output)
 
     async def _accept(self, run: TurnRun, env: Envelope) -> None:
@@ -783,6 +788,7 @@ class SimGateway:
         state.running = False
         self.totals[bot]["tokens_in"] += run.tokens_in
         self.totals[bot]["tokens_out"] += run.tokens_out
+        self.totals[bot]["cost_usd"] += run.cost_usd
         if outcome == "normal":
             state.retry_after, state.backoff_level, state.backoff_notice_sent = 0.0, 0, False
             state.invalid_streak, state.degraded, state.invalid_notice_sent = 0, False, False

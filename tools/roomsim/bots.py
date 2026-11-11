@@ -164,6 +164,7 @@ class BackendBot:
             duration_seconds=max(self._clock() - started, 0.0),
             input_tokens=usage.input_tokens if usage else 0,
             output_tokens=usage.output_tokens if usage else 0,
+            cost_usd=response.cost_usd or 0.0,
             failed=response.is_error,
             error=response.text if response.is_error else "",
         )
