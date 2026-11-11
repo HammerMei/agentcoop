@@ -1018,7 +1018,7 @@ Question 2 passes for all eleven (§5.1, 3.1, 5.9, 8.1, 5.3, 5.11, 5.4).
 | F5 | `Decision.reasons` reached no trace or report (5.1 "every fallback and reason is logged") | cheap | **FIX** — one field on `classifier_decision` |
 | F6 | `turn_hash` omitted `TurnInput.error`, so a retry turn replayed against a changed prompt | cheap | **FIX** — included only when set, so clean-turn hashes are unchanged. The rater flags this as the one the owner's sentence most plausibly waives; taken because it is the advertised contract and one line |
 | F7 | a replay that used a prefix of the recording exited 0 (silent) | cheap, silent | **FIX** — `[ERROR] replay used N of M recorded turns`, exit 1 |
-| F8 | a control first seen in replay got `last_activity=now`, so a mute older than the TTL stayed for a fresh TTL (5.4) | **not cheap** — the one-line fix (`setdefault(last_activity=post.time)`) is wrong: with a second replayed post inside the TTL of the mute, it expires a mute that §5.4 keeps (rater's trace, verified). Silent | **MAKE IT LOUD** — `age` field on `control_applied` (0 live; > TTL only in a replay). Behaviour not fixed. Rater's score: 0.01–0.1 h/y against 0.2 h/y tax, net ≤ 0 |
+| F8 | a control first seen in replay got `last_activity=now`, so a mute older than the TTL stayed for a fresh TTL (5.4) | **not cheap** — the one-line fix (`setdefault(last_activity=post.time)`) is wrong: with a second replayed post inside the TTL of the mute, it expires a mute that §5.4 keeps (rater's trace, re-traced by the author; not run). Silent | **MAKE IT LOUD** — `age` field on `control_applied` (0 live; > TTL only in a replay). Behaviour not fixed. Rater's score: 0.01–0.1 h/y against 0.2 h/y tax, net ≤ 0 |
 | F9 | `classifier_posts=0` showed nothing instead of everything (3.1 "0 disables") | cheap | **FIX** — `or None` |
 | F10 | `"done": "false"` was truthy; an item with no other action was accepted as done and the cursor saved (silent discard) | cheap, silent | **FIX** — `done` must be a JSON boolean; wrong-types test extended |
 | F11 | `to` listing the sender among others passed; §5.9 said both "never the sender" (contract) and "addresses only the sender" (invalid list) | cheap; layer = §5.9 | **FIX** — code follows the contract sentence; the invalid-list line now says "names the sender among its recipients". Owner's call to reverse |
@@ -1037,7 +1037,7 @@ and F4 is a ≤30 s delay under every shipped scenario.
 
 **Adoption:** 10 FIX + 1 MAKE IT LOUD of 11 — near 100 %, which the skill says to
 watch. Every one cleared `cheap` on the touched function (highest C901 in
-`tools/roomsim` is 7) and lands as one assertion in an existing test file; the
+`tools/roomsim` after the round is 8, `_item` and `render_hint`) and lands as one assertion in an existing test file; the
 pattern response for envelope types (round 0 F3, this round F1/F10) is the
 extended wrong-types parametrize rather than two more point fixes. 137 tests after
 the round.
