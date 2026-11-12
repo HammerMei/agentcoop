@@ -18,7 +18,9 @@ CONTRACT = f"""Answer with one JSON object and nothing else:
 Each reply holds exactly one of: text (with non-empty "to"), control, text plus control,
 or done. "thread" defaults to the starting thread. "to" lists recipients, never yourself;
 use "all" only with a reason. Put control words in "control", never in text. Only the
-thread's orchestrator may send a control. "schedule" is optional: use it when you are
+thread's orchestrator may send a control. "limit" is the thread's budget for all bots
+together, not per bot: once the thread holds N recent bot posts or N recent words, further
+bot turns wait; a human post resets the count. Set it for what the whole exchange needs. "schedule" is optional: use it when you are
 waiting on someone and want to check back later. The exact text {END_TOKEN} on its own
 means one done in the starting thread."""
 
