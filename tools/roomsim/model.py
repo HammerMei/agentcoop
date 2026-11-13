@@ -4,7 +4,7 @@ and the structures the mechanisms exchange."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, get_args
 
 TurnSource = Literal["addressed", "picked", "catch-up", "unfinished", "job"]
 PostKind = Literal["human", "bot", "notice", "integration"]
@@ -46,6 +46,10 @@ class Params:
     classifier_timeout_seconds: float = 10
     classifier_retries: int = 1
     classifier_fallback: Fallback = "addressed-only"
+
+    def __post_init__(self) -> None:
+        if self.classifier_fallback not in get_args(Fallback):
+            raise ValueError(f"classifier_fallback: {self.classifier_fallback!r} is not one of {get_args(Fallback)}")
     classifier_decision_ttl_seconds: float = 600
     follow_up_retry_cap: int = 3
     failure_backoff_seconds: float = 30

@@ -15,6 +15,7 @@ exact text ``<end-of-agent-chain>`` as one ``done``.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 
@@ -94,8 +95,9 @@ def _item(raw, index: int) -> ReplyItem:
 
 
 def _job(raw) -> JobRequest:
-    if not isinstance(raw, dict) or not isinstance(raw.get("in_seconds"), (int, float)):
-        raise ParseError("schedule entry needs a numeric in_seconds")
+    if not isinstance(raw, dict) or not isinstance(raw.get("in_seconds"), (int, float)) \
+            or not math.isfinite(raw["in_seconds"]):  # NaN would sit at the heap root and stall the run
+        raise ParseError("schedule entry needs a finite numeric in_seconds")
     thread = raw.get("thread")
     if thread is not None and not isinstance(thread, str):
         raise ParseError("schedule entry: thread must be a string")

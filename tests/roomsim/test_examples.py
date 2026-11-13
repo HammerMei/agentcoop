@@ -6,10 +6,11 @@ from dataclasses import replace
 
 import pytest
 
+from tests.helpers import MockAgentBackend
 from tests.roomsim.helpers import FAST, Sandbox, Script, item, replies, reply
-from tools.roomsim.bots import Recorder, Replayer, ReplayMismatch, ScriptedBot
+from tools.roomsim.bots import BackendBot, Recorder, Replayer, ReplayMismatch, ScriptedBot
 from tools.roomsim.classifier import ScriptedClassifier
-from tools.roomsim.model import Decision
+from tools.roomsim.model import Decision, Hint, Member, ThreadGroup, TurnInput
 
 
 def mentions_from(author):
@@ -159,3 +160,16 @@ def test_turn_hash_covers_the_retry_error():
     first = TurnInput("a", "addressed", "main", (), Hint("addressed", "main", ()))
     retry = replace(first, error="schema@main: done must be a boolean")
     assert turn_hash(first) != turn_hash(retry)
+
+
+async def test_a_session_whose_first_send_fails_is_recreated_with_its_intro():
+    backend = MockAgentBackend(default_response='{"replies": [{"done": true}]}')
+    backend.side_effect = TimeoutError
+    bot = BackendBot(backend, "/nowhere", 10, "team", [Member("H", "owner"), Member("a", "bot")])
+    turn = TurnInput("a", "addressed", "main", (), Hint("addressed", "main", (ThreadGroup("main", "must-reply"),)))
+    first = await bot.run(turn)
+    backend.side_effect = None
+    second = await bot.run(turn)
+    assert first.failed and not second.failed
+    assert len(backend.created_sessions) == 2  # the poisoned session was not kept
+    assert all(m["prompt"].startswith("You are a") for m in backend.sent_messages)  # both sends carried the intro

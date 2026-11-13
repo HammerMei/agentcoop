@@ -20,6 +20,7 @@ Kinds and their fields:
 - ``job_scheduled`` / ``job_fired`` / ``job_waiting`` / ``job_retry`` / ``job_capped`` — gateway, bot, job, thread
 - ``rule``            — gateway, bot, thread, mechanism, outcome (blocked | complied | violated)
 - ``refused``         — gateway, bot, thread (platform refused an outbound post)
+- ``done``            — gateway, bot, thread, to (a done reply; nothing is posted)
 """
 
 from __future__ import annotations

@@ -10,6 +10,7 @@ from dataclasses import replace
 import pytest
 
 from tests.roomsim.helpers import FAST, Sandbox, Script, item, replies, reply
+from tools.roomsim.bots import fail
 
 ON = FAST
 OFF = replace(FAST, enforce=False)
@@ -72,7 +73,6 @@ async def test_structural_problems_are_still_rejected_when_not_enforced():
 
 
 async def test_hard_holds_are_not_switched_off():
-    from tools.roomsim.bots import fail
     off = Sandbox(params=OFF, script=Script().on(fail(), bot="a", once=True))
     await off.human("@a go")
     await off.run(2)
@@ -164,3 +164,28 @@ async def test_replay_of_an_already_delivered_mention_starts_no_turn_and_own_pos
     await sb.run(2)
     assert sb.trace.count("turn_start", bot="a") == before
     assert sb.gw.status()["threads"]["main"]["recent_posts"] == 1  # a's own post seeded the window
+
+
+async def test_a_rejected_first_attempt_is_counted_when_the_retry_fails_at_the_backend():
+    attempts = []
+
+    def handler(turn):
+        attempts.append(turn)
+        if len(attempts) == 1:
+            return replies(item(thread="main", to=["H"], text="hi"), item(thread="t2", to=["H"], text="sneak"))
+        return fail()
+
+    sb = Sandbox(script=Script().on(handler, bot="a"))
+    await sb.human("mute: @a", thread="t2")
+    await sb.human("fyi", thread="t2")
+    await sb.human("@a go")  # t2 is delivered closed; the text there is rejected, the retry fails
+    await sb.run(5)
+    assert [e.outcome for e in sb.trace.of("turn_end", bot="a")] == ["backend_failure"]
+    assert sb.gw.rules["mute"].rejected == 1
+
+
+async def test_a_first_attempt_backend_failure_counts_no_rule():
+    sb = Sandbox(script=Script().on(fail(), bot="a"))
+    await sb.human("@a go")
+    await sb.run(5)
+    assert sb.gw.rules == {}

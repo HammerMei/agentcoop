@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         recorder = Recorder(preview.sim.gateways[0].runner)
     scenario = load(args.scenario, enforce, recorder or runner)
     sim = asyncio.run(run(scenario))
-    print(report(sim, scenario.name))
+    print(report(sim, scenario.name, args.show_rules))
     if isinstance(runner, Replayer) and runner.unused():
         print(f"[ERROR] replay used {len(runner.records) - runner.unused()} of {len(runner.records)} recorded turns",
               file=sys.stderr)

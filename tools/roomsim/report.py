@@ -87,10 +87,10 @@ def classifier_summary(sim: Simulation) -> str:
     return f"classifier: {calls} calls, {retries} retries, {fallbacks} fallbacks, {expired} expired decisions"
 
 
-def report(sim: Simulation, title: str = "") -> str:
+def report(sim: Simulation, title: str = "", show_rules: bool = False) -> str:
     gateways = sim.gateways
     mode = "enforced" if all(g.params.enforce for g in gateways) else "measure-only"
-    parts = [f"# {title or sim.room.name} ({mode})", "", "## Transcript", "", transcript(sim), "",
+    parts = [f"# {title or sim.room.name} ({mode})", "", "## Transcript", "", transcript(sim, show_rules), "",
              "## Totals", "", totals(gateways), "", "## Rules", "", rules(gateways), "",
              classifier_summary(sim), ""]
     return "\n".join(parts)

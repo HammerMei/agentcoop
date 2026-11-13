@@ -5,10 +5,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from tests.roomsim.helpers import FAST, Sandbox, Script, reply
 from tools.roomsim.bots import fail
 from tools.roomsim.classifier import ScriptedClassifier
-from tools.roomsim.model import Decision
+from tools.roomsim.model import Decision, Params
+
+
+def test_a_misspelt_classifier_fallback_is_rejected_at_construction():
+    with pytest.raises(ValueError):
+        Params(classifier_fallback="everybody")
 
 SCHEDULE = {"replies": [{"done": True}], "schedule": [{"in_seconds": 5, "text": "check on b"}]}
 
@@ -248,3 +255,15 @@ async def test_addressed_or_everyone_fallback_matches_current_behaviour_for_bot_
     await sb.run(2)
     decision = sb.trace.last("classifier_decision", post=2)
     assert decision.fallback == "addressed-or-everyone" and decision.add == ["b", "c"]
+
+
+async def test_replayed_posts_are_classified_with_the_history_that_preceded_them():
+    cls = ScriptedClassifier(latency=0.5)
+    sb = Sandbox(classifier=cls)
+    sb.gw.set_offline()
+    await sb.human("first")
+    await sb.human("second")
+    await sb.human("third")
+    await sb.gw.set_online(replay_after=0)
+    await sb.run(2)
+    assert [(c.post.seq, [p.seq for p in c.history]) for c in cls.calls] == [(1, []), (2, [1]), (3, [2, 1])]

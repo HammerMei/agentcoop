@@ -506,7 +506,7 @@ class SimGateway:
 
     def _request(self, post: Post, addressed: tuple[str, ...]) -> ClassifierRequest:
         history = self.sim.room.thread_posts(post.thread, newest_first=True)
-        history = [p for p in history if p.seq != post.seq]
+        history = [p for p in history if p.seq < post.seq]  # on replay the room already holds newer posts
         shown = tuple(history[: self.params.classifier_posts or None])  # 0 disables the cap (3.1)
         offered = [self.sim.room.members[b] for b in self._bots_in_room() if not self._not_offered(b, post.thread)]
         return ClassifierRequest(post, addressed, shown, len(history) - len(shown), tuple(offered))
@@ -807,6 +807,8 @@ class SimGateway:
         posted: set[str] = set()
         for item in env.replies:
             if item.done:
+                self.sim.trace.add(self.now(), "done", gateway=self.name, bot=bot, thread=item.thread,
+                                   to=list(item.to or []))  # 8.3: record done.to without posting
                 continue
             if item.control:
                 settings = self._thread(item.thread)
@@ -871,6 +873,8 @@ class SimGateway:
         state = self.volatile[bot]
         self.totals[bot]["failures"] += 1
         state.previous_failure = f"backend failure ({error})"
+        if run.attempt > 1:
+            self._count_turn_rules(run)  # the first attempt's rejections happened
         if run.job is not None:
             await self._job_failed(bot, run.job)
         if self.params.failure_backoff_seconds:

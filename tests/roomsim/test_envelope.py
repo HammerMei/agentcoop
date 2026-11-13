@@ -133,6 +133,10 @@ class TestInvalidCombinations:
     def test_a_null_schedule_is_an_empty_one(self):
         assert parse_envelope('{"replies": [{"done": true}], "schedule": null}').schedule == []
 
+    def test_a_nan_delay_is_a_schema_error(self):  # it would sit at the heap root and stall the run
+        with pytest.raises(ParseError):
+            parse_envelope('{"replies": [{"done": true}], "schedule": [{"in_seconds": NaN}]}')
+
     def test_limit_is_not_a_bot_control(self):  # 5.3: the rate limit is the owner's
         structural, _ = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": 2}}},'
                                  ' {"done": true}, {"thread": "unf", "done": true}]}')

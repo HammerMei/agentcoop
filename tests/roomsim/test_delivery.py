@@ -290,3 +290,19 @@ async def test_gateway_counts_its_own_successful_post():
     assert sb.gw.status()["threads"]["main"] == {
         "orchestrator": None, "muted": [], "limits": (4, 400), "recent_posts": 1, "recent_words": 5,
         "unknown_mutes": []}
+
+
+async def test_a_done_reply_records_its_recipients_without_posting():  # 8.3
+    sb = Sandbox(script=Script().on(replies(item(to=["H", "b"], done=True)), bot="a"), bots=("a", "b"))
+    await sb.human("@a go")
+    await sb.run(2)
+    assert sb.posts_by("a") == [] and sb.trace.last("done", bot="a").to == ["H", "b"]
+
+
+async def test_the_report_shows_rule_events_only_when_asked():
+    from tools.roomsim.report import report
+    sb = Sandbox()
+    await sb.human("mute: @a")
+    await sb.sim.post("b", "@a what do you think?")
+    await sb.run(2)
+    assert "§ a mute held" in report(sb.sim, show_rules=True) and "§ a mute" not in report(sb.sim)

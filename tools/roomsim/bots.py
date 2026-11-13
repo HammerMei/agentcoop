@@ -154,6 +154,7 @@ class BackendBot:
 
     async def run(self, turn: TurnInput) -> BotOutput:
         started = self._clock()
+        fresh = False
         try:
             session_id, fresh = await self._session(turn.bot)
             prompt = render_prompt(turn)
@@ -163,6 +164,8 @@ class BackendBot:
             response = await self.backend.send(session_id, prompt, self.working_directory, self.timeout,
                                                env=self.env)
         except Exception as exc:  # the backend failed: a process error, timeout, credentials
+            if fresh:
+                self.sessions.pop(turn.bot, None)  # the intro never arrived; the next turn resends it
             return BotOutput(text="", failed=True, error=f"{type(exc).__name__}: {exc}",
                              duration_seconds=max(self._clock() - started, 0.0))
         usage = response.usage
