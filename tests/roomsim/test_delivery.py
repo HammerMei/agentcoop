@@ -306,3 +306,12 @@ async def test_the_report_shows_rule_events_only_when_asked():
     await sb.sim.post("b", "@a what do you think?")
     await sb.run(2)
     assert "§ a mute held" in report(sb.sim, show_rules=True) and "§ a mute" not in report(sb.sim)
+
+
+def test_a_private_profile_reaches_only_its_own_bot():
+    from tools.roomsim.model import Member
+    from tools.roomsim.prompt import render_intro
+    members = [Member("H", "owner"), Member("chair", "bot", profile="runs meetings"),
+               Member("d", "bot", profile="frontend engineer", private_profile="Ask a question after every report.")]
+    assert "Ask a question" in render_intro(members[2], "team", members)
+    assert "Ask a question" not in render_intro(members[1], "team", members)

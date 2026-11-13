@@ -76,6 +76,7 @@ class Member:
     display_name: str = ""
     nickname: str = ""
     profile: str = ""
+    private_profile: str = ""  # shown only to the bot itself, never in the roster others see
 
     @property
     def is_bot(self) -> bool:

@@ -43,7 +43,8 @@ def render_intro(bot: Member, room: str, members: list[Member]) -> str:
     )
     return (
         f"You are {bot.username} ({bot.display_name or bot.username}), a bot in chat room "
-        f"#{room}. Your role: {bot.profile or 'a helpful teammate'}.\nRoom members:\n{others}\n\n"
+        f"#{room}. Your role: {bot.profile or 'a helpful teammate'}."
+        f"{' ' + bot.private_profile if bot.private_profile else ''}\nRoom members:\n{others}\n\n"
         f"{CONTRACT}"
     )
 

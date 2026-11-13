@@ -99,7 +99,8 @@ def _classifier(raw: dict | None) -> ScriptedClassifier:
 
 def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None) -> Scenario:
     data = yaml.safe_load(Path(path).read_text())
-    members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""))
+    members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""),
+                      m.get("private_profile", ""))
                for m in data["members"]]
     room = Room(data.get("room", data["name"]), members, is_dm=bool(data.get("dm", False)))
     sim = Simulation(room)
