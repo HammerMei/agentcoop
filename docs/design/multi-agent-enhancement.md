@@ -119,7 +119,7 @@ Each definition below uses only ordinary language or terms defined above it.
 | **classifier** | A small model that chooses which additional bots should speak for a post. It never writes a reply or removes an addressed bot. |
 | **rate limit** | A per-thread post and word allowance. Once reached, it delays further bot invocations unless their source is exempt. |
 | **cooldown** | The minimum interval between one bot's own posts in a thread. |
-| **orchestrator** | A bot designated by an owner for one thread. It is exempt from the rate limit and cooldown and may change that thread's rules. |
+| **orchestrator** | A bot designated by an owner for one thread. It is exempt from the rate limit and cooldown and may mute and unmute bots in that thread. |
 | **muted** | Silenced in a thread except when addressed by a human or the orchestrator. |
 | **cursor** | The last post delivered to one bot's session in one room. It is distinct from the connector watermark, which tracks what the connector has processed. |
 | **backlog** | Posts after a bot's cursor, plus any scheduled-job prompt held while that bot was muted. |
@@ -402,7 +402,9 @@ sweeper retries it. The mechanism slows a loop but does not end it; `done`, a
 mute, or a human ends the exchange.
 
 Thread overrides use `limit: N posts`, `limit: N words`, or both. `limit: 0
-posts 0 words` disables the thread limit.
+posts 0 words` disables the thread limit. Only an owner writes them: the rate
+limit is the room's brake, sized for the humans reading along, and no bot
+changes it.
 
 ### 5.4 Authority and settings (`AUTHORITY`, `SETTINGS`)
 
@@ -410,7 +412,7 @@ The gateway applies a control only when written by:
 
 - a human with the owner role; or
 - the thread's orchestrator, except that only an owner may set
-  `orchestrator:`.
+  `orchestrator:` or `limit:`.
 
 Controls from guests or ordinary bots remain visible text and change nothing.
 In a reply envelope, a `control` from a non-orchestrator is invalid. An
@@ -594,7 +596,6 @@ replies:
   - thread: T2
     control:
       mute: [a, b]          # or: all
-      limit: {posts: 20, words: 2000}
 
   - thread: T1
     to: [a, b, c]
@@ -621,8 +622,9 @@ claims: one says there is something to post, while the other says there is not.
 
 `thread` must be a thread delivered to this turn or an open unfinished thread
 listed in `HINT`; it defaults to the starting thread. `to` names room members
-or `all`, never the sender. The only bot-issued controls are `mute`, `unmute`,
-and `limit`; only an owner human may designate or remove an orchestrator.
+or `all`, never the sender. The only bot-issued controls are `mute` and
+`unmute`; only an owner human may designate or remove an orchestrator or set a
+thread's limit.
 
 The exact output `<end-of-agent-chain>` maps to one `done` reply. If that token
 has any surrounding text, the output is invalid.
@@ -657,7 +659,8 @@ invalid output fails the turn. Reject an envelope when:
   room member;
 - a thread was neither delivered to this turn nor listed as an open unfinished
   thread, or is closed for text/control;
-- a non-orchestrator issues `control`, or the control has an unsupported key;
+- a non-orchestrator issues `control`, or the control has a key other than
+  `mute` or `unmute`;
 - an explicit mute/unmute list is empty.
 
 `all` resolving to nobody is not an error. Omit that control; if nothing else
@@ -782,7 +785,13 @@ An owner post `orchestrator: @bot` designates one bot for one thread. The bot:
 
 - is exempt from rate and cooldown gates;
 - can address other bots without those gates;
-- may issue `mute`, `unmute`, and `limit` controls.
+- may issue `mute` and `unmute` controls.
+
+It does not set the thread's limit. The rate limit is the room's brake, sized
+for the humans reading along. The orchestrator's own mentions are exempt from
+it, so a round it runs never needs a larger allowance. To keep replies short,
+it asks in text ("one post each, 60 words or fewer"). That is a request to the
+bot, not a gateway rule.
 
 `orchestrator: none` from an owner removes the designation and restores the
 thread's default behaviour. Muting the orchestrator does not remove it: a muted
@@ -1047,6 +1056,8 @@ The simulator gets these tests first; the gateway reuses them.
 - After restart, enforce mutes reconstructed from persisted settings.
 - `orchestrator: none` from an owner clears the designation; a mute does not.
 - Human and orchestrator mentions bypass rate and cooldown.
+- A `limit:` line in a bot post, the orchestrator's included, changes nothing;
+  an owner's applies.
 - A scheduled job starts in its own thread despite the rate limit.
 - A reply in a thread marked open at turn start still posts when a mute arrives
   while the turn runs.

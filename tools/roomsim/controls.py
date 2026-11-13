@@ -74,7 +74,4 @@ def render_controls(control: dict) -> list[str]:
         if key in control:
             value = control[key]
             lines.append(f"{key}: {ALL if value == ALL else ' '.join('@' + n for n in value)}")
-    if "limit" in control:
-        parts = [f"{control['limit'][k]} {k}" for k in ("posts", "words") if k in control["limit"]]
-        lines.append("limit: " + " ".join(parts))
     return lines

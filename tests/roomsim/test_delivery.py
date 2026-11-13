@@ -169,11 +169,11 @@ async def test_enforce_closed_threads_and_canonical_to():
 
 
 async def test_done_with_to_posts_nothing_and_control_without_to_is_accepted():
-    sb = Sandbox(script=Script().on(replies(item(control={"limit": {"posts": 2}}), item(done=True, to=["H"])), bot="chair"),
+    sb = Sandbox(script=Script().on(replies(item(control={"mute": ["a"]}), item(done=True, to=["H"])), bot="chair"),
                  bots=("chair", "a"))
-    await sb.human("orchestrator: @chair\n@chair set a limit")
+    await sb.human("orchestrator: @chair\n@chair mute a")
     await sb.run(2)
-    assert len(sb.posts_by("chair")) == 1 and sb.posts_by("chair")[0].text == "limit: 2 posts"
+    assert len(sb.posts_by("chair")) == 1 and sb.posts_by("chair")[0].text == "mute: @a"
 
 
 async def test_control_plus_text_renders_control_lines_first():
@@ -270,6 +270,17 @@ async def test_orchestrator_control_in_text_applies_once_visible():
     await sb.run(2)
     assert sb.trace.count("control_applied", control="mute", by="chair") == 1
     assert sb.gw.status()["threads"]["main"]["muted"] == ["a"]
+
+
+async def test_limit_in_an_orchestrator_post_is_ignored_and_an_owner_limit_applies():  # 5.3, 5.4
+    sb = Sandbox(script=Script().on(reply(["a"], "limit: 1 posts\none post each"), bot="chair"), bots=("chair", "a"))
+    await sb.human("orchestrator: @chair\n@chair run it")
+    await sb.run(2)
+    assert sb.trace.count("control_applied", control="limit") == 0
+    assert sb.gw.status()["threads"]["main"]["limits"] == (sb.gw.params.rate_limit_posts, sb.gw.params.rate_limit_words)
+    await sb.human("limit: 1 posts")
+    assert sb.trace.count("control_applied", control="limit", by="H") == 1
+    assert sb.gw.status()["threads"]["main"]["limits"] == (1, sb.gw.params.rate_limit_words)
 
 
 async def test_gateway_counts_its_own_successful_post():

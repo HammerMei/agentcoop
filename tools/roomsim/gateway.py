@@ -310,7 +310,7 @@ class SimGateway:
             self._apply_mute(post, settings, controls.mute)
         if controls.unmute is not None:
             self._apply_unmute(post, settings, controls.unmute)
-        if controls.limit is not None and post.seq > settings.limit_seq:
+        if controls.limit is not None and role == "owner" and post.seq > settings.limit_seq:
             settings.limit_posts = controls.limit.get("posts", settings.limit_posts)
             settings.limit_words = controls.limit.get("words", settings.limit_words)
             settings.limit_seq = post.seq

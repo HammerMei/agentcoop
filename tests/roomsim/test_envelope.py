@@ -100,7 +100,7 @@ class TestInvalidCombinations:
         assert rules == [("authority", "main")]
 
     def test_control_without_to_is_accepted_from_the_orchestrator(self):
-        structural, rules = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": 2}}},'
+        structural, rules = problems('{"replies": [{"thread": "opt", "control": {"mute": ["b"]}},'
                                      ' {"done": true}, {"thread": "unf", "done": true}]}')
         assert structural == [] and rules == []
 
@@ -133,10 +133,10 @@ class TestInvalidCombinations:
     def test_a_null_schedule_is_an_empty_one(self):
         assert parse_envelope('{"replies": [{"done": true}], "schedule": null}').schedule == []
 
-    def test_limit_shape_is_checked(self):
-        structural, _ = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": "ten"}}},'
+    def test_limit_is_not_a_bot_control(self):  # 5.3: the rate limit is the owner's
+        structural, _ = problems('{"replies": [{"thread": "opt", "control": {"limit": {"posts": 2}}},'
                                  ' {"done": true}, {"thread": "unf", "done": true}]}')
-        assert [s[2] for s in structural] == ["limit must map posts/words to integers"]
+        assert [s[2] for s in structural] == ["unsupported control ['limit']"]
 
     def test_thread_defaults_to_the_starting_thread(self):
         env = parse_envelope('{"replies": [{"to": ["H"], "text": "x"}, {"thread": "unf", "done": true}]}')
@@ -158,5 +158,5 @@ class TestCanonicalForm:
         assert resolve_control({"mute": ALL}, ["chair"], set(), "chair") == {}
 
     def test_resolve_unmute_all_names_only_the_muted(self):
-        assert resolve_control({"unmute": ALL, "limit": {"posts": 1}}, ["a", "b"], {"b"}, None) == {
-            "unmute": ["b"], "limit": {"posts": 1}}
+        assert resolve_control({"unmute": ALL, "mute": ["a"]}, ["a", "b"], {"b"}, None) == {
+            "unmute": ["b"], "mute": ["a"]}

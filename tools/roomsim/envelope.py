@@ -32,7 +32,7 @@ from .model import (
 )
 
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
-_CONTROL_KEYS = {"mute", "unmute", "limit"}
+_CONTROL_KEYS = {"mute", "unmute"}  # limit is an owner control (5.3, 5.9)
 
 
 class ParseError(Exception):
@@ -187,15 +187,8 @@ def _check_control(item: ReplyItem, ctx: ValidationContext, structural, rules) -
     for key in ("mute", "unmute"):
         if key in control:
             _check_name_list(control[key], key, item.thread, ctx, structural)
-    if "limit" in control and not _limit_ok(control["limit"]):
-        structural.append(Problem("schema", item.thread, "limit must map posts/words to integers"))
     if item.thread not in ctx.orchestrator_in:
         rules.append(Problem(AUTHORITY, item.thread, "control from a non-orchestrator"))
-
-
-def _limit_ok(value) -> bool:
-    return isinstance(value, dict) and bool(value) and set(value) <= {"posts", "words"} \
-        and all(isinstance(v, int) and v >= 0 for v in value.values())
 
 
 def _check_name_list(value, key: str, thread: str | None, ctx: ValidationContext, structural) -> None:
