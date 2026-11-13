@@ -1048,3 +1048,72 @@ It does not cover later turns: the adapter resumes with `--system-prompt-snapsho
 off` and without `--agent`, so the system prompt is rebuilt and the `agent` setting applies again — the brainstorm live run's session log shows the full
 persona in the resumed turn's system prompt. A self-report probe had said otherwise;
 the request shape in the log is the evidence, not the model's answer.
+
+---
+
+## 2026-11-13 — PR #202 round 2 (Codex on `7aa069e`, `tools/roomsim/`)
+
+Twelve inline findings, posted 2026-11-11 09:25, thirteen minutes after the
+`@codex review` request. **They sat unread for two days**: the author checked the
+issue's reactions and not `pulls/202/reviews`. Triaged at HEAD `c3bd791`, five
+commits later (the `limit` control moved to owners in between).
+
+**chain-check** (working tree): 23 findings over 2 rounds, no chain; round 2 has
+2 findings on `gateway.py` and 1 on `__main__.py` landing on the previous round's
+fixes, streak 1 each — noise, not the signal.
+
+**Depth rule for this round, set by the owner before the verdicts:** the simulator
+exists to give a rough understanding of the mechanisms; a count off by one in a
+rare case is acceptable; do not re-request a Codex pass unless a major gap appears;
+spend the effort on running the scenarios. The cut line applied: **fix what is
+true and a few lines in a function well under the complexity limit, file or drop
+the rest in this entry.** F7 (two lines) is of the same off-by-one class as F5
+(seven lines plus a restart-only trigger); the line count, not the class, put them
+on different sides.
+
+**Blind second rater** (general-purpose agent; findings, method, constants, HEAD;
+no verdicts of the author's; it did not have the owner's depth rule). **No control
+finding was available; agreement in this round is not evidence of independence.**
+All twelve re-verified by the rater at HEAD with run reproductions.
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | replay classifier history included posts newer than the trigger | yes (Python API only) | **FIX** (1 line) | FIX | — |
+| F2 | an in-flight classifier result survives `restart` and starts a picked turn on a post the replay excluded | yes; silent; Python API only | **FILE** | FILE | — |
+| F3 | `"in_seconds": NaN` passed and stalled the whole run at the heap root; the report looked normal | yes; silent; live model or recording | **FIX** (1 line, finiteness) | FIX | — |
+| F4 | `--show-rules` never reached `report` | yes; every live run this week | **FIX** (3 lines) | FIX | — |
+| F5 | a stale turn dropped by `restart` kept its token/cost out of the totals | yes; silent; Python API only | **FILE** | FIX (cheap) | owner's depth rule |
+| F6 | `done` with `to` recorded nowhere (8.3 names it) | yes; silent | **FIX** (2 lines + trace kind `done`) | FIX | — |
+| F7 | a first attempt's rule rejections uncounted when the retry fails at the backend | yes; silent | **FIX** (2 lines, `attempt > 1` guard — the bare call miscounts first-attempt failures) | FIX | — |
+| F8 | a picked turn held by mute leaves the cached selection usable after unmute (§5.1: mute recovery does not reuse the decision) | yes; silent; needs a `classifier:` block no scenario has | **FILE** | FIX (~5 lines) | owner's depth rule; revisit with the model-backed classifier |
+| F9 | an owner may designate a guest as orchestrator (the `limit` half closed by `c3bd791`; the `mute` half stands) | partly | **DROP** | FIX (low value) | owner's depth rule; the state is owner-created and traced |
+| F10 | `classifier_fallback: everybody` accepted; the trace printed the typo while behaving as addressed-only | yes; silent | **FIX** (3 lines in `Params.__post_init__`, the layer that owns the contract) | FIX at `Params` | — |
+| F11 | delayed turns start in archived threads | true as mechanics, not as a defect: §5.9 prescribes the refusal, it terminates, `refused` is loud | **DROP** | DROP | — |
+| F12 | `BackendBot` kept a session whose introductory send failed; every later prompt lacked identity, roster and contract | yes; silent; live only | **FIX** (3 lines) | FIX | — |
+
+Exit obligations:
+
+- **FILE F2** — reversal: a restart test where a `classifier_decision` for post N
+  precedes the replay's own `classifier_call` for N. **FILE F5** — reversal: a restart
+  experiment whose totals are compared across runs. **FILE F8** — reversal: a
+  scenario with a `classifier:` block and a mute inside a hold. All three revisit
+  **2027-02-13** or when the model-backed classifier lands, whichever first. No
+  issues opened (owner's call); the threads stay open.
+- **DROP F9** — reason: the designation is an owner's visible post and every
+  control it enables is traced with the author; reversal: a guest orchestrator in
+  a live run that nobody noticed from the trace; revisit 2027-02-13.
+- **DROP F11** — reason: the observed behaviour is §5.9's; reversal: an archived
+  thread producing more than one `refused` per bot, or a job in one firing twice;
+  revisit 2027-02-13.
+
+**Badges vs consequence:** the three P1s are a replay-only input difference (F1),
+a restart-only stale callback (F2) and a model emitting `NaN` (F3). Of the twelve,
+F12 (silent corruption of every later live prompt) and F4 (a flag that did nothing
+in six live runs) had the only consequences anyone met this week; both carried P2.
+
+**Adoption:** 7 FIX, 3 FILE, 2 DROP. Highest C901 after the round: 8. 146 tests.
+No `@codex review` re-requested: commits after `7aa069e` are unreviewed by Codex,
+by the owner's decision, so the project's 👍 bar is not met on this PR as it stands.
+
+**Cost:** one rater run (~18 minutes, ~220k tokens), ~40 minutes of author time
+including the fixes.
