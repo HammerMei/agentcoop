@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--claude-model", default="sonnet", help="model for the bot sessions (sonnet, haiku, ...)")
     parser.add_argument("--config-dir", help="CLAUDE_CONFIG_DIR for the bot sessions (a lab login, not the operator's)")
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--scripted-bots", default="", help="comma-separated bots that follow the scenario script while the rest run live")
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")
     args = parser.parse_args(argv)
     if args.config_dir:
@@ -68,7 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     recorder = Recorder(runner) if (args.record and runner is not None) else None
     if args.record and runner is None:
         recorder = Recorder(preview.sim.gateways[0].runner)
-    scenario = load(args.scenario, enforce, recorder or runner)
+    scripted = frozenset(b for b in args.scripted_bots.split(",") if b)
+    scenario = load(args.scenario, enforce, recorder or runner, scripted)
     sim = asyncio.run(run(scenario))
     print(report(sim, scenario.name, args.show_rules))
     if isinstance(runner, Replayer) and runner.unused():

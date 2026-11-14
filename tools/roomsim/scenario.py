@@ -31,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from .bots import BotRunner, ScriptedBot, done_everywhere
+from .bots import BotRunner, Mixed, ScriptedBot, done_everywhere
 from .classifier import ScriptedClassifier
 from .gateway import SimGateway
 from .model import Decision, Member, Params, TurnInput
@@ -97,7 +97,8 @@ def _classifier(raw: dict | None) -> ScriptedClassifier:
                               failures={int(k): int(v) for k, v in (raw.get("failures") or {}).items()})
 
 
-def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None) -> Scenario:
+def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None,
+         scripted_bots: frozenset[str] = frozenset()) -> Scenario:
     data = yaml.safe_load(Path(path).read_text())
     members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""),
                       m.get("private_profile", ""))
@@ -109,6 +110,8 @@ def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None
         bot: [ScriptRule(**rule) for rule in rules] for bot, rules in (data.get("bots") or {}).items()
     })
     bot_runner = runner or ScriptedBot(script)
+    if runner is not None and scripted_bots:
+        bot_runner = Mixed(runner, ScriptedBot(script), scripted_bots)
     bots = room.bots()
     for raw in data.get("gateways") or [{"name": "g1", "hosted": bots}]:
         sim.add_gateway(SimGateway(sim, raw["name"], raw["hosted"], raw.get("agents", bots), params,

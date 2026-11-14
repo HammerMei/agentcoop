@@ -8,7 +8,7 @@ import pytest
 
 from tests.helpers import MockAgentBackend
 from tests.roomsim.helpers import FAST, Sandbox, Script, item, replies, reply
-from tools.roomsim.bots import BackendBot, Recorder, Replayer, ReplayMismatch, ScriptedBot
+from tools.roomsim.bots import BackendBot, Mixed, Recorder, Replayer, ReplayMismatch, ScriptedBot
 from tools.roomsim.classifier import ScriptedClassifier
 from tools.roomsim.model import Decision, Hint, Member, ThreadGroup, TurnInput
 
@@ -173,3 +173,16 @@ async def test_a_session_whose_first_send_fails_is_recreated_with_its_intro():
     assert first.failed and not second.failed
     assert len(backend.created_sessions) == 2  # the poisoned session was not kept
     assert all(m["prompt"].startswith("You are a") for m in backend.sent_messages)  # both sends carried the intro
+
+
+async def test_a_mixed_runner_scripts_the_named_bots_and_sends_the_rest_to_the_backend():
+    backend = MockAgentBackend(default_response='{"replies": [{"to": ["H"], "text": "live"}]}')
+    members = [Member("H", "owner"), Member("a", "bot"), Member("b", "bot")]
+    live = BackendBot(backend, "/nowhere", 10, "team", members)
+    scripted = ScriptedBot(lambda turn: {"replies": [{"to": ["H"], "text": "scripted"}]})
+    runner = Mixed(live, scripted, frozenset({"b"}))
+    hint = Hint("addressed", "main", (ThreadGroup("main", "must-reply"),))
+    out_a = await runner.run(TurnInput("a", "addressed", "main", (), hint))
+    out_b = await runner.run(TurnInput("b", "addressed", "main", (), hint))
+    assert "live" in out_a.text and "scripted" in out_b.text
+    assert [m["prompt"].startswith("You are a") for m in backend.sent_messages] == [True]

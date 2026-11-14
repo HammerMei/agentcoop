@@ -120,6 +120,19 @@ class Replayer:
         return BotOutput(**record["output"])
 
 
+@dataclass
+class Mixed:
+    """Some bots scripted, the rest live: a deterministic provocateur with live subjects."""
+
+    default: BotRunner
+    scripted: BotRunner
+    names: frozenset[str]
+
+    async def run(self, turn: TurnInput) -> BotOutput:
+        runner = self.scripted if turn.bot in self.names else self.default
+        return await runner.run(turn)
+
+
 class BackendBot:
     """One ``AgentBackend`` session per bot per room. ``members`` and ``room`` feed the
     session's first message (who the bot is, who is in the room, the envelope contract)."""
