@@ -9,6 +9,7 @@ the `[live 2.2.6]` evidence in the design's Appendix A. Run them with
 |---|---|
 | `probe_new_session.py <cwd> ["<prompt>"] ['<json env>']` | `initialize` → `session/new`. With a prompt: `session/prompt`, answering every `session/request_permission` with `allow_once`. The JSON env is merged into the process environment, for `OPENCODE_CONFIG_CONTENT`. |
 | `probe_resume.py <cwd> <session id> "<prompt>" [session/resume\|session/load]` | `initialize` → `session/resume` (or `session/load`) of an existing session in a fresh process, then one prompt. Counts the replayed updates. |
+| `probe_agent_mode.py <cwd> <config path> [provider/model]` | The §4 P5 chain. Writes `<config path>` with per-watcher `agents.*` entries and spawns with `OPENCODE_CONFIG=<config path>` plus the force-ask ruleset in `OPENCODE_CONFIG_CONTENT`. Selects entries through the `mode` config option, adds and rewrites entries while the process runs, removes one under a live session, then resumes in a fresh process. Each step prints its result. The model defaults to `openai/gpt-5.6-luna-fast`. |
 
 The §4 force-ask ruleset, as the env argument:
 

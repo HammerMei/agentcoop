@@ -221,17 +221,19 @@ concurrently `[src]` `packages/cli/src/acp/sessions.ts`, `turn.ts` `FiberMap`.
 The spec states that one agent can run several independent sessions `[docs]`.
 
 The alternative is one process per watcher. It would make process-global
-mechanisms usable for per-watcher content (opencode's `instructions` config
-key, or an agent/mode with a `system` prompt). This increment rejects it for
-the reason the 1.x adapter gives for not using `config.instructions`
-(`gateway/agents/opencode/adapter.py`, `ensure_durable_instructions`
-docstring): an `agents:` entry is many-to-one with watchers, so anything
-scoped to the process leaks one watcher's identity header into another's
-session. It would also multiply memory by the number of rooms, because an
-`opencode acp` process is two processes, the bridge and a private server
-`[src]` `packages/cli/src/services/standalone.ts`. The idle/expiry lifecycle
-(`docs/design/dynamic-watcher-design.md` §2.5) would make per-watcher
-processes affordable later. The profile interface does not preclude it.
+mechanisms usable for per-watcher content, such as opencode's `instructions`
+config key. This increment rejects it for the reason the 1.x adapter gives
+for not using `config.instructions` (`gateway/agents/opencode/adapter.py`,
+`ensure_durable_instructions` docstring): an `agents:` entry is many-to-one
+with watchers, so anything scoped to the process leaks one watcher's identity
+header into another's session. It would also multiply memory by the number
+of rooms, because an `opencode acp` process is two processes, the bridge and
+a private server `[src]` `packages/cli/src/services/standalone.ts`.
+Per-watcher content on opencode therefore rides a per-session mechanism: an
+agent entry with its own system prompt, selected as the session's mode
+(§4 P5). The idle/expiry lifecycle (`docs/design/dynamic-watcher-design.md`
+§2.5) would make per-watcher processes affordable later. The profile
+interface does not preclude it.
 
 Whether `claude-agent-acp` and `codex-acp` serve concurrent top-level
 sessions in one process is `[unverified]`, because their READMEs do not say.
@@ -270,8 +272,8 @@ Why each value:
 - `auth.terminal` is off, because a terminal-type auth method requires
   relaunching the agent interactively and a daemon cannot do that. Every
   agent is authenticated out of band (§3.7, P2).
-- `session.compaction` is on, because compaction notifications are the
-  signal rung (c) of §3.8 may use later.
+- `session.compaction` is on, so the fold sees `compaction_update` and can
+  log it. Nothing in this increment acts on it.
 - The backend does **not** set `_meta["opencode/child-session-updates"]`.
   Without it, opencode projects a subagent's asks onto the parent session
   `[src]` `packages/cli/src/acp/child.ts`, and the parent session is the one
@@ -313,11 +315,11 @@ client at its 1.0 without reaching the rest of the backend.
 
 **Prompt.** The backend sends these content blocks, in order:
 
-1. the durable instructions, if the profile's strategy is a per-turn one
-   (§3.8)
-2. one `text` block with the prompt the gateway already builds (trusted
+1. one `text` block with the prompt the gateway already builds (trusted
    connector prefix + body)
-3. one `resource_link {uri: file://<abs path>, name}` per attachment (§3.9)
+2. one `resource_link {uri: file://<abs path>, name}` per attachment (§3.9)
+
+The durable instructions are never a prompt block (§3.8).
 
 **Fold.** The backend folds `session/update` into `AgentEvent`, mirroring what
 the 1.x SSE parser emits (`gateway/agents/opencode/adapter.py`
@@ -514,17 +516,25 @@ The backend probes capabilities and takes the first rung that applies:
   and the backend does that. (A room rename re-issues the header,
   `message_processor.py` `rename`.)
 - **(b) profile strategy.** The agent has a lever ACP does not expose
-  generically. opencode's is in §4.
-- **(c) per-turn prefix.** The backend sends the file's content as the first
-  `text` block of every `session/prompt`. This rung is always available. It is
-  exactly the 1.x discipline ("re-supplied on every call") minus one
-  property: the content is in the conversation history, so it costs tokens
-  per turn and compaction treats it like everything else. That is tolerable
-  precisely because the backend re-sends it every turn. The
-  `session.compaction` capability in the handshake exists so a later
-  increment can send it only on the first turn and after each
-  `compaction_update: completed`. This increment sends it every turn and
-  measures.
+  generically. opencode's is §4 P5.
+
+There is no per-turn rung. When neither (a) nor (b) applies, the watcher
+fails to start: `[ERROR] <agent>: no durable-instruction channel (no
+systemPrompt capability, no profile strategy)`. A new agent needs a profile
+strategy before it is supported. Every profile is a deliberate addition
+anyway (§5).
+
+**Why there is no per-turn rung.** A `text` block in `session/prompt` is
+conversation history. The 1.x `system` field was not. opencode 1.x appended
+it as a system part after the base prompt and the instructions `[src]`
+v1.18.13 `session/llm/request.ts`. The durable header on this gateway is
+10.7 KB, about 2.7k tokens (`RUNTIME_DIR/system-prompts/*.md`). Sent every
+turn, it adds 2.7k tokens of history per turn, 54k tokens of duplicates
+after twenty turns. Sent on the first turn only, compaction summarises it
+away. Sent again after each `compaction_update`, two versions coexist, the
+summary's paraphrase and the fresh copy, and the model cannot tell which is
+current. None of the three is acceptable, and no profile in this increment
+needs any of them.
 
 The backend logs the rung in use once per session at INFO, because it is a
 security- and cost-relevant property an operator should be able to read off.
@@ -645,6 +655,12 @@ events for the turn and forwards every `permission.asked` as
 never ask. With the ruleset above, a `shell` call and a `write` call each
 produced a `session/request_permission` before running `[live 2.2.6]`.
 
+`OPENCODE_CONFIG_CONTENT` loads above the gateway's `OPENCODE_CONFIG` file
+(P5), the project config and the global config `[src]` `packages/core/src/config.ts`
+`load`, so the ruleset outranks whatever an agent entry carries. A `shell`
+call on a session selected onto a watcher entry produced one ask under this
+ruleset `[live 2.2.6]`.
+
 **P6 normalisation.** When `tool_call.name` is present, it is the opencode
 **tool** name: `shell`, `edit`, `write`, `patch`, `read`, `webfetch`,
 `websearch`, `subagent`, … `[src]` `tool.ts`. `rawInput` is that tool's
@@ -726,14 +742,89 @@ that field counts the cached read as well (observed: `inputTokens: 294`,
 and reports the difference as `cost_usd`. It reports `None` on the first turn
 after attach.
 
-**P5 instructions.** Rung (c), with one opencode-specific refinement
-available as strategy (b). opencode splits off a `text` block carrying
-`annotations: {audience: ["assistant"]}` and delivers it as a *synthetic*
-steer message before the prompt. The model sees it, a UI's transcript hides
-it, and it is not a system prompt `[src]` `content.ts` `contentBlockToParts`,
-`prompt.ts`, `turn.ts` `submit`. The profile uses that annotation for the
-durable content, so the header does not read as user text. The content is
-still in history and still re-sent per turn.
+**P5 instructions.** Rung (b). opencode selects an agent per session, and an
+agent entry carries a system prompt. The profile gives each watcher its own
+agent entry and selects it as the session's mode. The header is a system
+part, outside history, and a changed header reaches the model on the next
+turn.
+
+The mechanism, `[src]` v2.2.6 unless marked:
+
+- An `agents.<name>` config entry carries `system`. A non-empty `system`
+  becomes the session's first system part in place of opencode's base
+  prompt. Instructions, skills and `AGENTS.md` are still appended as the
+  second system part `[src]` `packages/core/src/session/model-request.ts`
+  `baseTranscript`, `[docs]` agents "System".
+- ACP exposes the agent as the session config option `mode`.
+  `session/new`, `session/load` and `session/resume` return `configOptions`
+  with the current value and the available entries.
+  `session/set_config_option {configId: "mode", value}` and
+  `session/set_mode {modeId}` make the same selection `[src]` `service.ts`,
+  `config-option.ts`. A stored session keeps its agent. A resumed session
+  comes back on it and its next turn uses that entry's `system` `[src]`
+  `sessions.ts` `attach`, `[live 2.2.6]`.
+- `OPENCODE_CONFIG=<path>` names an explicit config file. opencode watches
+  it and reloads on change `[src]` `config.ts`, `config/watch.ts`. A reload
+  that changes the option list pushes `config_option_update` to every
+  attached session `[src]` `sessions.ts` `changed`. It arrived 0.3 s to
+  0.4 s after the write `[live 2.2.6]`.
+- Config layers, lowest first: global, the explicit file, project,
+  `OPENCODE_CONFIG_CONTENT`, managed `[src]` `config.ts` `load`. The
+  operator's global agents stay visible next to the gateway's entries, and
+  the P3 ruleset outranks the file `[live 2.2.6]`.
+
+The profile does this:
+
+1. Before spawning the process, it writes `RUNTIME_DIR/opencode/<agent
+   id>.jsonc` with one `agents.coop-<path_key>` entry per watcher bound to
+   the agent: `mode: "primary"`, `system` = preamble + the durable
+   instructions file content, `description` = a hash of `system`. It sets
+   `OPENCODE_CONFIG` to that path. It writes through a temporary file and
+   `rename`, because opencode reloads on every write. An operator
+   `OPENCODE_CONFIG` in the agent's `env:` is a load error, because the
+   profile owns the variable.
+2. `ensure_durable_instructions` adds or rewrites the watcher's entry. The
+   description hash changes with the content, so every rewrite produces a
+   `config_option_update`. The backend waits for it. When no session is
+   attached, nothing is pushed, and the backend retries the selection in
+   step 3 with a bounded backoff instead. A selection issued right after the
+   write fails with `mode not found` until the watcher has fired `[live
+   2.2.6]` through `set_config_option`, the same path as `set_mode` `[src]`
+   `service.ts`: the ACP catalog reload inside `withReload` does not re-read
+   the file.
+3. After every `session/new`, `session/load` and `session/resume`, it
+   selects the watcher's entry with `session/set_mode`. The default mode is
+   the operator's. It was a global agent `[live 2.2.6]`, so the backend
+   never relies on it.
+4. `reclaim_durable_instructions` removes the entry after the watcher's
+   session is closed, never before. A prompt on a session whose entry was
+   removed returned nothing in 30 s. A `set_mode` on that session still
+   succeeded, and every later prompt failed with `Session already has an
+   active ACP prompt` `[live 2.2.6]`. A session moved to another entry with
+   `set_mode` before the removal is unaffected.
+
+The `coop-` prefix keeps a gateway entry from colliding with a project
+`.opencode/` agent of the same name, which would outrank it.
+
+A room rename rewrites the entry in place. The following turn used the new
+`system` with no re-attach `[live 2.2.6]`.
+
+**The preamble.** `system` replaces opencode's base prompt. That prompt is
+`runner/prompt/system.txt`: fifteen lines of harness guidance (Markdown
+output, `<system-reminder>` handling, parallel tool calls) plus three tool
+bullets rendered for `shell`, `write` and `edit` `[src]` `system-prompt.ts`
+`render`. The 1.x `system` field was appended after it. To keep that text in
+front of the model, the profile vendors the rendered base prompt and
+prepends it to the header. The vendored copy names the opencode version it
+was taken from. At backend start the profile reads the agent binary and
+checks that the template and the three tool bullets appear in it verbatim.
+The binary embeds them as plain strings `[live 2.2.6]` macOS arm64,
+`[unverified]` Linux. A miss logs `[WARNING] opencode base prompt differs
+from the vendored copy (<version>); watcher system prompts carry the vendored
+text` and does not block the start. The vendored copy is what the model sees
+either way, so drift degrades guidance and never breaks a turn. Whether the
+preamble keeps the base prompt's first sentence, "running in OpenCode, a
+coding agent harness", or lets the header state the identity is open.
 
 opencode 2.2 added a compaction-resistant mechanism: per-session instruction
 entries (`session.instructions.entry.put`, `[src]` `handlers/session.ts`). It
@@ -876,6 +967,9 @@ Everything else is a default.
    `RUNTIME_DIR/system-prompts/`, as for both existing backends.
 6. The backend never recreates a stored session id silently on `-32002`.
 7. The backend logs the durable-instructions rung in use once per session.
+8. The durable instructions are never a prompt block (§3.8).
+9. On opencode, a watcher's agent entry is removed only after the session
+   on it is closed (§4 P5).
 
 ---
 
@@ -924,6 +1018,18 @@ is called done. The state of each item on 2.2.6, macOS:
    set up for it.
 5. The handshake, `session/new`, a prompt turn and a permission round-trip.
    **Settled** `[live 2.2.6]`, Appendix A.
+6. The per-watcher agent entry (§4 P5): `OPENCODE_CONFIG` hot reload,
+   `config_option_update` within 0.4 s, `set_mode` onto a new entry and a
+   turn on it, an in-place `system` edit used by the next turn, the P3
+   ruleset still asking on a `shell` call under the entry, two sessions on
+   different entries in one process, and `session/resume` in a fresh process
+   returning on the stored entry. **Settled** `[live 2.2.6]`,
+   `tests/manual/acp/probe_agent_mode.py`. Also observed: `set_mode` right
+   after the write fails with `mode not found`, and a prompt on a session
+   whose entry was removed does not return. **Open on Linux**: the binary
+   embeds the base prompt template as plain text.
+7. The vendored preamble in front of the full durable header, on a real
+   watcher turn. **Open**: the probe used a one-line `system`.
 
 For the Claude and Codex profiles, the `[unverified]` rows in §5 are the
 checklist.
@@ -946,9 +1052,8 @@ checklist.
 5. The §8 checklist against 2.2.5. Then the docs: `docs/permission-reference.md`,
    `docs/architecture.md` ("Adding a New Agent Backend" becomes profiles),
    `docs/supported-features.md`, `config.example.yaml`.
-6. Separately, later: the Claude and Codex profiles when wanted, the 1.x
-   backend retirement, and the per-watcher topology if measurement of rung
-   (c)'s cost says so.
+6. Separately, later: the Claude and Codex profiles when wanted, and the
+   1.x backend retirement.
 
 ---
 
@@ -1074,9 +1179,53 @@ of a prompt on the resumed session:
 notifications (`user_message_chunk`, `agent_message_chunk`, `tool_call`,
 `tool_call_update`) before its `{configOptions: […]}` response.
 
+**Per-watcher agent entry** (`tests/manual/acp/probe_agent_mode.py`:
+`OPENCODE_CONFIG` holds `agents.watcher_a`, the §4 ruleset is in
+`OPENCODE_CONFIG_CONTENT`, the operator's global config is in place).
+
+The `mode` entry of `configOptions` on `session/new`. The `value` strings
+are as observed, with the operator's own global agents shown as `<operator
+agent>`. The object shape is `[src]` `config-option.ts`:
+
+```json
+{"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
+ "currentValue": "<operator agent>",
+ "options": [{"value": "<operator agent>", "name": "…"}, {"value": "build", "name": "build"},
+             {"value": "plan", "name": "plan"}, {"value": "<operator agent>", "name": "…"},
+             {"value": "<operator agent>", "name": "…"},
+             {"value": "watcher_a", "name": "watcher_a", "description": "probe <hash>"}]}
+```
+
+`session/set_config_option {configId: "mode", value: "watcher_b"}` issued
+right after `agents.watcher_b` was written to the file:
+
+```json
+{"code": -32602, "message": "Invalid params: mode not found: watcher_b", "data": {"mode": "watcher_b"}}
+```
+
+0.3 s after the write, a `config_option_update` with `watcher_b` in the
+options list reached the attached session. The same call then returned the
+updated `configOptions` with `currentValue: "watcher_b"`, and the next turn
+answered with the name from `watcher_b`'s `system`. After `watcher_b.system`
+was rewritten in place, the next turn answered with the new text.
+
+A prompt on a session whose entry had been removed from the file produced no
+response in 30 s. A `set_config_option` on it then succeeded. The next
+prompt on it:
+
+```json
+{"code": -32603, "message": "Internal error: Session already has an active ACP prompt: ses_…", "data": {"service": "session"}}
+```
+
+`session/resume` of the first session in a fresh process returned
+`currentValue: "watcher_b"`, and its next turn answered from that entry
+without a `set_mode`.
+
 ## Appendix B: sources
 
 - opencode `v2.2.5`: `packages/cli/src/acp/{agent,service,sessions,turn,permission,prompt,content,tool,translate,replay,config-option,child,error,capabilities}.ts`, `packages/cli/src/commands/handlers/acp.ts`, `packages/cli/src/services/standalone.ts`, `packages/server/src/handlers/{session,permission}.ts`, `packages/schema/src/{permission,session-inbox}.ts`, `packages/core/src/config/normalize.ts`, `CHANGELOG.md`. Docs: `cli/acp`, `permissions`, `config`, `migrate-v1`.
+- opencode `v2.2.6` (§4 P5): `packages/cli/src/acp/{service,sessions,catalog,config-option}.ts`, `packages/core/src/config.ts`, `packages/core/src/config/watch.ts`, `packages/core/src/session/{model-request,system-prompt}.ts`, `packages/core/src/session/runner/prompt/system.txt`, `packages/schema/src/agent.ts`. Docs: `agents`.
+- opencode `v1.18.13` (§3.8): `packages/opencode/src/session/llm/request.ts`.
 - ACP: `agentclientprotocol.com/protocol/v1/*`, `schema/v1/schema.json` (artifact `schema-v1.29.1`), RFDs `client-system-prompt` (Preview), `end-turn-token-usage` (Draft), `session-usage` (Completed). Registry: `cdn.agentclientprotocol.com/registry/v1/latest/registry.json`.
 - Adapters: `agentclientprotocol/claude-agent-acp` @ `1d4418f` (v0.100.0), `agentclientprotocol/codex-acp` @ `519c267` (v2.5.0). Claude Agent SDK permissions docs. `openai/codex` `codex-rs/app-server`.
 - Python SDK: `agentclientprotocol/python-sdk`, PyPI `agent-client-protocol` 0.12.1 / 1.0.0rc3.
