@@ -308,7 +308,7 @@ client at its 1.0 without reaching the rest of the backend.
 | `AgentBackend` (`gateway/agents/__init__.py`) | ACP | Notes |
 |---|---|---|
 | `start()` / `stop()` | spawn + `initialize`. Close stdin + terminate | idempotent, as today |
-| `create_session(working_directory, extra_args, session_title)` | `session/new {cwd, mcpServers: []}` | Returns the agent's id. **No init prompt**, because `session/new` returns an id without a model turn, unlike `claude -p`. The 1.x opencode adapter's `_INIT_PROMPT` came from the CLI era and is dropped. `extra_args` and `session_title` have no ACP equivalent. The backend logs them at DEBUG if given. A profile may map `session_title` to an agent-specific call. No profile does in this increment. |
+| `create_session(working_directory, extra_args, session_title)` | `session/new {cwd, mcpServers: []}` | Returns the agent's id. **No init prompt**, because `session/new` returns an id without a model turn, unlike `claude -p`. The 1.x opencode adapter's `_INIT_PROMPT` came from the CLI era and is dropped. `extra_args` and `session_title` have no ACP equivalent. `extra_args` comes from `new_session_args`, which the loader accepts for every type (`gateway/config.py:941`): on `type: opencode` they were `opencode serve` flags, on `type: claude` they are `claude -p` flags. Config loading warns on a `type: acp` agent with a non-empty `new_session_args`, next to the `tool: external_directory` warning (§4), and the backend ignores the value. It is not mapped onto `opencode acp`, whose flags nobody has checked. `session_title` is logged at DEBUG. A profile may map it to an agent-specific call. No profile does in this increment. |
 | re-attach after a restart (§3.11) | `session/resume {sessionId, cwd}` if `sessionCapabilities.resume`, else `session/load {sessionId, cwd, mcpServers: []}` with the replayed updates discarded | `cwd` must equal the session's directory, or opencode rejects with `invalid_params` `[src]` `service.ts` `getSession`. `mcpServers` is optional on `resume` and required on `new` and `load` `[docs]` ACP v1 schema |
 | `delete_session(session_id)` | `session/delete` if `sessionCapabilities.delete`, else return `False` | opencode cancels the turn and removes the row `[src]` `service.ts` `deleteSession` |
 | `send()` | `stream()` consumed to its final event | one code path, as the base class already allows |
@@ -340,6 +340,13 @@ the 1.x SSE parser emits (`gateway/agents/opencode/adapter.py`
 | `tool_call_update` with `status: completed \| failed` | `tool_result` (`✓ <name>`), once per `toolCallId` |
 | `usage_update`, `plan`, `available_commands_update`, `config_option_update`, `current_mode_update`, `session_info_update`, `compaction_*`, `notice`, `user_message_chunk` | consumed, not emitted. The backend records `compaction_update` for §3.8 |
 
+The fold also checks R4 at runtime. Every `tool_call` whose normalised name
+the profile's force-ask ruleset gates (§4 P3) must have been preceded by a
+`session/request_permission` for its `toolCallId`. A gated tool that runs
+without an ask is logged at ERROR with the tool, the session and the room.
+It means something outside the gateway allowed the call, and the log line
+is the only place that would ever show it.
+
 **Final.** The `session/prompt` response ends the turn.
 
 - `stopReason` `end_turn` and `max_tokens` are a normal reply.
@@ -369,9 +376,18 @@ abandon the turn. Under ACP the backend has to end the turn on the wire:
    `queueAsk`.
 3. Wait, bounded, for the prompt response, which must carry
    `stopReason: cancelled`. opencode's own drain is 5 s `[src]` `turn.ts`
-   `CancelDrainTimeout`.
+   `CancelDrainTimeout`: `cancel` interrupts the turn fiber, the fiber waits
+   up to that long for the core, then settles and frees the session's slot.
 4. Raise `asyncio.TimeoutError`, so `AgentTurnRunner._execute_agent`
    (`gateway/core/agent_turn_runner.py`) posts its timeout message as today.
+5. If no prompt response arrives within the bound in step 3, the core is
+   hung inside the turn. `session/close` cannot free it, because `close` is
+   the same `FiberMap.remove` on the same fiber `[src]` `turn.ts` `close`.
+   The backend terminates the process and raises `AgentUnavailableError`
+   (§3.10). Every watcher on that agent re-attaches lazily (§3.11). A session
+   left in that state answers every later prompt with `Session already has
+   an active ACP prompt` `[live 2.2.6]`, which is loud, so the restart is
+   the cheaper outcome.
 
 A second `session/prompt` on a session with a turn in flight is an error on
 opencode `[src]` `turn.ts` `prompt`. The per-room serial queue already
@@ -411,10 +427,20 @@ in the same spirit as `is_mention()`. The same change re-points the two
 existing brokers at it, and their tests prove the decision table did not move.
 
 **What the ask carries.** `toolCall` is a `ToolCallUpdate`: `toolCallId`,
-`title`, `name?`, `kind?`, `rawInput?`, `locations?`, `content?`. The ladder
-needs `(tool_name, param_strings)` for `all_params_match_any`
-(`gateway/core/tool_match.py`). `profile.normalize_ask(tool_call) ->
-(tool_name, tool_input)` (§3.7) produces the first step of that. The existing
+`title`, `name?`, `kind?`, `rawInput?`, `locations?`, `content?`. Only
+`toolCallId` is required `[docs]` ACP v1 schema. The fold already keeps one
+record per `toolCallId` for the session (§3.5), and the backend merges the
+ask's `toolCall` over that record before normalisation, so a partial patch
+still carries the `name` and `rawInput` an earlier `tool_call` delivered.
+The three known adapters send the full shape to a client that does not
+advertise the AIR capability `[src]` opencode `permission.ts` `ask`,
+claude-agent-acp `src/tool-calls/renderer.ts`, codex-acp
+`renderPermissionToolCall`, and this backend does not advertise it. The
+merge costs one line and protects the `other` default in P6 from a future
+adapter. The ladder needs `(tool_name, param_strings)` for
+`all_params_match_any` (`gateway/core/tool_match.py`).
+`profile.normalize_ask(tool_call) -> (tool_name, tool_input)` (§3.7)
+produces the first step of that. The existing
 `get_param_strings_for_claude(tool_name, tool_input, working_directory)`
 (`tool_match.py:480`) then produces the param strings.
 
@@ -442,6 +468,9 @@ operator's own interactive opencode in that directory `[docs]` v2
 permissions, `[src]` `packages/cli/src/acp/permission.ts` (it returns
 `once|always|reject`). On Claude, `always` writes `updatedPermissions` into
 settings. The gateway's allow-lists are the only durable policy (ADR-0002).
+On opencode the store the backend talks to is the gateway's own (§4 P3,
+`XDG_DATA_HOME`), so this invariant also keeps that store free of `allow`
+rules, and the operator's interactive store is never written either way.
 
 **Invariant: the broker answers an ask within the turn that raised it.** The
 registry entry's lifetime is the turn's. `session/cancel` answers all of a
@@ -521,7 +550,17 @@ The backend probes capabilities and takes the first rung that applies:
   it `[src]` `service.ts` `initialize`. The content is attached when the
   session is attached, so a change requires `session/close` plus re-attach,
   and the backend does that. (A room rename re-issues the header,
-  `message_processor.py` `rename`.)
+  `message_processor.py` `rename`.) The content first exists at
+  `ensure_durable_instructions`, which the lifecycle calls after
+  `session/new` and after the history handoff (`_start_watcher` steps 3, 3.6
+  and 4). claude-agent-acp records a conversation's system prompt on its
+  first request and applies a later change at the next compaction `[src]`
+  `src/client-system-prompt.ts`. A close plus re-attach before any turn is
+  therefore an initial delivery and works. With the handoff enabled, the
+  handoff is the first request, and the header waits for a compaction.
+  **A rung-(a) profile is not supported until the lifecycle delivers the
+  durable instructions before the history handoff (§9).** No rung-(a)
+  profile ships in this increment.
 - **(b) profile strategy.** The agent has a lever ACP does not expose
   generically. opencode's is §4 P5.
 
@@ -603,8 +642,11 @@ only way to set the directory `[live 2.2.6]`. The process spawns a private
 reaches it over HTTP itself `[src]` `packages/cli/src/services/standalone.ts`,
 `commands/handlers/acp.ts`. The child inherits the parent's environment
 (`extendEnv: true`), so `env` set on the `opencode acp` process reaches the
-config loader `[src]` `standalone.ts`. The inline config takes effect in the
-private server `[live 2.2.6]`, see P3. The gateway cannot reach that private
+config loader `[src]` `standalone.ts`. The profile sets three variables on
+that environment, each over any value the daemon inherited:
+`OPENCODE_CONFIG` (P5), `OPENCODE_CONFIG_CONTENT` (P3) and
+`XDG_DATA_HOME=<RUNTIME_DIR>/opencode/data` (P3, saved approvals). The
+inline config takes effect in the private server `[live 2.2.6]`, see P3. The gateway cannot reach that private
 server, because its port and password are random. There is no HTTP side
 channel in this topology, and the design does not want one.
 
@@ -614,7 +656,7 @@ anomalyco/opencode#34638 (1.17.11, Linux, auto-closed) and #52259 (2.0.3 to
 (PR #52286). The §8 checklist therefore keeps item 1 for Linux, where the
 production gateway runs.
 
-**P2 authentication error.** `auth_hint = "opencode auth login"`. `authenticate` is a no-op on opencode: it checks the method id and returns `{}` `[src]` `service.ts` `authenticate`. `session/new` loads the
+**P2 authentication error.** `auth_hint = "XDG_DATA_HOME=<RUNTIME_DIR>/opencode/data opencode auth login"`, with the path spelled out. Provider credentials live in the opencode database under the data directory, and P3 gives the agent process its own data directory, so the operator logs in once under that variable. `authenticate` is a no-op on opencode: it checks the method id and returns `{}` `[src]` `service.ts` `authenticate`. `session/new` loads the
 model catalog first and fails `auth_required` when no provider is usable
 `[src]` `service.ts` `newSession`, `error.ts`.
 
@@ -641,8 +683,31 @@ unreachable under the gateway. The profile sets `OPENCODE_CONFIG_CONTENT` to
 this ruleset on the spawn environment, over any value the daemon inherited,
 as 1.x does (`adapter.py:475`), and logs the override at INFO when the
 daemon's environment carried one. An operator who wants a weaker rule has no
-supported path. That is R4's gap statement for this profile, and it is the
-same as on 1.x.
+supported path, as on 1.x.
+
+**Saved approvals.** 2.x persists an `always` answer as project-scoped
+`allow` rules in the opencode database, and evaluates them **after** the
+configured rules with last match winning, so a saved `allow` beats a
+configured `ask` `[src]` `packages/core/src/permission.ts` `evaluateInput`,
+`[docs]` v2 permissions "Saved approvals are durable, project-scoped allow
+rules. They never override a configured deny." Only `deny` is immune, and a
+`deny` never reaches the broker. 1.x kept `always` in process memory `[src]`
+v1.18.13 `permission/index.ts` `approved`, so this store is new. The project
+is the working directory's git root, so any interactive opencode client the
+operator runs in that directory and answers `always` in would silently
+remove that pattern from the gateway's gate. ACP carries no signal when the
+store changes.
+
+The profile therefore gives the agent process its own data directory:
+`XDG_DATA_HOME=<RUNTIME_DIR>/opencode/data` on the spawn environment (P1).
+opencode roots its database, log and credentials there `[src]`
+`packages/util/src/global-roots.ts`, `core/src/database/database.ts`. The
+gateway never answers `always` (§3.6), so that store never gains an `allow`
+rule. The operator's own store is untouched in both directions. The cost is
+one login under the same variable (P2). The global config directory is not
+moved: `XDG_CONFIG_HOME` is a separate variable, so the operator's providers,
+agents and `opencode.jsonc` still load. R4's gap statement for this profile
+is then only the action gap below.
 
 `external_directory` is new in the list, because v2 flipped its default to
 allow.
@@ -695,10 +760,17 @@ absorbs both, so an existing allow-list keeps meaning what it meant.
   `Write`, which is the 1.x meaning of that rule. That is the one alias that
   is not a plain rename, and the migration note states it.
 - *Fields.* The profile renames `path` / `filePath` to `file_path`.
-  `command`, `url`, `query` and `pattern` already match `_CLAUDE_PARAM_FIELD`.
-  Without the path rename every file-tool ask would produce the empty param
-  string and fail every `params` rule. That is fail-closed, but the
-  `scratch-dir` preset would stop auto-approving.
+  `command` and `url` already match `_CLAUDE_PARAM_FIELD`. `query` and
+  `pattern` do not: the table has no `websearch`, `grep` or `glob` row
+  (`gateway/core/tool_match.py:45-54`), so those asks fall back to the whole
+  input as JSON and a `params` rule on them never matches. The increment adds
+  the three rows, `websearch: query`, `grep: pattern`, `glob: pattern`, to
+  the shared table. That is a core change, not a profile one, and it changes
+  `type: claude` the same way, because Claude's WebSearch, Grep and Glob
+  carry the same fields. The shipped `tool: "WebSearch"` preset has no
+  `params` and is unaffected. Without the path rename every file-tool ask
+  would produce the empty param string and fail every `params` rule. That is
+  fail-closed, but the `scratch-dir` preset would stop auto-approving.
 
 **The action gap.** The ask carries the **tool** that triggered it, never the
 permission **action** that fired. `permission.ts` `ask` builds `name` from
@@ -1038,10 +1110,12 @@ is called done. The state of each item on 2.2.6, macOS:
 3. `session/resume` of a session created by a previous `opencode acp`
    process, same data directory, same `cwd`, followed by a prompt turn on it.
    **Settled** `[live 2.2.6]`.
-4. `always` persists as a project allow rule in the shared store (the reason
-   for invariant 1). **Open by choice**: the test writes a rule into the
-   operator's store. The docs are the evidence until a disposable store is
-   set up for it.
+4. `always` persists as a project allow rule in the store (the reason for
+   invariant 1), and a saved `allow` beats a configured `ask` (§4 P3). **Open**:
+   with `XDG_DATA_HOME` pointed at a scratch directory the probe can answer
+   `always` once, then show the next identical call running with no ask, and
+   show the same call still asking in a fresh scratch store. The docs and
+   `permission.ts` are the evidence until then.
 5. The handshake, `session/new`, a prompt turn and a permission round-trip.
    **Settled** `[live 2.2.6]`, Appendix A.
 6. The per-watcher agent entry (§4 P5): `OPENCODE_CONFIG` hot reload,
