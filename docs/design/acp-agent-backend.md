@@ -476,7 +476,7 @@ seam from the agent's advertised capabilities with no profile involvement.
 | # | Seam | In ACP? | `AgentProfile` member | Generic default |
 |---|---|---|---|---|
 | P1 | launch: argv around `command`, env, cwd | no | `argv(command) -> list[str]`, `env(base: dict) -> dict` | `[command]`, `base` unchanged |
-| P2 | authentication | partly. `initialize` lists `authMethods`, and `session/new` fails `-32000 auth_required` | `auth_hint: str` (what the operator must run, e.g. `opencode auth login`) | the error maps to `AgentPermissionError` carrying the hint. Nothing is attempted in-process |
+| P2 | authentication error | partly. `initialize` lists `authMethods`, and `session/new` fails `-32000 auth_required` | `auth_hint: str` (what the operator must run, e.g. `opencode auth login`) | the error maps to `AgentPermissionError` carrying the hint. The backend performs no authentication. The operator logs the agent in out of band, and the agent process inherits those credentials |
 | P3 | **force-ask**: make the agent raise an ask for every call the gateway gates (ADR-0002) | **no**. ACP forwards only what the agent's own policy escalates | `gate_env(base) -> dict` and/or `session_meta() -> dict` (the `_meta` on `session/new`) | none. A profile that leaves this unset gets a load-time warning naming the gap |
 | P4 | sessions per process | no (the spec allows many, agents vary) | `sessions_per_process: Literal["many","one"]` | `"many"` |
 | P5 | durable instructions | **no** in stable v1. Preview RFD `sessionCapabilities.systemPrompt` | `instructions: InstructionsStrategy` (§3.8) | the capability-probed ladder in §3.8 |
@@ -597,7 +597,7 @@ anomalyco/opencode#34638 (1.17.11, Linux, auto-closed) and #52259 (2.0.3 to
 (PR #52286). The §8 checklist therefore keeps item 1 for Linux, where the
 production gateway runs.
 
-**P2 auth.** `auth_hint = "opencode auth login"`. `session/new` loads the
+**P2 authentication error.** `auth_hint = "opencode auth login"`. `authenticate` is a no-op on opencode: it checks the method id and returns `{}` `[src]` `service.ts` `authenticate`. `session/new` loads the
 model catalog first and fails `auth_required` when no provider is usable
 `[src]` `service.ts` `newSession`, `error.ts`.
 
