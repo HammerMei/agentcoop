@@ -203,7 +203,13 @@ the 1.x database on first start `[src]` `packages/server/src/routes.ts`
 `[unverified]`.) `context_inject_files` and history handoff carry continuity,
 as they do for any identity change today.
 
-These places enumerate agent types today, and each gains `acp`:
+The new type and the new field touch every place that enumerates agent
+types or `AgentConfig` fields. The tests own that list, not this document:
+`RELOAD_ACTIONS[AgentConfig]` is exhaustive and its field-enumeration test
+fails on a field with no classification (`gateway/config_diff.py`, `profile`
+→ `restart-agent`, because it changes the process and the store),
+`check_backend_signatures` covers the backend surface, and the config-load
+tests cover the loader. The places known today, for orientation:
 
 - `service.py:100-124`
 - `gateway/cli.py:318`
@@ -212,6 +218,7 @@ These places enumerate agent types today, and each gains `acp`:
 - `gateway/configtool/modals.py:153`
 - `gateway/tools/tui.py:91`
 - `gateway/config.py:908`
+- `gateway/config_diff.py:51-71`
 
 The two creation paths also collect the profile, because the loader
 rejects a `type: acp` agent without one. `coop config add agent` gains
@@ -433,6 +440,11 @@ The ladder is currently written out twice (`claude/broker.py`,
 extracts it into one predicate in `gateway/core` that all three brokers call,
 in the same spirit as `is_mention()`. The same change re-points the two
 existing brokers at it, and their tests prove the decision table did not move.
+The predicate is the ladder and nothing before it. The Claude broker's
+meta-tool pre-check (`_CLAUDE_META_TOOLS`, `claude/broker.py:195-199`,
+an unconditional allow before any role check) stays in that broker, in
+front of the shared call. It is Claude-specific and has no counterpart on
+the other two.
 
 **What the ask carries.** `toolCall` is a `ToolCallUpdate`: `toolCallId`,
 `title`, `name?`, `kind?`, `rawInput?`, `locations?`, `content?`. Only
@@ -714,8 +726,18 @@ gateway never answers `always` (§3.6), so that store never gains an `allow`
 rule. The operator's own store is untouched in both directions. The cost is
 one login under the same variable (P2). The global config directory is not
 moved: `XDG_CONFIG_HOME` is a separate variable, so the operator's providers,
-agents and `opencode.jsonc` still load. R4's gap statement for this profile
-is then only the action gap below.
+agents and `opencode.jsonc` still load.
+
+**The scope gap.** The ruleset asks for the five actions above and nothing
+else. opencode 2.x also gates `read`, `glob`, `grep`, `question`,
+`subagent` and `skill` `[docs]` v2 permissions "Defaults", and leaves them
+at `allow` by default (`read` asks for `.env` files). This profile leaves
+them there. For `read`, `glob` and `grep` that is the 1.x scope, which
+ADR-0002 states as bash, edit, webfetch and websearch. `question`,
+`subagent` and `skill` are new actions in 2.x, and on `type: claude` the
+matching calls (`Task`, `Skill`) do go through the ladder. Whether this
+profile asks for them too is a policy choice for the owner. R4's gap
+statement for this profile is this scope plus the action gap below.
 
 `external_directory` is new in the list, because v2 flipped its default to
 allow.
@@ -879,7 +901,11 @@ The profile does this:
    `OPENCODE_CONFIG` to that path on the spawn environment, over any value
    the daemon inherited, and logs the override at INFO when there was one.
    It writes through a temporary file and `rename`, because opencode reloads
-   on every write.
+   on every write. The file name is the agent's config key, so the loader
+   checks a `type: acp` agent's key against the one-component rule `coop
+   config add agent` already enforces (`gateway/cli.py:317`,
+   `^[a-z0-9][a-z0-9_-]{0,63}$`) and rejects any other key at load. The
+   loader applies no such rule today (`gateway/config.py` `_parse_one_agent`).
 2. `ensure_durable_instructions(session_id, …, content)` adds or rewrites
    the watcher's entry and then selects it on that session with
    `session/set_mode`. The entry for a new watcher cannot exist at
@@ -916,8 +942,13 @@ The profile does this:
    prompt` `[live 2.2.6]`. A session moved to another entry with `set_mode`
    before the removal is unaffected.
 
-The `coop-` prefix keeps a gateway entry from colliding with a project
-`.opencode/` agent of the same name, which would outrank it.
+The `coop-` prefix keeps a gateway entry from colliding by accident with a
+project `.opencode/` agent of the same name, which would outrank it. A
+deliberate entry of that name in the working directory is not defended
+against. The working directory is the agent's own (ADR-0001), and a project
+config there is the same class as an `AGENTS.md` the agent can write: it
+can change what the model is told, and it cannot touch the ruleset, because
+`OPENCODE_CONFIG_CONTENT` outranks project config (P3).
 
 A room rename rewrites the entry in place. The following turn used the new
 `system` with no re-attach `[live 2.2.6]`.

@@ -40,6 +40,7 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-09-25 | #186 r4 F2 — a container started with `COOP_HOME` set splits where the entrypoint writes and `coop` reads | DROP, recorded on #183 | #183's image ships still honouring `COOP_HOME`, or a user report of `coop start` failing in the container | 2027-09-25 | open |
 | 2026-10-07 | #195 r1 F1 — RC replay re-runs the human reset for an unmentioned post; an in-flight agent delivery keeps a free turn | DROP | `Agent chain counters reset … had turns` logged directly after `replaying missed messages` for a room whose human post was unmentioned, or any chain observed past `max_turns+1` | 2027-10-07 | open |
 | 2026-11-14 | #205 r1 F7 — `session/resume` without `mcpServers` is rejected by a conforming agent | DROP (`cannot-occur`: ACP v1 schema `ResumeSessionRequest.required = [sessionId, cwd]`) | an ACP agent answering `invalid_params` naming `mcpServers` on a `session/resume` that omits it | 2027-11-14 | open |
+| 2026-11-14 | #205 r4 J3 — a project `.opencode/` config defining `coop-<path_key>` outranks the gateway's watcher entry | DROP (ADR-0001: the working directory is the agent's own; the ruleset is unaffected) | a `coop-<path_key>` entry found in a project config that neither the operator nor the agent wrote | 2027-11-14 | open |
 
 ---
 
@@ -885,3 +886,26 @@ Notes:
 - Cost: 3 rounds, 2 raters in rounds 1 and 2, about 3.5 hours of attention across the PR.
 
 **Status: open** — fixes pushed, confirming Codex round requested.
+
+---
+
+## 2026-11-14 — PR #205 round 4 (confirming round on `adca85a`)
+
+**Chain detector:** 21 findings over 4 rounds, round 4 `1 finding(s) on our own last fix, streak 3 — STOP`. `git blame` on the five anchors: `:683` and `:422` are the 2026-11-07 text, `:878` and `:920` are `37aadb3` (the commit the PR opened on, before any round), `:220` is `adca85a` (round 3's I1). So the real chain is **streak 1** (round 3's was the re-anchoring artifact), which the rule calls noise. The stop rule was not applied. What the one real hit shows is a **pattern**: I1 added an entry to the hand-written wiring list, J5 found the next missing entry. The pattern fix is not a longer list. §3.1 now says the tests own that enumeration (`RELOAD_ACTIONS`' exhaustiveness test, `check_backend_signatures`, the config-load tests) and the list is orientation.
+**Arrival check:** the `created_at > 00:30` filter returned nothing because the review landed at 23:44. The unresolved-thread count (5) and an id-based `--paginate` fetch recovered all five. Filter on the review's own timestamp, not a guess.
+**Control finding:** none. **Rater 2 not run**: every surviving item is a sentence in the design, and one is a DROP on an ADR's stated boundary. Said here so the shortcut is visible.
+
+| | rater 1 (author) | outcome |
+|---|---|---|
+| **J1** the ruleset leaves `read`, `grep`, `glob` and subagent calls at opencode's default allow, so a guest runs them with no ask; "add force-ask entries for every tool category governed by the broker" (P1) | half wrong, half right. ADR-0002's Decision paragraph names the opencode injection scope as bash, edit, webfetch, websearch, so `read`/`grep`/`glob` at default is the ADR's own scope, not this profile's gap. But the P3 sentence "R4's gap statement is then only the action gap" was false: 2.x adds `question`, `subagent`, `skill` as actions (`[docs]` v2 permissions "Defaults"), and on `type: claude` the matching calls go through the ladder. P1 inflated. `cheap` (doc) | **FIX (doc)** — P3 gains "The scope gap", listing the six ungated actions, naming three as 2.x-new, and leaving whether to ask for them as the owner's policy call (put to the owner with this round). The sentence J1 caught was replaced, not appended to |
+| **J2** `RUNTIME_DIR/opencode/<agent id>.jsonc` interpolates the raw config key; the loader does not validate it as one path component (P2) | true: `_parse_one_agent` has no name rule, the CLI does (`cli.py:317`). `cheap` (doc) | **FIX (doc)** — the loader applies the CLI's regex to a `type: acp` agent's key |
+| **J3** a project `.opencode/` config defining `coop-<path_key>` outranks the gateway's entry; the prefix does not enforce the claim (P2) | true as a mechanism, inside the trust boundary: the working directory is the agent's own (ADR-0001) and a project config there is the same class as an `AGENTS.md` the agent can write. The ruleset is unaffected (`OPENCODE_CONFIG_CONTENT` outranks project config). Random names would defend the agent from itself | **DROP** — one sentence in P5 states the boundary. Reversal: a report of a `coop-<path_key>` entry in a project config that the operator did not write and the agent did not write |
+| **J4** re-pointing the Claude broker at the shared predicate loses the `_CLAUDE_META_TOOLS` unconditional allow (P1) | true at `claude/broker.py:195-199`, and already guarded: the design requires the brokers' tests to prove the decision table did not move. P1 inflated. `cheap` (doc) | **FIX (doc)** — §3.6: the predicate is the ladder and nothing before it; the meta-tool pre-check stays in the Claude broker |
+| **J5** `profile` must be classified in `RELOAD_ACTIONS[AgentConfig]` (`config_diff.py:51-71`, exhaustive, tested); the wiring list omits it (P2) | true. Same pattern as I1. `cheap` (doc) | **FIX (doc)** via the pattern move above, with `config_diff.py` added to the orientation list |
+
+Notes:
+- Adoption: 4 of 5, 1 DROP. Verdict kinds: one ADR-scope misread with a true sentence under it (J1), one trust-boundary DROP (J3), three single-sentence spec completions. The useful signal is thinning: nothing this round changed a mechanism.
+- J1 leaves a policy question for the owner (ask for `question`/`subagent`/`skill` on this profile, or not). The next Codex round waits for that answer, because it changes P3.
+- Cost: 4 rounds, about 4 hours across the PR.
+
+**Status: open** — fixes pushed, owner's answer on J1 pending before any further round.
