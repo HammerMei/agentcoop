@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 from .bots import BotRunner, Mixed, ScriptedBot, done_everywhere
-from .classifier import ScriptedClassifier
+from .classifier import Classifier, InjectedFailures, ScriptedClassifier
 from .gateway import SimGateway
 from .model import Decision, Member, Params, TurnInput
 from .room import Room
@@ -89,8 +89,13 @@ def _params(raw: dict | None, enforce: bool | None) -> Params:
     return Params(**values)
 
 
-def _classifier(raw: dict | None) -> ScriptedClassifier:
+def _classifier(raw: dict | None, live: Classifier | None) -> Classifier:
+    """The scenario's scripted classifier, or ``live`` wrapped in the scenario's injected
+    failures so section 8.1's failure configuration runs against a model too."""
     raw = raw or {}
+    if live is not None:
+        failures = {int(k): int(v) for k, v in (raw.get("failures") or {}).items()}
+        return InjectedFailures(live, failures, float(raw.get("latency", 0.5))) if failures else live
     decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())))
                  for k, v in (raw.get("decisions") or {}).items()}
     return ScriptedClassifier(decisions=decisions, latency=float(raw.get("latency", 0.5)),
@@ -98,7 +103,7 @@ def _classifier(raw: dict | None) -> ScriptedClassifier:
 
 
 def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None,
-         scripted_bots: frozenset[str] = frozenset()) -> Scenario:
+         scripted_bots: frozenset[str] = frozenset(), classifier: Classifier | None = None) -> Scenario:
     data = yaml.safe_load(Path(path).read_text())
     members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""),
                       m.get("private_profile", ""))
@@ -115,7 +120,7 @@ def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None
     bots = room.bots()
     for raw in data.get("gateways") or [{"name": "g1", "hosted": bots}]:
         sim.add_gateway(SimGateway(sim, raw["name"], raw["hosted"], raw.get("agents", bots), params,
-                                   bot_runner, _classifier(data.get("classifier"))))
+                                   bot_runner, _classifier(data.get("classifier"), classifier)))
     for event in data.get("events") or []:
         _schedule(sim, event)
     return Scenario(data["name"], sim, float(data.get("horizon", 600)), script)

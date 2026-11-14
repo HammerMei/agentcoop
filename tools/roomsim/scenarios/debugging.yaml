@@ -1,0 +1,34 @@
+# Spec section 7, "Debugging": a production incident reported without naming anyone, a larger
+# thread limit, and the expectation that the likely experts speak first while the others catch
+# up or stay out. The report points at infrastructure and the API; the frontend and product
+# bots have nothing to add until the human asks about the user-facing side.
+name: debugging
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: a, role: bot, display_name: Alice, profile: "backend engineer; owns the API service and its database"}
+  - {username: b, role: bot, display_name: Bob, profile: "frontend engineer; owns the web app"}
+  - {username: c, role: bot, display_name: Cara, profile: "product manager; owns customer communication and the status page"}
+  - {username: d, role: bot, display_name: Dev, profile: "site reliability; owns nginx, the deploy pipeline and production alerts"}
+params: {rate_limit_posts: 12, rate_limit_words: 1200, rate_limit_seconds: 300, sweep_interval_seconds: 30,
+         catch_up_post_threshold: 3, catch_up_age_seconds: 120, classifier_timeout_seconds: 60}
+events:
+  - {at: 0, human: H, text: "prod API has been returning 502s since the 10:40 deploy. nginx logs say 'upstream timed out (110: Connection timed out) while reading response header'. what do we know?"}  # expected: d, a
+  - {at: 120, human: H, text: "customers are asking in the support inbox. do we say anything publicly yet?"}  # expected: c
+  - {at: 200, human: H, text: "ok, rolling back. a, can you confirm the API is healthy once d has rolled back?"}  # expected: a (named in prose), d
+bots:
+  d:
+    - {source: picked, once: true, reply: {replies: [{to: [H, a], text: "10:40 deploy changed the upstream timeout from 60s to 10s. the API's slow endpoints now exceed it. a, is the /reports endpoint still doing the full scan?"}]}}
+    - {source: picked, once: true, reply: {replies: [{to: [H, a], text: "rolled back to the 09:00 build; 502 rate is dropping"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  a:
+    - {source: picked, once: true, reply: {replies: [{to: [H, d], text: "yes, /reports scans the whole table; it takes 20-40s under load. rolling back the timeout is the quick fix; I will add pagination after"}]}}
+    - {source: picked, once: true, reply: {replies: [{to: [H, d], text: "API healthy: p99 at 800ms, no 502s in the last two minutes"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  c:
+    - {source: picked, once: true, reply: {replies: [{to: [H], text: "yes: a short status-page note now ('degraded API performance, fix in progress'), a follow-up when it is resolved. I will draft it."}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  b:
+    - {thread: main, reply: {replies: [{done: true}]}}
+classifier: {decisions: {1: {add: [d, a]}, 4: {add: [c]}, 6: {add: [a, d]}}}  # the expected picks; a live classifier replaces them
+horizon: 360

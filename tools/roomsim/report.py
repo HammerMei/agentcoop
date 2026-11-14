@@ -28,7 +28,8 @@ _MARKERS = {
     "invalid": lambda e: f"✗ {e.bot} invalid reply #{e.attempt}: {e.reason}",
     "notice": lambda e: f"⚠ {e.bot} failure notice ({e.cause})",
     "control_applied": lambda e: f"⚙ {e.control} {e.value} by {e.by} in {e.thread}",
-    "classifier_decision": lambda e: f"? post {e.post}: add {e.add}{' fallback ' + e.fallback if e.fallback else ''}",
+    "classifier_decision": lambda e: f"? post {e.post}: add {e.add}{' remove ' + str(e.remove) if e.remove else ''}"
+    f"{' fallback ' + e.fallback if e.fallback else ''}",
     "classifier_expired": lambda e: f"? post {e.post}: decision for {e.bot} expired",
     "job_scheduled": lambda e: f"⏰ {e.bot} scheduled job {e.job} in {e.thread}",
     "job_fired": lambda e: f"⏰ {e.bot} job {e.job} fired",
@@ -84,7 +85,16 @@ def classifier_summary(sim: Simulation) -> str:
     retries = sim.trace.count("classifier_retry")
     fallbacks = len([e for e in sim.trace.of("classifier_decision") if e.fallback])
     expired = sim.trace.count("classifier_expired")
-    return f"classifier: {calls} calls, {retries} retries, {fallbacks} fallbacks, {expired} expired decisions"
+    line = f"classifier: {calls} calls, {retries} retries, {fallbacks} fallbacks, {expired} expired decisions"
+    attempts = sum(g.classifier_totals["calls"] for g in sim.gateways)
+    if attempts:
+        failures = sum(g.classifier_totals["failures"] for g in sim.gateways)
+        latency = sum(g.classifier_totals["latency"] for g in sim.gateways) / attempts
+        cost = sum(g.classifier_totals["cost_usd"] for g in sim.gateways)
+        tokens_out = sum(g.classifier_totals["tokens_out"] for g in sim.gateways)
+        line += (f"; {attempts} attempts, {failures} failed, mean latency {latency:.1f}s, "
+                 f"{tokens_out} tokens out, {cost:.4f} USD")
+    return line
 
 
 def report(sim: Simulation, title: str = "", show_rules: bool = False) -> str:

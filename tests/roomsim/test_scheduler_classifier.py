@@ -3,14 +3,23 @@ WHO_SPEAKS with its cache, failures and fallbacks."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
 
+from tests.helpers import MockAgentBackend
 from tests.roomsim.helpers import FAST, Sandbox, Script, reply
 from tools.roomsim.bots import fail
-from tools.roomsim.classifier import ScriptedClassifier
-from tools.roomsim.model import Decision, Params
+from tools.roomsim.classifier import (
+    BackendClassifier,
+    ClassifierRequest,
+    InjectedFailures,
+    JevClassifier,
+    ScriptedClassifier,
+    parse_decision,
+)
+from tools.roomsim.model import Decision, Member, Params, Post
 
 
 def test_a_misspelt_classifier_fallback_is_rejected_at_construction():
@@ -157,6 +166,8 @@ async def test_addressed_bots_still_speak_when_listed_in_remove():
     await sb.run(2)
     assert len(sb.posts_by("a")) == 1
     assert sb.trace.last("classifier_decision").remove == ["a"]
+    from tools.roomsim.report import transcript
+    assert "? post 1: add [] remove ['a']" in transcript(sb.sim)
 
 
 async def test_a_decision_naming_a_bot_on_another_gateway_starts_no_local_turn():
@@ -236,7 +247,7 @@ async def test_a_classifier_slower_than_its_timeout_is_retried_at_the_timeout_th
     assert retry.time == 10 and "timeout" in retry.error
     decision = sb.trace.last("classifier_decision", post=1)
     assert decision.time == 20 and decision.fallback == "everyone"
-    assert classifier.calls == []  # a timed-out call never answers
+    assert len(classifier.calls) == 2  # asked twice; both answers arrived after the timeout and were dropped
 
 
 async def test_classifier_reasons_reach_the_trace():
@@ -267,3 +278,149 @@ async def test_replayed_posts_are_classified_with_the_history_that_preceded_them
     await sb.gw.set_online(replay_after=0)
     await sb.run(2)
     assert [(c.post.seq, [p.seq for p in c.history]) for c in cls.calls] == [(1, []), (2, [1]), (3, [2, 1])]
+
+
+# ── a model-backed classifier (5.1 through the backend adapters) ────────────────
+
+def _request(text="who can look at the flaky deploy?", addressed=(), history=(), omitted=0, author="H"):
+    post = Post(seq=len(history) + 1, time=0.0, thread="main", author=author, text=text, kind="human")
+    agents = (Member("a", "bot", "Alice", "al", "backend engineer"), Member("b", "bot", profile="frontend engineer"),
+              Member("c", "bot"))
+    return ClassifierRequest(post, tuple(addressed), tuple(history), omitted, agents)
+
+
+class _Clock:
+    """Every reading advances by ``step``; a call reads it twice, so its latency is one step."""
+
+    def __init__(self, step: float) -> None:
+        self.t, self.step = 0.0, step
+
+    def __call__(self) -> float:
+        self.t += self.step
+        return self.t
+
+
+async def test_a_backend_classifier_sends_only_the_request_in_a_fresh_session_each_call():
+    backend = MockAgentBackend(default_response='{"add": [{"username": "a", "reason": "deploys are backend"}], "remove": []}')
+    classifier = BackendClassifier(backend, "/nowhere", 10, "team", clock=_Clock(1.5))
+    older = (Post(seq=1, time=0.0, thread="main", author="b", text="earlier remark", kind="bot"),)
+    first = await classifier.classify(_request(addressed=("b",), history=older, omitted=4))
+    second = await classifier.classify(_request())
+    assert first.decision == Decision(add=("a",), reasons={"a": "deploys are backend"}) and first.latency == 1.5
+    assert second.decision is not None and len(backend.created_sessions) == 2  # nothing carries over between calls
+    prompt = backend.sent_messages[0]["prompt"]
+    assert "Addressed bots: b" in prompt and "(4 older posts omitted)" in prompt
+    assert "#1 b (bot): earlier remark" in prompt and "- a (display name 'Alice', nickname 'al'): backend engineer" in prompt
+    assert "- c: no profile" in prompt and "Answer with one JSON object" in prompt
+
+
+def test_parse_decision_keeps_only_offered_names_in_the_right_list():
+    request = _request(addressed=("b",))
+    decision = parse_decision(
+        '```json\n{"add": ["@a", "b", "zed", "H"], "remove": [{"username": "b", "reason": "H is thinking aloud"}, "a"]}\n```',
+        request,
+    )
+    assert decision.add == ("a",)  # b is addressed already, zed and H are not offered bots
+    assert decision.remove == ("b",) and decision.reasons == {"b": "H is thinking aloud"}
+
+
+@pytest.mark.parametrize("answer", ["not json at all", '{"replies": []}', '{"add": "a"}', '{"add": [1]}'])
+async def test_an_unusable_answer_is_a_failed_result_not_an_exception(answer):
+    classifier = BackendClassifier(MockAgentBackend(default_response=answer), "/nowhere", 10, "team")
+    result = await classifier.classify(_request())
+    assert result.failed and result.error.startswith("unparseable answer")
+
+
+async def test_a_backend_error_is_a_failed_result_with_its_latency():
+    backend = MockAgentBackend()
+    backend.side_effect = TimeoutError
+    classifier = BackendClassifier(backend, "/nowhere", 10, "team", clock=_Clock(2.0))
+    result = await classifier.classify(_request())
+    assert result.failed and "TimeoutError" in result.error and result.latency == 2.0
+
+
+async def test_a_live_classifier_whose_answer_misses_the_timeout_is_retried_then_falls_back():
+    backend = MockAgentBackend(default_response='{"add": ["b"]}')
+    classifier = BackendClassifier(backend, "/nowhere", 10, "team", clock=_Clock(12.0))  # 12s per call
+    sb = Sandbox(params=replace(FAST, classifier_timeout_seconds=10, classifier_retries=1, classifier_fallback="everyone"),
+                 classifier=classifier)
+    await sb.human("question")
+    await sb.run(21)
+    assert sb.trace.last("classifier_retry", post=1).time == 10
+    decision = sb.trace.last("classifier_decision", post=1)
+    assert decision.time == 20 and decision.fallback == "everyone" and len(backend.sent_messages) == 2
+    assert sb.gw.classifier_totals["calls"] == 2 and sb.gw.classifier_totals["failures"] == 0  # late, not failed
+
+
+async def test_a_live_decision_arrives_after_its_measured_latency_and_starts_the_added_bot():
+    backend = MockAgentBackend(default_response='{"add": [{"username": "b", "reason": "frontend"}]}')
+    classifier = BackendClassifier(backend, "/nowhere", 10, "team", clock=_Clock(3.0))  # 3s per call
+    sb = Sandbox(classifier=classifier)
+    await sb.human("the button is misaligned")
+    await sb.run(2.9)
+    assert sb.trace.count("classifier_decision") == 0
+    await sb.run(0.2)
+    assert sb.trace.last("classifier_decision", post=1).time == 3.0
+    assert sb.turns("b", "picked") and sb.gw.status()["classifier"]["latency"] == 3.0
+
+
+async def test_injected_failures_wrap_a_live_classifier_for_the_failure_configuration():
+    backend = MockAgentBackend(default_response='{"add": ["b"]}')
+    classifier = InjectedFailures(BackendClassifier(backend, "/nowhere", 10, "team"), failures={1: 1}, latency=0.5)
+    sb = Sandbox(params=replace(FAST, classifier_retries=1), classifier=classifier)
+    await sb.human("question")
+    await sb.run(2)
+    assert sb.trace.count("classifier_retry", post=1) == 1 and len(backend.sent_messages) == 1
+    assert sb.trace.last("classifier_decision", post=1).add == ["b"]
+
+
+async def test_the_report_summarises_classifier_attempts_and_latency():
+    from tools.roomsim.report import classifier_summary
+    sb = Sandbox(classifier=ScriptedClassifier(latency=2.0, failures={1: 1}))
+    await sb.human("question")
+    await sb.run(5)
+    line = classifier_summary(sb.sim)
+    assert "1 calls, 1 retries" in line and "2 attempts, 1 failed, mean latency 2.0s" in line
+
+
+# ── Jev: probabilities, not text ───────────────────────────────────────────────
+
+def _jev_answers(**nouls):
+    answers = {f"speak_{bot}": {"type": "noul", "noul": p} for bot, p in nouls.items()}
+    return json.dumps({"model": "jev-1.13.0", "answers": answers, "usage": {"input_tokens": 300, "output_tokens": 9},
+                       "cost_usd": 0.0000126, "latency_ms": 140})
+
+
+async def test_jev_asks_one_yes_no_question_per_offered_bot_and_adds_those_over_the_threshold():
+    sent = []
+
+    async def run(argv, stdin):
+        sent.append((argv, json.loads(stdin)))
+        return _jev_answers(a=0.91, b=0.12, c=0.55)
+
+    classifier = JevClassifier("team", run=run, threshold=0.6, clock=_Clock(0.2))
+    result = await classifier.classify(_request(addressed=("b",)))
+    assert sent[0][0][:3] == ["jev", "eval", "-f"] and "model" not in sent[0][1]
+    body = sent[0][1]
+    assert set(body["questions"]) == {"speak_a", "speak_b", "speak_c"}
+    assert all(q["type"] == "noul" and "answer the new post" in q["instructions"] for q in body["questions"].values())
+    assert "Addressed bots: b" in body["state"] and "Answer with one JSON object" not in body["state"]
+    assert result.decision == Decision(add=("a",), remove=("b",), reasons={"a": "p(answer)=0.91", "b": "p(answer)=0.12"})
+    assert result.latency == 0.2 and result.input_tokens == 300 and result.cost_usd == 0.0000126
+
+
+async def test_jev_passes_the_model_through_and_a_failed_cli_is_a_failed_result():
+    async def run(argv, stdin):
+        assert json.loads(stdin)["model"] == "jev-1.13.0"
+        raise RuntimeError("jev exited 3: no API key is configured")
+
+    result = await JevClassifier("team", model="jev-1.13.0", run=run).classify(_request())
+    assert result.failed and "no API key" in result.error
+
+
+async def test_jev_output_without_the_answers_is_a_failed_result():
+    async def run(argv, stdin):
+        return '{"answers": {"speak_a": {"type": "noul", "noul": 0.9}}}'  # b and c missing
+
+    result = await JevClassifier("team", run=run).classify(_request())
+    assert result.failed and "KeyError" in result.error

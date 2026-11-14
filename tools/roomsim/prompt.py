@@ -6,7 +6,12 @@ Kept apart from the mechanisms so a prompt wording change cannot alter a trace.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .model import END_TOKEN, Hint, Member, TurnInput
+
+if TYPE_CHECKING:
+    from .classifier import ClassifierRequest
 
 CONTRACT = f"""Answer with one JSON object and nothing else:
 {{"replies": [{{"thread": "<thread id>", "to": ["<username>", ...], "text": "..."}},
@@ -67,6 +72,41 @@ def render_hint(hint: Hint) -> str:
     if hint.degraded:
         lines.append("You are degraded in this room after repeated invalid replies.")
     return "\n".join(lines)
+
+
+CLASSIFIER_CONTRACT = """Answer with one JSON object and nothing else:
+{"add": [{"username": "<unaddressed bot that should speak>", "reason": "..."}],
+ "remove": [{"username": "<addressed bot that seems unnecessary>", "reason": "..."}]}
+Use empty lists when nobody should be added or removed. Name only bots from the list
+above. Choose the smallest useful set: add a bot when the post needs it, not because it
+could answer. An addressed bot answers anyway; "remove" only records your doubt."""
+
+
+def render_classifier_state(request: ClassifierRequest, room: str) -> str:
+    """What the speaker classifier sees (section 5.1): the post with its addressed bots,
+    recent thread history newest first, and the agent list with profiles. Nothing else."""
+    agents = "\n".join(
+        f"- {m.username}" + (f" (display name {m.display_name!r}" + (f", nickname {m.nickname!r}" if m.nickname else "")
+                             + ")" if m.display_name else (f" (nickname {m.nickname!r})" if m.nickname else ""))
+        + f": {m.profile or 'no profile'}"
+        for m in request.agents
+    ) or "(none)"
+    post = request.post
+    history = "\n".join(f"[{p.thread}] #{p.seq} {p.author} ({p.kind}): {p.text}" for p in request.history) or "(none)"
+    omitted = f" ({request.omitted} older posts omitted)" if request.omitted else ""
+    addressed = ", ".join(request.addressed) or "none"
+    return (
+        f"You choose which bots should answer a new post in chat room #{room}.\n"
+        f"Bots in the room:\n{agents}\n\n"
+        f"New post:\n[{post.thread}] #{post.seq} {post.author} ({post.kind}): {post.text}\n"
+        f"Addressed bots: {addressed}\n\n"
+        f"Recent posts in this thread, newest first{omitted}:\n{history}"
+    )
+
+
+def render_classifier_prompt(request: ClassifierRequest, room: str) -> str:
+    """The state plus the answer contract, for a classifier that writes text."""
+    return f"{render_classifier_state(request, room)}\n\n{CLASSIFIER_CONTRACT}"
 
 
 def render_prompt(turn: TurnInput) -> str:
