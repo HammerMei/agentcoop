@@ -863,3 +863,22 @@ Notes:
 - Cost: 1 round, 2 raters, about 90 minutes of attention, most of it on G5's source trace and the owner's questions about scope and undo.
 
 **Status: open** — fixes pushed, confirming Codex round requested.
+
+---
+
+## 2026-11-14 — PR #205 round 3 (confirming round on `175f29b`)
+
+**Chain detector:** 16 findings over 3 rounds, round 3 `1 finding(s) on our own last fix, streak 2 — STOP` for the design doc. **Checked and found to be an artifact**: the two round-3 findings are both on probe files; the doc "hit" is the three round-2 doc comments (ids 4575367977/85/90, `created_at` 19:41, `original_commit_id 6836a3c`) that GitHub re-anchored to `175f29b` when the file changed. The detector keys on `commit_id`, which moves with the anchor. Same class as the #181 r9 limitation, in the other direction: that one missed a chain, this one invented one. Recorded for the detector; the stop rule was not applied because its precondition did not hold.
+**Control finding:** none this round. **Rater 2 not run**: both findings pass the `cheap` gate on a manual probe (one-liners, no new concept, unshipped code) and the method scores nothing for a `cheap` FIX. Noted as a deliberate shortcut, not a precedent for scored findings.
+
+| | rater 1 (author) | outcome |
+|---|---|---|
+| **H1** probe step 5 waits on a shared event, so when `sid1`'s `config_option_update` lands first the probe reads `c.options[sid2]` before it exists and records `current=None` (P2) | true, and it explains the `current=None` in both live runs (the notification for `sid2` printed `current=watcher_a`). The design does not cite that value, so no doc change. `cheap`: a per-session event | **FIX** — `option_event(sid)`, callers wait on the session they inspect |
+| **H2** `probe_resume.py` and `probe_new_session.py` pass a relative `<cwd>` through unchanged, and resume's `cwd` must equal the stored absolute directory (P2) | true, loud (attach fails). `cheap` | **FIX** — `os.path.abspath` in both, as `probe_agent_mode.py` already does |
+
+Notes:
+- Adoption: 2 of 2, both one-liners on probes. No finding touched the design document. By the stop-loss agreed on PR #184 and applied on #195, no further Codex round: a round that is all cheap probe nits is the convergence signal.
+- Codex's security review did not run in any of the three rounds (its paying account reported insufficient credits); the code review ran each time.
+- Cost: 3 rounds, 2 raters in rounds 1 and 2, about 3 hours of attention across the PR.
+
+**Status: settled for this PR** — pending the owner's merge decision.

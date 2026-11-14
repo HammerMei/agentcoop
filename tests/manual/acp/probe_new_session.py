@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-CWD = sys.argv[1]
+CWD = os.path.abspath(sys.argv[1])  # ACP session paths are absolute
 PROMPT = sys.argv[2] if len(sys.argv) > 2 else None
 EXTRA_ENV = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
 

@@ -2,9 +2,10 @@
 
 import asyncio
 import json
+import os
 import sys
 
-CWD, SID, PROMPT = sys.argv[1], sys.argv[2], sys.argv[3]
+CWD, SID, PROMPT = os.path.abspath(sys.argv[1]), sys.argv[2], sys.argv[3]  # resume's cwd must equal the stored absolute directory
 METHOD = sys.argv[4] if len(sys.argv) > 4 else "session/resume"
 REPLAYED = ("user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update")
 

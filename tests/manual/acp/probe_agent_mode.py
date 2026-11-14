@@ -62,7 +62,10 @@ class Client:
         self.text = {}
         self.asks = 0
         self.options = {}          # sessionId -> latest configOptions from config_option_update
-        self.option_event = asyncio.Event()
+        self.option_events = {}    # sessionId -> Event set by that session's config_option_update
+
+    def option_event(self, sid):
+        return self.option_events.setdefault(sid, asyncio.Event())
 
     async def write(self, msg):
         self.proc.stdin.write((json.dumps(msg) + "\n").encode())
@@ -99,7 +102,7 @@ class Client:
         elif kind == "config_option_update":
             cur, avail = mode_option(u["configOptions"])
             self.options[sid] = u["configOptions"]
-            self.option_event.set()
+            self.option_event(sid).set()
             print(f"<< config_option_update session={sid[-6:]} mode current={cur} available={avail}")
         elif kind not in QUIET_UPDATES:
             print("<< update", kind, json.dumps(u)[:160])
@@ -132,13 +135,14 @@ class Client:
             else:
                 print("<< notify", msg.get("method"), json.dumps(msg.get("params"))[:160])
 
-    async def wait_option_update(self, timeout=10):
-        """Callers clear `option_event` before the write that should trigger the update,
-        so an update that lands before this call is not lost."""
+    async def wait_option_update(self, sid, timeout=10):
+        """Wait for `sid`'s own config_option_update. A rewrite notifies every attached session,
+        so a shared event would be set by whichever session's update lands first. Callers clear
+        `option_event(sid)` before the write that should trigger it, so an early update is not lost."""
         t0 = time.time()
         try:
-            await asyncio.wait_for(self.option_event.wait(), timeout)
-            print(f"   config_option_update arrived {time.time() - t0:.1f}s after write")
+            await asyncio.wait_for(self.option_event(sid).wait(), timeout)
+            print(f"   config_option_update for {sid[-6:]} arrived {time.time() - t0:.1f}s after write")
             return True
         except asyncio.TimeoutError:
             print(f"   NO config_option_update within {timeout}s")
@@ -220,20 +224,20 @@ async def steps_1_to_5(c, results):
     results["2 shell asks on watcher_a"] = f"{c.asks - before} ask(s), answer={answer!r}"
 
     print("== 3. add watcher_b: set mode immediately, then after config_option_update")
-    c.option_event.clear()
+    c.option_event(sid1).clear()
     write_config({"watcher_a": "WATCHER_A", "watcher_b": "WATCHER_B"})
     ok = await set_mode(c, sid1, "watcher_b")
     results["3 set_mode immediately after write"] = "ok" if ok else "ERROR (mode not found)"
     if not ok:
-        got = await c.wait_option_update()
+        got = await c.wait_option_update(sid1)
         ok = await set_mode(c, sid1, "watcher_b")
         results["3 set_mode after notification"] = f"notified={got} set_mode={'ok' if ok else 'ERROR'}"
     results["3 name on watcher_b"] = await prompt(c, sid1, NAME_PROMPT) if ok else "skipped"
 
     print("== 4. edit watcher_b.system in place")
-    c.option_event.clear()
+    c.option_event(sid1).clear()
     write_config({"watcher_a": "WATCHER_A", "watcher_b": "WATCHER_B2"})
-    got = await c.wait_option_update()
+    got = await c.wait_option_update(sid1)
     results["4 update after in-place edit"] = "notified" if got else "no notification"
     results["4 name after in-place edit"] = await prompt(c, sid1, NAME_PROMPT)
 
@@ -241,9 +245,9 @@ async def steps_1_to_5(c, results):
     sid2 = await new_session(c, "session2")
     await set_mode(c, sid2, "watcher_a")
     results["5 name on s2 watcher_a"] = await prompt(c, sid2, NAME_PROMPT)
-    c.option_event.clear()
+    c.option_event(sid2).clear()
     write_config({"watcher_b": "WATCHER_B2"})
-    got = await c.wait_option_update()
+    got = await c.wait_option_update(sid2)
     cur2, _ = mode_option(c.options.get(sid2))
     results["5 s2 mode after removal"] = f"notified={got} current={cur2}"
     results["5 name on s2 after removal (30s cap)"] = await prompt(c, sid2, NAME_PROMPT, timeout=30)
