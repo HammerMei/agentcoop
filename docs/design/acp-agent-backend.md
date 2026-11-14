@@ -213,6 +213,14 @@ These places enumerate agent types today, and each gains `acp`:
 - `gateway/tools/tui.py:91`
 - `gateway/config.py:908`
 
+The two creation paths also collect the profile, because the loader
+rejects a `type: acp` agent without one. `coop config add agent` gains
+`--profile`, required when `--type acp` and refused otherwise. The TUI's
+agent form (`agent_detail.py`, `_FORM_FIELDS`) gains a `profile` enum whose
+options come from the profile registry, shown and required only when the
+type picked in `TypePickerModal` is `acp`. Both paths write `profile` next
+to `type`.
+
 The TUI and `AgentSession` path builds the backend without a
 `GatewayBrokerConfig` and attaches a callable broker after `start()`, exactly
 as for the two existing backends.
@@ -758,7 +766,14 @@ absorbs both, so an existing allow-list keeps meaning what it meant.
   Rule matching accepts the 1.x spellings as aliases. A rule `tool: bash`
   matches a normalised `Bash`. A rule `tool: edit` matches `Edit` **and**
   `Write`, which is the 1.x meaning of that rule. That is the one alias that
-  is not a plain rename, and the migration note states it.
+  is not a plain rename, and the migration note states it. The shared
+  predicate matches a rule's `tool` against one name today
+  (`tool_match.py` `re.fullmatch(rule.tool, tool_name, IGNORECASE)`), so
+  case folding alone cannot make `edit` cover `Write`. The profile supplies
+  `rule_aliases = {"edit": ("Edit", "Write")}`, and the shared predicate
+  (§3.6) tries the rule's `tool` against each alias of the normalised name
+  before the plain match. The alias map is per profile, so a `tool: edit`
+  rule on a `type: claude` agent keeps covering `Edit` only.
 - *Fields.* The profile renames `path` / `filePath` to `file_path`.
   `command` and `url` already match `_CLAUDE_PARAM_FIELD`. `query` and
   `pattern` do not: the table has no `websearch`, `grep` or `glob` row
