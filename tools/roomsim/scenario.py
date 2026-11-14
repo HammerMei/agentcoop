@@ -97,7 +97,9 @@ def _params(raw: dict | None, enforce: bool | None, overrides: dict[str, str] | 
 
 def _parse_param(text: str, default) -> object:
     if isinstance(default, bool):
-        return text.lower() in ("1", "true", "yes", "on")
+        if text.lower() not in ("true", "false"):
+            raise ValueError(f"a boolean param takes true or false, not {text!r}")
+        return text.lower() == "true"
     if isinstance(default, int):
         return int(text)
     if isinstance(default, float):

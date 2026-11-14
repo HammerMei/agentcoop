@@ -1,6 +1,9 @@
 # Catch-up as the correction path: a answers H with two wrong claims, one wrong for lack of
 # context (only m remembers the decision), one unverified (only v reads the code). Their
 # public profiles do not say so, so the classifier cannot pick them; only catch-up can.
+# A live run needs the code v reads: `--workdir tools/roomsim/scenarios/catch_up_corrections`
+# (db/init.py, db/migrations.py, api/reports.py), with `--scripted-bots a,b` so a makes the
+# claims and b answers as scripted.
 name: catch_up_corrections
 room: team
 members:

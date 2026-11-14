@@ -106,7 +106,8 @@ def flag_summary(sim: Simulation) -> str:
     turns they caused did (spoke, or woke and returned done)."""
     turns = sim.trace.of("flag_turn")
     spoke = len([e for e in turns if e.posts])
-    return (f"flags: {sim.trace.count('flag_set')} set, {sim.trace.count('flag_cleared')} cleared by revision, "
+    cleared = sum(len(e.flags) for e in sim.trace.of("flag_cleared"))
+    return (f"flags: {sim.trace.count('flag_set')} set, {cleared} cleared by revision, "
             f"{sim.trace.count('flag_skipped')} bots skipped; flagged catch-up turns: {len(turns)} "
             f"({spoke} spoke, {len(turns) - spoke} done)")
 

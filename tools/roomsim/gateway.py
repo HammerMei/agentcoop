@@ -243,6 +243,7 @@ class SimGateway:
         self.thread_state = {}
         self.volatile = {b: BotVolatile(generation=v.generation + 1) for b, v in self.volatile.items()}
         self.decisions = {}
+        self.flags = []
         self.online = True
         await self._replay(replay_after)
 
@@ -582,9 +583,9 @@ class SimGateway:
         bot post queues every hosted bot it did not address, in roster or score order."""
         if decision.revises:
             if self.params.flag_clear == "on-revision":
-                cleared = [f for f in self.flags if f.thread == post.thread]
+                cleared = [f for f in self.flags if f.thread == post.thread and f.seq < post.seq]
                 if cleared:
-                    self.flags = [f for f in self.flags if f.thread != post.thread]
+                    self.flags = [f for f in self.flags if f not in cleared]
                     self.sim.trace.add(self.now(), "flag_cleared", gateway=self.name, post=post.seq,
                                        flags=[f.seq for f in cleared],
                                        skipped=sorted({b for f in cleared for b in f.queue}))
@@ -592,6 +593,8 @@ class SimGateway:
         if decision.flag and post.kind == "bot":
             queue = [b for b in self.hosted if b != post.author and not post.addresses(b)]
             if self.params.catch_up_order == "score":
+                if not decision.scores:
+                    raise ValueError("catch_up_order=score, but the classifier's decision carries no speak scores")
                 queue.sort(key=lambda b: -decision.scores.get(b, 0.0))
             self.flags.append(Flag(post.seq, post.thread, post.time, queue))
             self.sim.trace.add(self.now(), "flag_set", gateway=self.name, post=post.seq, thread=post.thread,
@@ -615,9 +618,13 @@ class SimGateway:
         for flag in list(self.flags):
             if bot not in flag.queue or flag.thread in due or bot in flag.running:
                 continue
-            if self._closed_by(bot, flag.thread) or self._in_cooldown(bot, flag.thread):
+            if self._closed_by(bot, flag.thread):
                 if serial and not flag.running and flag.queue[0] == bot:
-                    self._flag_skipped(bot, flag.thread)  # a closed head must not stall the queue
+                    self._flag_skipped(bot, flag.thread)  # a muted or degraded head must not stall the queue
+                continue
+            if self._in_cooldown(bot, flag.thread):
+                if serial and not flag.running and flag.queue[0] == bot:
+                    self._flag_deferred(bot, flag.thread)
                 continue
             if self.now() - flag.time < self.params.catch_up_age_seconds:
                 continue
@@ -650,6 +657,24 @@ class SimGateway:
             if bot in flag.queue:
                 flag.queue.remove(bot)
         self._prune_flags()
+        self._wake_flag_heads()
+
+    def _flag_deferred(self, bot: str, thread: str) -> None:
+        """A head bot held for now (busy, backoff, cooldown, rate) goes to the back of the
+        queue; the next bot runs and this one gets its look when it is free."""
+        for flag in self._flags_for(bot, thread):
+            flag.queue.remove(bot)
+            flag.queue.append(bot)
+        # No wake here: a wake of a head that is itself held would defer again at the same
+        # instant without end. The new head's next periodic sweep, or its turn end, starts it.
+
+    def _flag_turn_failed(self, bot: str, thread: str) -> None:
+        """The turn did not commit: the bot stays queued and runs again after its backoff."""
+        for flag in self.flags:
+            if flag.thread == thread and bot in flag.running:
+                flag.running.discard(bot)
+                flag.queue.remove(bot)
+                flag.queue.append(bot)
         self._wake_flag_heads()
 
     def _flag_skipped(self, bot: str, thread: str) -> None:
@@ -754,7 +779,7 @@ class SimGateway:
             return await self._try_start(bot, "unfinished", key, hwm=hwm, from_sweep=True)
         started = await self._try_start(bot, "catch-up", key, hwm=hwm, from_sweep=True)
         if not started and self.params.catch_up_policy == "flagged" and self.params.catch_up_order != "parallel":
-            self._flag_skipped(bot, key)
+            self._flag_deferred(bot, key)  # a temporary hold (busy, backoff, rate): the bot keeps its place
         return started
 
     # ── FOLLOW_UP: jobs ─────────────────────────────────────────────────────
@@ -1001,7 +1026,10 @@ class SimGateway:
             state.invalid_streak, state.degraded, state.invalid_notice_sent = 0, False, False
             state.previous_failure = None
         self.sim.trace.add(self.now(), "turn_end", gateway=self.name, bot=bot, outcome=outcome, posts=run.posts)
-        self._flag_turn_ended(bot, run.turn.starting_thread, run.posts)
+        if outcome == "normal":
+            self._flag_turn_ended(bot, run.turn.starting_thread, run.posts)
+        else:
+            self._flag_turn_failed(bot, run.turn.starting_thread)
         self._request_sweep(bot, "turn end")
 
     # ── FAILURE_NOTICE ──────────────────────────────────────────────────────

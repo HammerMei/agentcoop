@@ -10,7 +10,8 @@ from dataclasses import replace
 import pytest
 
 from tests.roomsim.helpers import FAST, Sandbox, Script, reply
-from tools.roomsim.classifier import JevClassifier, ScriptedClassifier, parse_decision
+from tools.roomsim.bots import fail
+from tools.roomsim.classifier import JevClassifier, ParseError, ScriptedClassifier, parse_decision
 from tools.roomsim.model import Decision, Hint, Member, Params, Post, ThreadGroup
 from tools.roomsim.prompt import render_hint
 from tools.roomsim.report import flag_summary, transcript
@@ -117,6 +118,59 @@ async def test_a_bot_that_read_past_the_post_leaves_the_queue():
     assert [b for _, b in _catch_ups(sb)] == ["y", "m"]
 
 
+async def test_a_head_bot_in_backoff_keeps_its_place_and_a_failed_turn_is_run_again():
+    # x's first catch-up turn fails at the backend: x goes to the back of the queue, y and
+    # m run meanwhile, and x gets its look once its backoff has passed.
+    attempts = []
+    script = (Script()
+              .on(lambda turn: attempts.append(1) or (fail() if len(attempts) == 1 else {"replies": [{"done": True}]}),
+                  bot="x", source="catch-up")
+              .on(reply(["H"], "the deploy did not touch nginx"), bot="a", source="addressed", once=True)
+              .on(reply(["H", "a"], "correction: it did"), bot="m", source="catch-up", once=True))
+    sb = await _flagged(replace(FLAGGED, catch_up_order="roster"), script=script)
+    await sb.run(200)
+    assert [b for _, b in _catch_ups(sb)] == ["x", "y", "m", "x"]
+    assert sb.trace.count("flag_skipped") == 0 and sb.trace.count("flag_done") == 1
+    assert "flagged catch-up turns: 3 (1 spoke, 2 done)" in flag_summary(sb.sim)  # the failed turn is not a done
+
+
+async def test_a_busy_head_keeps_its_place_and_leaves_the_queue_once_its_turn_delivered_the_post():
+    # H addresses x just before the queue is due: x is mid-turn when it is the head, keeps
+    # its place, and that addressed turn delivers post 2, so x needs no catch-up turn.
+    sb = await _flagged(replace(FLAGGED, catch_up_order="roster"))
+    await sb.run(29.5)
+    await sb.human("@x unrelated: check the banner?")
+    await sb.run(200)
+    assert sb.trace.count("flag_skipped") == 0
+    assert [b for _, b in _catch_ups(sb)] == ["y", "m"]
+
+
+async def test_restart_drops_the_flags_with_the_decisions_and_the_replay_rebuilds_them():
+    sb = await _flagged(replace(FLAGGED, catch_up_order="roster"))
+    await sb.run(30.5)  # x's catch-up turn is in flight
+    assert sb.gw.flags and sb.gw.flags[0].running == {"x"}
+    await sb.gw.restart(replay_after=0)
+    await sb.run(200)
+    assert [e.post for e in sb.trace.of("flag_set")] == [2, 2]  # once before, once from the replay
+    assert sb.trace.count("flag_done") == 1 and len(sb.posts_by("m")) == 1  # the queue did not stall
+
+
+async def test_a_revision_clears_only_the_flags_of_earlier_posts():
+    sb = await _flagged(replace(FLAGGED, flag_clear="on-revision"), classifier=ScriptedClassifier())
+    gw = sb.gw
+    for seq in (2, 5):
+        gw._apply_flag(Post(seq, 1.0, "main", "a", "claim", "bot"), Decision(flag=True))
+    gw._apply_flag(Post(3, 2.0, "main", "m", "correction", "bot"), Decision(revises=True))
+    assert [f.seq for f in gw.flags] == [5]
+    assert sb.trace.last("flag_cleared").flags == [2]
+
+
+async def test_score_order_needs_scores():
+    sb = await _flagged(replace(FLAGGED, catch_up_order="score"), classifier=ScriptedClassifier())
+    with pytest.raises(ValueError, match="no speak scores"):
+        sb.gw._apply_flag(Post(2, 1.0, "main", "a", "claim", "bot"), Decision(flag=True))
+
+
 async def test_a_head_bot_the_sweep_cannot_start_is_skipped():
     sb = await _flagged(replace(FLAGGED, catch_up_order="roster"))
     await sb.run(5)
@@ -147,6 +201,9 @@ def test_scenario_params_accept_overrides_and_reject_unknown_values():
         _params(None, None, {"catch_up_order": "random"})
     with pytest.raises(ValueError, match="unknown param"):
         _params(None, None, {"catch_up": "1"})
+    with pytest.raises(ValueError, match="true or false"):
+        _params(None, None, {"classifier_enabled": "treu"})
+    assert _params(None, None, {"classifier_enabled": "False"}).classifier_enabled is False
 
 
 def _request():
@@ -181,3 +238,13 @@ def test_the_json_contract_carries_flag_and_revises():
     decision = parse_decision('{"add": [], "remove": [], "flag": true, "revises": false}', _request())
     assert decision.flag and not decision.revises
     assert not parse_decision('{"add": []}', _request()).flag
+    with pytest.raises(ParseError, match="booleans"):
+        parse_decision('{"add": [], "flag": "false"}', _request())
+
+
+def test_the_summary_counts_every_flag_a_revision_cleared():
+    from tools.roomsim.room import Room
+    from tools.roomsim.sim import Simulation
+    sim = Simulation(Room("team", [Member("a", "bot")]))
+    sim.trace.add(0.0, "flag_cleared", gateway="g1", post=3, flags=[1, 2], skipped=[])
+    assert "2 cleared by revision" in flag_summary(sim)

@@ -266,8 +266,11 @@ def parse_decision(text: str, request: ClassifierRequest) -> Decision:
     remove = _names(data.get("remove"), "remove", reasons)
     add = tuple(n for n in add if n in offered and n not in request.addressed)
     remove = tuple(n for n in remove if n in offered and n in request.addressed)
+    grades = {name: data.get(name, False) for name in ("flag", "revises")}
+    if any(not isinstance(value, bool) for value in grades.values()):
+        raise ParseError("flag and revises must be booleans")
     return Decision(add=add, remove=remove, reasons={n: r for n, r in reasons.items() if n in add + remove},
-                    flag=bool(data.get("flag", False)), revises=bool(data.get("revises", False)))
+                    flag=grades["flag"], revises=grades["revises"])
 
 
 def _names(raw, key: str, reasons: dict[str, str]) -> list[str]:
