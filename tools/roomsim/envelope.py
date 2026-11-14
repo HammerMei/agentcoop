@@ -46,7 +46,7 @@ def parse_envelope(text: str) -> Envelope:
         return Envelope(replies=[ReplyItem(done=True)])
     if END_TOKEN in stripped:
         raise ParseError("end token with surrounding text")
-    data = _load_json(stripped)
+    data = load_json(stripped)
     if not isinstance(data, dict) or "replies" not in data:
         raise ParseError("replies absent")
     if not isinstance(data["replies"], list):
@@ -59,7 +59,8 @@ def parse_envelope(text: str) -> Envelope:
     return Envelope(replies=replies, schedule=schedule)
 
 
-def _load_json(text: str):
+def load_json(text: str):
+    """A JSON object: the whole text, or one fenced block in it."""
     try:
         return json.loads(text)
     except ValueError:

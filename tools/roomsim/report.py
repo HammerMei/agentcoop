@@ -84,7 +84,16 @@ def classifier_summary(sim: Simulation) -> str:
     retries = sim.trace.count("classifier_retry")
     fallbacks = len([e for e in sim.trace.of("classifier_decision") if e.fallback])
     expired = sim.trace.count("classifier_expired")
-    return f"classifier: {calls} calls, {retries} retries, {fallbacks} fallbacks, {expired} expired decisions"
+    line = f"classifier: {calls} calls, {retries} retries, {fallbacks} fallbacks, {expired} expired decisions"
+    attempts = sum(g.classifier_totals["calls"] for g in sim.gateways)
+    if attempts:
+        failures = sum(g.classifier_totals["failures"] for g in sim.gateways)
+        latency = sum(g.classifier_totals["latency"] for g in sim.gateways) / attempts
+        cost = sum(g.classifier_totals["cost_usd"] for g in sim.gateways)
+        tokens_out = sum(g.classifier_totals["tokens_out"] for g in sim.gateways)
+        line += (f"; {attempts} attempts, {failures} failed, mean latency {latency:.1f}s, "
+                 f"{tokens_out} tokens out, {cost:.4f} USD")
+    return line
 
 
 def report(sim: Simulation, title: str = "", show_rules: bool = False) -> str:

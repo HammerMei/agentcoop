@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .classifier import Classifier, ClassifierError, ClassifierRequest, fallback_decision
+from .classifier import Classifier, ClassifierRequest, ClassifierResult, fallback_decision
 from .controls import is_control_only
 from .envelope import (
     ParseError,
@@ -181,6 +181,9 @@ class SimGateway:
         self.replaying = False
         self.rules: dict[str, RuleCount] = {}
         self.totals: dict[str, dict[str, int]] = {b: self._zero_totals() for b in hosted}
+        self.classifier_totals: dict[str, float] = {"calls": 0, "failures": 0, "latency": 0.0, "tokens_in": 0,
+                                                    "tokens_out": 0, "cache_read": 0, "cache_write": 0,
+                                                    "cost_usd": 0.0}
         self._job_seq = 0
 
     @staticmethod
@@ -512,24 +515,38 @@ class SimGateway:
         return ClassifierRequest(post, addressed, shown, len(history) - len(shown), tuple(offered))
 
     async def _classifier_attempt(self, request: ClassifierRequest, attempt: int) -> None:
-        latency = getattr(self.classifier, "latency", 0.0)
+        """Ask now, deliver the result after its latency: a live call's wall-clock time
+        becomes simulated time, as a live turn's does (``_invoke``). An answer slower
+        than the timeout is a timeout, whatever it said."""
+        result = await self.classifier.classify(request)
+        self._account_classifier(result)
         timeout = self.params.classifier_timeout_seconds
-        timed_out = bool(timeout) and latency > timeout
-        self.sim.at(timeout if timed_out else latency, self._classifier_result, request, attempt, timed_out)
+        if timeout and result.latency > timeout:
+            result = ClassifierResult(error=f"timeout after {timeout}s", latency=timeout)
+        self.sim.at(result.latency, self._classifier_result, request, attempt, result)
 
-    async def _classifier_result(self, request: ClassifierRequest, attempt: int, timed_out: bool = False) -> None:
+    def _account_classifier(self, result: ClassifierResult) -> None:
+        t = self.classifier_totals
+        t["calls"] += 1
+        t["failures"] += int(result.failed)
+        t["latency"] += result.latency
+        t["tokens_in"] += result.input_tokens
+        t["tokens_out"] += result.output_tokens
+        t["cache_read"] += result.cache_read_tokens
+        t["cache_write"] += result.cache_write_tokens
+        t["cost_usd"] += result.cost_usd
+
+    async def _classifier_result(self, request: ClassifierRequest, attempt: int, result: ClassifierResult) -> None:
         post, addressed = request.post, request.addressed
-        try:
-            if timed_out:
-                raise ClassifierError(f"timeout after {self.params.classifier_timeout_seconds}s")
-            decision = await self.classifier.classify(request)
-        except ClassifierError as exc:
+        if result.failed:
             if attempt <= self.params.classifier_retries:
                 self.sim.trace.add(self.now(), "classifier_retry", gateway=self.name, post=post.seq,
-                                   attempt=attempt, error=str(exc))
+                                   attempt=attempt, error=result.error)
                 await self._classifier_attempt(request, attempt + 1)
                 return
             decision = fallback_decision(self.params.classifier_fallback, post, addressed, self._bots_in_room())
+        else:
+            decision = result.decision
         await self._decided(post, addressed, decision)
 
     async def _decided(self, post: Post, addressed: tuple[str, ...], decision: Decision) -> None:
@@ -974,6 +991,7 @@ class SimGateway:
             "bot_like_members_missing": [b for b in self.sim.room.bots() if b not in self.agents],
             "rules": {m: vars(c) for m, c in self.rules.items()},
             "totals": self.totals,
+            "classifier": self.classifier_totals,
         }
 
 

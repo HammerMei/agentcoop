@@ -1,0 +1,29 @@
+# Spec section 7, "Support or triage": a first-line bot answers the user and mentions a
+# specialist when the question is theirs. Nothing is addressed by the human, so the
+# classifier has to pick the first-line bot and not the specialists; the specialists are then
+# reached by mention, which needs no classifier.
+name: support_triage
+room: help
+members:
+  - {username: U, role: member}
+  - {username: support, role: bot, display_name: Support, profile: "first-line support; answers users directly and brings in a specialist by mentioning them when the question is about billing or infrastructure"}
+  - {username: billing, role: bot, display_name: Billing, profile: "billing specialist; refunds, invoices and duplicate charges. answers when support brings them in"}
+  - {username: infra, role: bot, display_name: Infra, profile: "infrastructure specialist; login, outages and account lockouts. answers when support brings them in"}
+params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
+         catch_up_post_threshold: 3, catch_up_age_seconds: 120, classifier_timeout_seconds: 60}
+events:
+  - {at: 0, human: U, text: "hi, I was charged twice for November. invoice numbers 1042 and 1043, same amount"}  # expected: support
+  - {at: 150, human: U, text: "thanks. separately, I have not been able to log in since yesterday evening; password reset email never arrives"}  # expected: support
+bots:
+  support:
+    - {source: picked, once: true, reply: {replies: [{to: [U, billing], text: "sorry about that. @billing can you check invoices 1042 and 1043 for a duplicate charge?"}]}}
+    - {source: picked, once: true, reply: {replies: [{to: [U, infra], text: "@infra can you look at why reset emails are not reaching this account?"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  billing:
+    - {source: addressed, once: true, reply: {replies: [{to: [U, support], text: "confirmed: 1043 is a duplicate of 1042. refund issued, 3-5 business days to appear"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  infra:
+    - {source: addressed, once: true, reply: {replies: [{to: [U, support], text: "the account's email bounced twice yesterday and was suppressed. suppression cleared; try the reset again"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+classifier: {decisions: {1: {add: [support]}, 4: {add: [support]}}}  # the expected picks; a live classifier replaces them
+horizon: 300
