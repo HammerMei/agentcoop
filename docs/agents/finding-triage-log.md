@@ -1117,3 +1117,59 @@ by the owner's decision, so the project's 👍 bar is not met on this PR as it s
 
 **Cost:** one rater run (~18 minutes, ~220k tokens), ~40 minutes of author time
 including the fixes.
+
+## 2026-11-14 — PR #203 round 1 (Codex on `bfaa140`, `tools/roomsim/`)
+
+Nine inline findings, all on the flagged catch-up experiment and the `--param`
+override that commit `bfaa140` added. The security review Codex triggers beside
+the code review failed on the paying account's credits and was not retried.
+
+**chain-check** (working tree): 9 findings over 1 round, no chain.
+
+**Depth rule for this round, set by the owner before the review:** one Codex
+round, focused on major issues, not corner cases; a second round only for
+something the team feels it must do. Applied as: fix what passes `cheap`, reply
+on every thread, re-request nothing.
+
+**Blind second rater** (general-purpose agent; findings, method, constants, HEAD;
+no verdicts of the author's; it did not have the owner's depth rule). **The
+control was compromised:** the ledger's one settled row (`#181 r9 F1`) was sent
+as a tenth finding, but the rater had read this log during orientation and
+reported that it knew the answer, so its verdict on the control is not evidence.
+**No valid control; agreement in this round is not evidence of independence.**
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | a busy or backed-off head bot was removed from the serial queue for good (`one_turn`/`backoff` hold) | yes; the turn's own end already requests a sweep | **FIX** (defer to the back of the queue; skip only muted or degraded) | FIX | — |
+| F2 | a failed catch-up turn completed the flag and was summed as "done" | yes; coupled to F1 | **FIX** (complete only on a normal outcome) | FIX | — |
+| F3 | `restart` kept the flags whose decisions it dropped; an in-flight flagged turn stalled the serial queue | yes; silent; Python API only (no restart event in scenarios) | **FIX** (1 line: drop flags with decisions; replay rebuilds them) | FIX | — |
+| F4 | a late `revises` decision for an earlier post cleared later posts' flags (`on-revision`) | yes; expressible scripted via injected latency | **FIX** (clear only lower seqs) | FIX | — |
+| F5 | `bool("false")` opened a flag | yes; silent | **FIX** (booleans or `ParseError`, the `_names` shape) | FIX | — |
+| F6 | the summary counted `flag_cleared` events, not flags | yes | **FIX** (1 line) | FIX | — |
+| F7 | a boolean `--param` typo ran as `false` | yes; silent | **FIX** (true/false or `ValueError`) | FIX | — |
+| F8 | the code the live `v` reads was outside the tree | yes; the live result was not reproducible from the PR | **FIX** (fixture shipped beside the scenario, `--workdir` named in its header) | FIX (least sure; on the 10-line bound) | — |
+| F9 | `score` order with no scores silently ran in roster order | yes; silent | FIX at the CLI (`claude` + `score`) → **conceded to the rater's layer**: `_apply_flag` raises when the decision carries no scores, which also covers scripted decisions without `scores:` | MAKE IT LOUD at `_apply_flag` | the author had the reviewer's shape; the rater named the owning layer and the scripted case the CLI check misses (checkable: `Decision.scores` defaults empty) |
+
+Exit obligations: none open — nine FIX, no FILE, no DROP. The rater's pattern note
+stands as the next-round rule: F1, F2, F3 are one class (the queue's bookkeeping
+confusing *temporarily unable* with *won't ever*); a further finding on any of
+the three is the signal to replace the patches with one test enumerating hold
+cause × turn outcome × queue effect.
+
+One defect the fixes introduced and the suite caught before push: a deferred head
+that re-woke the next head at the same instant looped without end when every
+queued bot was held; the deferral now leaves the start to the next periodic
+sweep or turn end.
+
+**Badges vs consequence:** the two P1s (F1, F4) are a real loss and a bias in a
+rejected variant; of the P2s, F2 (a backend timeout reported as a `done` look)
+and F8 (an irreproducible live result) carried the consequences that mattered to
+the experiment's conclusion.
+
+**Adoption:** 9 FIX of 9, which the skill flags as "triage not running"; here the
+batch was fresh code with every touched function under C901 10 and no fix over
+ten lines. 181 tests. No `@codex review` re-requested (owner's rule).
+
+**Cost:** one rater run (~13 minutes, ~155k tokens), ~50 minutes of author time
+including the fixes and the reruns that confirmed the experiment's numbers did
+not move.

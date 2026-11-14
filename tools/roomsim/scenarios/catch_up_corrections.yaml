@@ -1,0 +1,39 @@
+# Catch-up as the correction path: a answers H with two wrong claims, one wrong for lack of
+# context (only m remembers the decision), one unverified (only v reads the code). Their
+# public profiles do not say so, so the classifier cannot pick them; only catch-up can.
+# A live run needs the code v reads: `--workdir tools/roomsim/scenarios/catch_up_corrections`
+# (db/init.py, db/migrations.py, api/reports.py), with `--scripted-bots a,b` so a makes the
+# claims and b answers as scripted.
+name: catch_up_corrections
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: a, role: bot, display_name: Alice, profile: "backend engineer; owns the API and the deploy pipeline"}
+  - {username: b, role: bot, display_name: Bob, profile: "SRE; owns nginx and production alerts"}
+  - {username: x, role: bot, display_name: Xavier, profile: "designer; owns the design system and the web UI"}
+  - {username: y, role: bot, display_name: Yuki, profile: "QA engineer; owns the test suites and release checks"}
+  - {username: m, role: bot, display_name: Mira, profile: "mobile engineer; owns the iOS and Android apps",
+     private_profile: "You remember: last Tuesday the team raised nginx's upstream timeout from 10s to 60s because /reports takes 20-40s under load, and today's 10:40 deploy reverted that file to 10s."}
+  - {username: v, role: bot, display_name: Vic, profile: "technical writer; owns the docs site and the changelog",
+     private_profile: "Before you accept or repeat a claim about what the code does, read the actual implementation in your working directory and answer from what it does."}
+params: {rate_limit_posts: 12, rate_limit_words: 1200, rate_limit_seconds: 300, sweep_interval_seconds: 30,
+         catch_up_post_threshold: 2, catch_up_age_seconds: 60, classifier_timeout_seconds: 60}
+events:
+  - {at: 0, human: H, text: "@a /reports has been timing out since the 10:40 deploy and nginx is logging upstream timeouts. what happened, and is there a quick fix?"}
+bots:
+  a:
+    - {source: addressed, once: true, reply: {replies: [{to: [H, b], text: "two things. the 10:40 deploy did not touch nginx; the timeouts come from the pagination we shipped to /reports last week, which made the query slower. quick fix: drop the reports table and restart, the ORM recreates the schema on boot so it self-heals. b, can you restart the API after that?"}]}}
+  b:
+    - {source: addressed, once: true, reply: {replies: [{to: [H, a], text: "on it. I will restart the API once H confirms the drop."}]}}
+  m:
+    - {source: catch-up, when_from: a, once: true, reply: {replies: [{to: [H, a], text: "correction on the cause: the 10:40 deploy did touch nginx. last Tuesday we raised the upstream timeout to 60s because /reports takes 20-40s under load; today's deploy reverted it to 10s. pagination is not the cause. restore the 60s timeout."}]}}
+  v:
+    - {source: catch-up, when_from: a, once: true, reply: {replies: [{to: [H, a], text: "do not drop the reports table. I read db/init.py: nothing recreates schemas on boot; migrations run only when MIGRATE=1 is set. dropping the table loses the data and the API fails on the missing table."}]}}
+# Scripted grades are Jev's on this text (2026-11-14): a's post flagged (stakes 0.98,
+# wrong 0.79), speak scores by role, both corrections revise the thread.
+classifier:
+  decisions:
+    2: {add: [], flag: true, scores: {b: 0.89, x: 0.05, y: 0.17, m: 0.04, v: 0.05}}
+    4: {revises: true}
+    5: {revises: true}
+horizon: 600

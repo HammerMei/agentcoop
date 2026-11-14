@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 from .bots import BotRunner, Mixed, ScriptedBot, done_everywhere
-from .classifier import ScriptedClassifier
+from .classifier import Classifier, InjectedFailures, ScriptedClassifier
 from .gateway import SimGateway
 from .model import Decision, Member, Params, TurnInput
 from .room import Room
@@ -78,10 +78,16 @@ class Scenario:
     script: ScenarioScript
 
 
-def _params(raw: dict | None, enforce: bool | None) -> Params:
-    known = {f.name for f in fields(Params)}
+def _params(raw: dict | None, enforce: bool | None, overrides: dict[str, str] | None = None) -> Params:
+    """The scenario's params, then ``overrides`` (``--param name=value``) parsed by the
+    field's default type."""
+    known = {f.name: f.default for f in fields(Params)}
     values = {k: v for k, v in (raw or {}).items() if k in known}
-    unknown = set(raw or {}) - known
+    for name, text in (overrides or {}).items():
+        if name not in known:
+            raise ValueError(f"unknown param: {name}")
+        values[name] = _parse_param(text, known[name])
+    unknown = set(raw or {}) - set(known)
     if unknown:
         raise ValueError(f"unknown params: {sorted(unknown)}")
     if enforce is not None:
@@ -89,23 +95,43 @@ def _params(raw: dict | None, enforce: bool | None) -> Params:
     return Params(**values)
 
 
-def _classifier(raw: dict | None) -> ScriptedClassifier:
+def _parse_param(text: str, default) -> object:
+    if isinstance(default, bool):
+        if text.lower() not in ("true", "false"):
+            raise ValueError(f"a boolean param takes true or false, not {text!r}")
+        return text.lower() == "true"
+    if isinstance(default, int):
+        return int(text)
+    if isinstance(default, float):
+        return float(text)
+    return text
+
+
+def _classifier(raw: dict | None, live: Classifier | None) -> Classifier:
+    """The scenario's scripted classifier, or ``live`` wrapped in the scenario's injected
+    failures so section 8.1's failure configuration runs against a model too."""
     raw = raw or {}
-    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())))
+    if live is not None:
+        failures = {int(k): int(v) for k, v in (raw.get("failures") or {}).items()}
+        return InjectedFailures(live, failures, float(raw.get("latency", 0.5))) if failures else live
+    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())),
+                                  flag=bool(v.get("flag", False)), revises=bool(v.get("revises", False)),
+                                  scores={b: float(p) for b, p in (v.get("scores") or {}).items()})
                  for k, v in (raw.get("decisions") or {}).items()}
     return ScriptedClassifier(decisions=decisions, latency=float(raw.get("latency", 0.5)),
                               failures={int(k): int(v) for k, v in (raw.get("failures") or {}).items()})
 
 
 def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None,
-         scripted_bots: frozenset[str] = frozenset()) -> Scenario:
+         scripted_bots: frozenset[str] = frozenset(), classifier: Classifier | None = None,
+         params: dict[str, str] | None = None) -> Scenario:
     data = yaml.safe_load(Path(path).read_text())
     members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""),
                       m.get("private_profile", ""))
                for m in data["members"]]
     room = Room(data.get("room", data["name"]), members, is_dm=bool(data.get("dm", False)))
     sim = Simulation(room)
-    params = _params(data.get("params"), enforce)
+    params = _params(data.get("params"), enforce, params)
     script = ScenarioScript({
         bot: [ScriptRule(**rule) for rule in rules] for bot, rules in (data.get("bots") or {}).items()
     })
@@ -115,7 +141,7 @@ def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None
     bots = room.bots()
     for raw in data.get("gateways") or [{"name": "g1", "hosted": bots}]:
         sim.add_gateway(SimGateway(sim, raw["name"], raw["hosted"], raw.get("agents", bots), params,
-                                   bot_runner, _classifier(data.get("classifier"))))
+                                   bot_runner, _classifier(data.get("classifier"), classifier)))
     for event in data.get("events") or []:
         _schedule(sim, event)
     return Scenario(data["name"], sim, float(data.get("horizon", 600)), script)

@@ -1,0 +1,30 @@
+# Spec section 7, "Casual conversation": nobody is addressed, so the classifier alone decides
+# who answers each remark, and an eager catch-up covers what it misses. Three remarks, each
+# aimed at one specialty without naming anyone. Scripted bots answer when picked, so a
+# scripted run shows the mechanics; a live run shows what the classifier picks and what the
+# picked bot does with it. The expected speaker is noted on each event; it is not enforced.
+name: casual
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: a, role: bot, display_name: Alice, profile: "backend engineer; owns the API, the database and the deploy pipeline"}
+  - {username: b, role: bot, display_name: Bob, profile: "frontend engineer; owns the web app and its onboarding screens"}
+  - {username: c, role: bot, display_name: Cara, profile: "product manager; owns pricing, roadmap and customer conversations"}
+params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
+         catch_up_post_threshold: 2, catch_up_age_seconds: 60, classifier_timeout_seconds: 60}
+events:
+  - {at: 0, human: H, text: "morning all. anyone know why the staging deploy took twenty minutes this morning? it is usually five"}  # expected: a
+  - {at: 90, human: H, text: "unrelated: the new onboarding screen looks great, the progress bar is a nice touch"}  # expected: b, or nobody
+  - {at: 180, human: H, text: "thinking about whether the enterprise tier should include SSO by default or as an add-on. thoughts?"}  # expected: c
+bots:
+  a:
+    - {source: picked, once: true, reply: {replies: [{to: [H], text: "the staging deploy rebuilt the base image today; a dependency bump invalidated the cache. one-off."}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  b:
+    - {source: picked, once: true, reply: {replies: [{to: [H], text: "thanks, the progress bar ships to prod on Thursday"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  c:
+    - {source: picked, once: true, reply: {replies: [{to: [H], text: "SSO as an add-on; the enterprise buyers who need it already expect to pay for it, and bundling it moves the tier price up for the rest"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+classifier: {decisions: {1: {add: [a]}, 3: {add: [b]}, 5: {add: [c]}}}  # the expected picks; a live classifier replaces them
+horizon: 300
