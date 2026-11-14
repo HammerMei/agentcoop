@@ -28,7 +28,8 @@ _MARKERS = {
     "invalid": lambda e: f"✗ {e.bot} invalid reply #{e.attempt}: {e.reason}",
     "notice": lambda e: f"⚠ {e.bot} failure notice ({e.cause})",
     "control_applied": lambda e: f"⚙ {e.control} {e.value} by {e.by} in {e.thread}",
-    "classifier_decision": lambda e: f"? post {e.post}: add {e.add}{' fallback ' + e.fallback if e.fallback else ''}",
+    "classifier_decision": lambda e: f"? post {e.post}: add {e.add}{' remove ' + str(e.remove) if e.remove else ''}"
+    f"{' fallback ' + e.fallback if e.fallback else ''}",
     "classifier_expired": lambda e: f"? post {e.post}: decision for {e.bot} expired",
     "job_scheduled": lambda e: f"⏰ {e.bot} scheduled job {e.job} in {e.thread}",
     "job_fired": lambda e: f"⏰ {e.bot} job {e.job} fired",

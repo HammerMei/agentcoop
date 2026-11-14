@@ -166,6 +166,8 @@ async def test_addressed_bots_still_speak_when_listed_in_remove():
     await sb.run(2)
     assert len(sb.posts_by("a")) == 1
     assert sb.trace.last("classifier_decision").remove == ["a"]
+    from tools.roomsim.report import transcript
+    assert "? post 1: add [] remove ['a']" in transcript(sb.sim)
 
 
 async def test_a_decision_naming_a_bot_on_another_gateway_starts_no_local_turn():
