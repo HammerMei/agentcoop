@@ -171,19 +171,26 @@ the 1.x line (R5). A later increment retires it, not this one. A config with
 profiles. `command` keeps its meaning (the executable). `profile` decides the
 argv around it and everything in §3.7.
 
-`working_directory` may be empty today, meaning "inherit the gateway's cwd"
-(`gateway/core/config.py:126`). ACP's `cwd` is mandatory and absolute on every
-session call. For `type: acp` the config loader therefore resolves an empty
-value to the gateway's own canonicalised cwd at load time. `backend_identity`
-and invariant 4 use the resolved path. The backend never passes an empty
-value through.
+`working_directory` is required. The loader rejects an agent without one
+and one that names a missing directory (`gateway/config.py`,
+`load_config`, "working_directory is required"). The dataclass default `""`
+(`gateway/core/config.py:126`) is unreachable through the loader. ACP's
+`cwd` is mandatory and absolute on every session call, and the backend
+passes the loaded path, canonicalised the way `backend_identity` does
+(invariant 4).
 
 **Backend identity.** `backend_identity(agent_type, working_directory)`
 (`gateway/core/state.py:506`) scopes a stored session id to the store that
 minted it. With one type serving several agents, `type` alone does not name
 the store, because a Claude session id must not be replayed into a Codex
 process after a config edit. The identity for this backend is `acp:<profile>`
-plus the canonicalised working directory. Switching an agent from
+plus the canonicalised working directory. The three call sites pass
+`agent_cfg.type` today (`gateway/core/watcher_lifecycle.py:704`, `:1728`,
+`gateway/config_validate.py:586`). `AgentConfig` gains a derived
+`identity_type`, `acp:<profile>` for this backend and `type` for the other
+two, and the three sites pass it. The persisted string carries the profile
+from the first release, so adding a profile later never changes a stored
+identity. Switching an agent from
 `type: opencode` to `type: acp` is therefore an identity change. The
 lifecycle refuses the stored session with its existing wording
 (`gateway/core/watcher_lifecycle.py:84-89`), re-provisions the record, and
@@ -302,7 +309,7 @@ client at its 1.0 without reaching the rest of the backend.
 |---|---|---|
 | `start()` / `stop()` | spawn + `initialize`. Close stdin + terminate | idempotent, as today |
 | `create_session(working_directory, extra_args, session_title)` | `session/new {cwd, mcpServers: []}` | Returns the agent's id. **No init prompt**, because `session/new` returns an id without a model turn, unlike `claude -p`. The 1.x opencode adapter's `_INIT_PROMPT` came from the CLI era and is dropped. `extra_args` and `session_title` have no ACP equivalent. The backend logs them at DEBUG if given. A profile may map `session_title` to an agent-specific call. No profile does in this increment. |
-| re-attach after a restart (§3.11) | `session/resume {sessionId, cwd}` if `sessionCapabilities.resume`, else `session/load {sessionId, cwd, mcpServers: []}` with the replayed updates discarded | `cwd` must equal the session's directory, or opencode rejects with `invalid_params` `[src]` `service.ts` `getSession` |
+| re-attach after a restart (§3.11) | `session/resume {sessionId, cwd}` if `sessionCapabilities.resume`, else `session/load {sessionId, cwd, mcpServers: []}` with the replayed updates discarded | `cwd` must equal the session's directory, or opencode rejects with `invalid_params` `[src]` `service.ts` `getSession`. `mcpServers` is optional on `resume` and required on `new` and `load` `[docs]` ACP v1 schema |
 | `delete_session(session_id)` | `session/delete` if `sessionCapabilities.delete`, else return `False` | opencode cancels the turn and removes the row `[src]` `service.ts` `deleteSession` |
 | `send()` | `stream()` consumed to its final event | one code path, as the base class already allows |
 | `stream()` | `session/prompt {sessionId, prompt: [...]}` + `session/update` fold (§3.5) | |
@@ -626,13 +633,16 @@ vocabulary:
 ]}
 ```
 
-The list is ordered and the last match wins `[docs]` v2 permissions. The
-profile merges a user `OPENCODE_CONFIG_CONTENT` the way the 1.x function
-merges it:
-
-- the user's own rules follow the catch-alls
-- invalid JSON is a load error
-- a user catch-all for an action is respected
+The list is ordered and the last match wins `[docs]` v2 permissions. There is
+no operator input to merge. `AgentConfig` has no per-agent environment, and
+the 1.x function reads only the gateway's own `sidecar_env`
+(`gateway/agents/opencode/adapter.py:327`), so its "user value" branches are
+unreachable under the gateway. The profile sets `OPENCODE_CONFIG_CONTENT` to
+this ruleset on the spawn environment, over any value the daemon inherited,
+as 1.x does (`adapter.py:475`), and logs the override at INFO when the
+daemon's environment carried one. An operator who wants a weaker rule has no
+supported path. That is R4's gap statement for this profile, and it is the
+same as on 1.x.
 
 `external_directory` is new in the list, because v2 flipped its default to
 allow.
@@ -779,29 +789,45 @@ The profile does this:
    id>.jsonc` with one `agents.coop-<path_key>` entry per watcher bound to
    the agent: `mode: "primary"`, `system` = preamble + the durable
    instructions file content, `description` = a hash of `system`. It sets
-   `OPENCODE_CONFIG` to that path. It writes through a temporary file and
-   `rename`, because opencode reloads on every write. An operator
-   `OPENCODE_CONFIG` in the agent's `env:` is a load error, because the
-   profile owns the variable.
-2. `ensure_durable_instructions` adds or rewrites the watcher's entry. The
-   description hash changes with the content, so every rewrite produces a
-   `config_option_update`. The backend waits for it. When no session is
-   attached, nothing is pushed, and the backend retries the selection in
-   step 3 with a bounded backoff instead. A selection issued right after the
-   write fails with `mode not found` until the watcher has fired `[live
-   2.2.6]` through `set_config_option`, the same path as `set_mode` `[src]`
-   `service.ts`: the ACP catalog reload inside `withReload` does not re-read
-   the file.
-3. After every `session/new`, `session/load` and `session/resume`, it
-   selects the watcher's entry with `session/set_mode`. The default mode is
+   `OPENCODE_CONFIG` to that path on the spawn environment, over any value
+   the daemon inherited, and logs the override at INFO when there was one.
+   It writes through a temporary file and `rename`, because opencode reloads
+   on every write.
+2. `ensure_durable_instructions(session_id, …, content)` adds or rewrites
+   the watcher's entry and then selects it on that session with
+   `session/set_mode`. The entry for a new watcher cannot exist at
+   `session/new`, because the lifecycle provisions the session, sends the
+   history handoff, and only then calls `ensure_durable_instructions` with
+   the watcher's `path_key` (`gateway/core/watcher_lifecycle.py`, steps 3,
+   3.6 and 4 of `_start_watcher`). The description hash changes with the
+   content, so every write produces a `config_option_update` on the attached
+   session. The backend waits for it before selecting. A selection issued
+   right after the write fails with `mode not found` until the watcher has
+   fired `[live 2.2.6]` through `set_config_option`, the same path as
+   `set_mode` `[src]` `service.ts`: the ACP catalog reload inside
+   `withReload` does not re-read the file.
+3. After `session/load` and `session/resume`, the entry already exists, and
+   the backend selects it right after the attach, with a bounded retry for
+   the case where the file was rewritten moments before. The default mode is
    the operator's. It was a global agent `[live 2.2.6]`, so the backend
    never relies on it.
-4. `reclaim_durable_instructions` removes the entry after the watcher's
-   session is closed, never before. A prompt on a session whose entry was
-   removed returned nothing in 30 s. A `set_mode` on that session still
-   succeeded, and every later prompt failed with `Session already has an
-   active ACP prompt` `[live 2.2.6]`. A session moved to another entry with
-   `set_mode` before the removal is unaffected.
+4. The history handoff turn (step 3.6) therefore runs before the selection,
+   on the operator's default mode. Today that turn runs without the header
+   on every backend, because the send carries no
+   `append_system_prompt_file`, and its reply is discarded. The ruleset
+   still gates its tool calls. Moving the handoff after the durable
+   instructions is a lifecycle change for its own increment (§9).
+5. `reclaim_durable_instructions` sends `session/close` to every session the
+   backend has selected onto that entry and then removes the entry. It does
+   not rely on the caller's order: the lifecycle reclaims after it has
+   dropped the session from its maps and after `delete_session`, confirmed
+   or not (`watcher_lifecycle.py:731-751`), and the reload-removal path
+   keeps the backend session on purpose (`session_manager.py`,
+   `keep_backend_session`). A prompt on a session whose entry was removed
+   returned nothing in 30 s. A `set_mode` on that session still succeeded,
+   and every later prompt failed with `Session already has an active ACP
+   prompt` `[live 2.2.6]`. A session moved to another entry with `set_mode`
+   before the removal is unaffected.
 
 The `coop-` prefix keeps a gateway entry from colliding with a project
 `.opencode/` agent of the same name, which would outrank it.
@@ -968,8 +994,8 @@ Everything else is a default.
 6. The backend never recreates a stored session id silently on `-32002`.
 7. The backend logs the durable-instructions rung in use once per session.
 8. The durable instructions are never a prompt block (§3.8).
-9. On opencode, a watcher's agent entry is removed only after the session
-   on it is closed (§4 P5).
+9. On opencode, the backend closes every session it selected onto an agent
+   entry before it removes the entry (§4 P5).
 
 ---
 
@@ -1052,8 +1078,9 @@ checklist.
 5. The §8 checklist against 2.2.5. Then the docs: `docs/permission-reference.md`,
    `docs/architecture.md` ("Adding a New Agent Backend" becomes profiles),
    `docs/supported-features.md`, `config.example.yaml`.
-6. Separately, later: the Claude and Codex profiles when wanted, and the
-   1.x backend retirement.
+6. Separately, later: the Claude and Codex profiles when wanted, the 1.x
+   backend retirement, and the lifecycle change that delivers the durable
+   instructions before the history handoff (§4 P5, step 4).
 
 ---
 

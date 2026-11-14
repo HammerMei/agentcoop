@@ -39,6 +39,7 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-09-25 | #186 r4 F1 — a group-writable COOP_HOME (0770/0775) passes `runtime_dir_is_ours` (boundary written in SECURITY.md) | DROP; `silent` | a report of a lower-privileged group member altering COOP_HOME contents | 2027-09-25 | open |
 | 2026-09-25 | #186 r4 F2 — a container started with `COOP_HOME` set splits where the entrypoint writes and `coop` reads | DROP, recorded on #183 | #183's image ships still honouring `COOP_HOME`, or a user report of `coop start` failing in the container | 2027-09-25 | open |
 | 2026-10-07 | #195 r1 F1 — RC replay re-runs the human reset for an unmentioned post; an in-flight agent delivery keeps a free turn | DROP | `Agent chain counters reset … had turns` logged directly after `replaying missed messages` for a room whose human post was unmentioned, or any chain observed past `max_turns+1` | 2027-10-07 | open |
+| 2026-11-14 | #205 r1 F7 — `session/resume` without `mcpServers` is rejected by a conforming agent | DROP (`cannot-occur`: ACP v1 schema `ResumeSessionRequest.required = [sessionId, cwd]`) | an ACP agent answering `invalid_params` naming `mcpServers` on a `session/resume` that omits it | 2027-11-14 | open |
 
 ---
 
@@ -787,3 +788,51 @@ Notes:
 
 **Status: settled for this PR** — the confirming round found nothing on round 1's
 fixes and nothing that contradicts a promise.
+
+---
+
+## 2026-11-14 — PR #205 round 1 (design: ACP agent backend for opencode 2.x)
+
+**Chain detector:** 8 findings on `37aadb3`, first round, `--`, no chain.
+**Control finding:** #181 r9 F1 (`settled: implemented`) was included as F9, blind by
+intent. Rater 2 disclosed that it hit the ledger row while grepping for the finding's
+file, so it was **not blind on the control**. Its F9 answer (FILE at the time, not a
+DROP) matches the settled outcome, but the control did not test independence this
+round. Agreement **uncorroborated**. Tree untouched until rater 2 reported.
+
+Increment: "design doc for a generic ACP agent backend (`type: acp` + per-agent
+profile) that supports opencode 2.x, plus the manual probes behind its live evidence.
+No gateway code changes." A finding on the doc is true when the specified mechanism
+cannot be built from the gateway as it is, or the text cites something that does not
+exist; the "fix" is the document.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** a user `allow` rule in `OPENCODE_CONFIG_CONTENT` placed after the gateway's `ask` catch-alls wins, bypassing the broker, "directly contradicts R4/ADR-0002" (P1) | ADR claim untrue: ADR-0002 Decision para says `ask` is injected "unless the user set a value", and the design copies the 1.x merge. Operator-authored env is inside the trust boundary. **DROP** | ADR claim untrue (same clause). Then: the "user value" has **no source** — `AgentConfig` has no `env` field, and the 1.x function reads only `sidecar_env` (`adapter.py:327`), hardcoded by `service.py`, so the respect-user branch is unreachable from the gateway; the design's "the agent's `env:`" (P5) names nothing. `silent`. MAKE IT LOUD: name the input, specify a WARNING, FILE the ADR question | **FIX (doc)** — rater 1 conceded on checkable evidence (`gateway/core/config.py` `AgentConfig`, `adapter.py:327`): the design referenced an input that does not exist. Outcome simpler than either verdict: P3 now states there is no operator input, the profile sets the variable over any inherited value and logs the override at INFO, and R4's gap is "no supported way to weaken a rule", as on 1.x. ADR unchanged |
+| **F2** the lifecycle sends the history handoff before `ensure_durable_instructions`, so the watcher entry cannot be selected "after `session/new`" and the handoff turn runs on the operator's default mode (P2) | true (`watcher_lifecycle.py` steps 3, 3.6, 4; `create_session` carries no `path_key`). On 2.x the default mode is the operator's own agent, a foreign identity. **FIX**: reorder the lifecycle in this increment | true, same trace. The handoff turn runs without the header on every backend today and its reply is discarded, so that half is pre-existing. `cheap` at the backend layer: selection happens in `ensure_durable_instructions` (session attached, so the `config_option_update` wait applies) and on re-attach; the reorder is a lifecycle change for its own increment | **FIX (doc)** on rater 2's shape, the cheapest correct fix inside the increment. P5 steps 2-4 rewritten; the reorder is listed in §9 as later work. Both raters rank this first: a wrong mechanism in the design outranks the bugs |
+| **F3** probe: `clear()` inside `wait_option_update` drops an update that lands before the wait (P2) | `cheap` | partly: real in step 3's fallback branch (an `await` sits between write and wait), `cannot-occur` in steps 4-5 (no yield point). `cheap` | **FIX** — clear moved to the callers |
+| **F4** `backend_identity()` is called with `agent_cfg.type` at all three sites, so `acp:<profile>` cannot be produced (P1) | true (`watcher_lifecycle.py:704`, `:1728`, `config_validate.py:586`). `silent` replay into the wrong store on a profile switch. **FIX (doc)** | true, same sites. Replay unreachable until a second profile ships and then loud (`resume` of a foreign id errors). The real consequence: the persisted string must carry the profile from release one, or a later change refuses every stored ACP session. `cheap` (doc) | **FIX (doc)** — `AgentConfig.identity_type`, the three sites named, "persisted with the profile from the first release". Rater 2's consequence adopted as the stated reason. Also fixed from rater 2's aside: §3.1 said `working_directory` "may be empty today"; the loader requires it (`config.py` `load_config`) |
+| **F5** on expiry the lifecycle reclaims the prompt file even when `delete_session` is unconfirmed, so "entry removed only after the session is closed" cannot be enforced (P2) | premise true (`:731-751`), consequence unreachable: `_maps.remove_session` runs first and the record is gone, so nothing prompts the orphan. `cheap`: reword the guarantee | premise true, plus the reload-removal path keeps the session on purpose (`session_manager.py:786`). Consequence near zero for the same reason. `cheap` at the backend layer: reclaim sends `session/close` to every session it selected onto the entry, then removes it | **FIX (doc)** on rater 2's shape: the backend closes, it does not rely on the caller's order. Invariant 9 reworded. Codex's conditional-reclaim fix declined: it would leak entries forever |
+| **F6** probe: a relative `<config path>` diverges from the child's cwd (P2) | `cheap` | true, not silent (step 1 fails loudly). `cheap` | **FIX** — `os.path.abspath` on both arguments |
+| **F7** `session/resume` must carry `mcpServers`, "a conforming strict agent rejects every reattachment" (P1) | untrue: ACP v1 schema `$defs.ResumeSessionRequest.required = ["sessionId", "cwd"]`. **DROP** | untrue, same field, plus opencode `service.ts` defaults an absent list to `[]`. `cannot-occur`. **DROP** | **DROP** — written on the thread, ledger row added. One phrase added to the §3.4 row so the next reader does not re-derive it |
+| **F8** probe: `kill()` without `wait()` before respawn (P2) | `cheap` | partly: opencode's private server exits on the pipe's EOF (`standalone.ts:24-31`), so the overlap is bounded; a zombie remains. `cheap` ×3 files | **FIX** — `await proc.wait()` after `kill()` in all three probes |
+| **F9** (control) `save()` validates beside the resolved target; a relative `working_directory` through a symlink resolves against the wrong directory | — (known) | not blind (see above). On HEAD untrue: `config_base_dir()` resolves against `$COOP_HOME` (#182, PR #186). Historically FILE, agrees with the ledger | control not independent this round |
+
+Notes:
+- Adoption: 7 of 8 (6 doc or probe fixes, 1 DROP). Verdicts agree on 6; F1 and F2
+  were disagreements on the fix's shape, both converged on rater 2's evidence
+  (F1: the input does not exist; F2: the cheapest correct fix is inside the backend).
+  No rates were needed: every surviving finding passed `cheap` against its cheapest
+  correct fix.
+- Severity re-ranked: Codex's three P1s are one false claim (F7), one false ADR claim
+  with a true unnamed-input problem under it (F1), and one true but unreachable-today
+  defect whose real consequence is the persisted identity format (F4). Its P2 F2 is the
+  top finding of the round.
+- Found outside the nine by rater 2: the PR's CI lint was red. `tests/manual/` is
+  inside `ruff check gateway/ tests/`, and the three probes carried 46 E701/E702/E401/
+  I001 errors plus three C901 (`main` 17 and 16, `pump` 11). Fixed by restructuring
+  the probes (dispatch helpers), no `noqa` added. Lesson already in memory: run lint
+  before push.
+- Cost: 1 round, 2 raters, about 75 minutes of attention.
+
+**Status: open** — fixes pushed, confirming Codex round requested.
