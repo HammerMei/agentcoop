@@ -114,12 +114,12 @@ Each definition below uses only ordinary language or terms defined above it.
 | **post** | One platform message written by a human or bot. |
 | **bot** | An agent's presence on one chat server. Within one room, that presence is a watcher. |
 | **thread** | A platform thread, or all top-level room posts treated as one thread. The rules below apply per thread. |
-| **addressed** | A post mentions a bot. Human posts may use `@bot`, `@all`, or a room-wide mention. Bot posts use only mentions the platform recorded on their post. A bare name is not an address. A 1:1 DM addresses its bot by definition. |
+| **addressed** | A post mentions a bot. Human posts may use `@bot`, `@all`, or a room-wide mention. Bot posts use only mentions the platform recorded on their post. A bare name is not an address, and a name on a control line (`mute: @a`) is the control's target, not an address. A 1:1 DM addresses its bot by definition. |
 | **scheduled job** | A reminder a bot creates through the existing scheduler. It fires at a chosen time for that bot in one thread, without a new platform post. |
 | **classifier** | A small model that chooses which additional bots should speak for a post. It never writes a reply or removes an addressed bot. |
 | **rate limit** | A per-thread post and word allowance. Once reached, it delays further bot invocations unless their source is exempt. |
 | **cooldown** | The minimum interval between one bot's own posts in a thread. |
-| **orchestrator** | A bot designated by an owner for one thread. It is exempt from the rate limit and cooldown and may change that thread's rules. |
+| **orchestrator** | A bot designated by an owner for one thread. It is exempt from the rate limit and cooldown and may mute and unmute bots in that thread. |
 | **muted** | Silenced in a thread except when addressed by a human or the orchestrator. |
 | **cursor** | The last post delivered to one bot's session in one room. It is distinct from the connector watermark, which tracks what the connector has processed. |
 | **backlog** | Posts after a bot's cursor, plus any scheduled-job prompt held while that bot was muted. |
@@ -402,7 +402,9 @@ sweeper retries it. The mechanism slows a loop but does not end it; `done`, a
 mute, or a human ends the exchange.
 
 Thread overrides use `limit: N posts`, `limit: N words`, or both. `limit: 0
-posts 0 words` disables the thread limit.
+posts 0 words` disables the thread limit. Only an owner writes them: the rate
+limit is the room's brake, sized for the humans reading along, and no bot
+changes it.
 
 ### 5.4 Authority and settings (`AUTHORITY`, `SETTINGS`)
 
@@ -410,7 +412,7 @@ The gateway applies a control only when written by:
 
 - a human with the owner role; or
 - the thread's orchestrator, except that only an owner may set
-  `orchestrator:`.
+  `orchestrator:` or `limit:`.
 
 Controls from guests or ordinary bots remain visible text and change nothing.
 In a reply envelope, a `control` from a non-orchestrator is invalid. An
@@ -498,9 +500,12 @@ of its turns ends, when it becomes free, and when a control or human post
 requests one (`MUTE`, `RATE_LIMIT`). Sweeps for different bots or rooms may run
 in parallel. It considers, in this order:
 
-1. the oldest backlog post that currently addresses or selects the bot;
+1. backlog posts that currently address or select the bot, oldest first, each
+   checked against the turn table so a held older post (a bot's mention of a
+   muted bot) cannot hide a newer human mention behind it;
 2. unfinished threads that have become open;
-3. threads due for catch-up.
+3. a scheduled-job firing held in backlog (`MUTE`, `FAILURE_NOTICE`);
+4. threads due for catch-up.
 
 The sweep chooses its candidate list once, then rechecks each candidate before
 starting a turn. Because the first turn delivers the entire room backlog, later
@@ -591,7 +596,6 @@ replies:
   - thread: T2
     control:
       mute: [a, b]          # or: all
-      limit: {posts: 20, words: 2000}
 
   - thread: T1
     to: [a, b, c]
@@ -618,8 +622,9 @@ claims: one says there is something to post, while the other says there is not.
 
 `thread` must be a thread delivered to this turn or an open unfinished thread
 listed in `HINT`; it defaults to the starting thread. `to` names room members
-or `all`, never the sender. The only bot-issued controls are `mute`, `unmute`,
-and `limit`; only an owner human may designate or remove an orchestrator.
+or `all`, never the sender. The only bot-issued controls are `mute` and
+`unmute`; only an owner human may designate or remove an orchestrator or set a
+thread's limit.
 
 The exact output `<end-of-agent-chain>` maps to one `done` reply. If that token
 has any surrounding text, the output is invalid.
@@ -647,14 +652,15 @@ invalid output fails the turn. Reject an envelope when:
 - `replies` is absent, or a must-reply thread listed in `HINT` has no item;
 - an item has no action, has both `text` and `done`, or has an unsupported
   combination;
-- text lacks recipients, has an empty recipient list, or addresses only the
-  sender;
+- text lacks recipients, has an empty recipient list, or names the sender
+  among its recipients;
 - a recipient is not a room member;
 - a name in an explicit mute/unmute list is not both on the agent list and a
   room member;
 - a thread was neither delivered to this turn nor listed as an open unfinished
   thread, or is closed for text/control;
-- a non-orchestrator issues `control`, or the control has an unsupported key;
+- a non-orchestrator issues `control`, or the control has a key other than
+  `mute` or `unmute`;
 - an explicit mute/unmute list is empty.
 
 `all` resolving to nobody is not an error. Omit that control; if nothing else
@@ -698,7 +704,9 @@ failure doubles the wait, up to `failure_backoff_max_seconds`. While that time
 is in the future the bot is treated as under cooldown: no sweep, classifier, or
 bot-mention turn starts, and a scheduled job that falls due waits for the
 backoff to end without counting as a job retry. A human or orchestrator mention
-still starts a turn. One normal turn end clears the backoff. The gateway posts
+that arrives during the backoff still starts a turn; the sweeper's retry of the
+failed turn waits for the backoff like any other sweep-started turn. One normal
+turn end clears the backoff. The gateway posts
 one failure notice at the first failure of an episode and none during the
 backoff. `STATUS` shows the backoff and the next retry time.
 
@@ -709,8 +717,9 @@ failed on a second invalid envelope. Backend failures neither add to nor reset
 the count. At `consecutive_invalid_limit` the bot is degraded in that room: it
 is eligible as in the muted column of `TURN_ELIGIBILITY` (the sweeper skips it,
 the classifier is not offered it, a bot mention starts nothing, its jobs wait
-in backlog), while a human or orchestrator mention still starts a turn, which
-is the probe. A normal turn end clears the degraded state and the count. The
+in backlog), while a new human or orchestrator mention still starts a turn,
+which is the probe; the sweeper does not retry the post whose turn failed. A
+normal turn end clears the degraded state and the count. The
 gateway posts one failure notice at the first twice-invalid turn of a streak,
 one more when the bot becomes degraded, and none between. `STATUS` shows
 degraded bots. A restart resets both the count and the state. With
@@ -776,7 +785,13 @@ An owner post `orchestrator: @bot` designates one bot for one thread. The bot:
 
 - is exempt from rate and cooldown gates;
 - can address other bots without those gates;
-- may issue `mute`, `unmute`, and `limit` controls.
+- may issue `mute` and `unmute` controls.
+
+It does not set the thread's limit. The rate limit is the room's brake, sized
+for the humans reading along. The orchestrator's own mentions are exempt from
+it, so a round it runs never needs a larger allowance. To keep replies short,
+it asks in text ("one post each, 60 words or fewer"). That is a request to the
+bot, not a gateway rule.
 
 `orchestrator: none` from an owner removes the designation and restores the
 thread's default behaviour. Muting the orchestrator does not remove it: a muted
@@ -921,6 +936,21 @@ the current OpenCode adapter targets opencode 1.x. Conclusions about how well
 models follow these rules are provisional until a second model has run.
 Scripted human events enter at fixed steps. Output should include an annotated transcript and per-bot totals for
 turns, posts, words, tokens, context size, classifier decisions, and sweeps.
+
+The simulator has an enforcement switch. With enforcement off it keeps every
+threshold and every `HINT` but holds no turn and rejects no envelope for a rule
+an agent could have obeyed by itself: mute, rate and cooldown closure, control
+authority, the must-reply group, recipients. Backoff, the degraded state, one
+turn per bot, the cursor and the failure notice stay on, because a bot cannot
+obey those alone. For each such rule the run counts opportunities, and whether
+the bot complied, violated (enforcement off), wrote a reply the gateway rejected
+(enforcement on), or was held before it could choose (enforcement on); a turn
+that enforcement off let run where enforcement on would have held it is counted
+apart, by whether the bot stayed silent in that thread. Running one scenario in
+both modes puts violated beside rejected, and the held turns beside what the
+bots did when not held: what the agents follow on their own, and what the
+gateway has to enforce. The comparison
+is for live runs; a recording replays in the mode it was made in.
 People review each transcript for exchanges that read incorrectly, revise the
 relevant rule in section 5, and rerun the scenario. This feedback loop is the
 purpose of building the simulator first.
@@ -960,7 +990,7 @@ input. Keep that separate from operational outcomes, including:
 
 | # | Increment | Main mechanisms |
 |---|---|---|
-| 0 | Simulator and scenarios | All section 5 mechanics, outside the gateway runtime; backend adapters imported |
+| 0 | Simulator and scenarios | All section 5 mechanics, outside the gateway runtime; backend adapters imported; the enforcement switch and per-rule counts |
 | 1 | Deliver, do not drop | Cursor, multi-thread envelope, canonical form, failure notice and failure counters, settings persistence |
 | 2 | Bot-sender eligibility and mute | Eligibility table, mute, authority |
 | 3 | Rate and cooldown | Rate state, exemptions, orchestrator, agent-list checks, hints |
@@ -1026,6 +1056,8 @@ The simulator gets these tests first; the gateway reuses them.
 - After restart, enforce mutes reconstructed from persisted settings.
 - `orchestrator: none` from an owner clears the designation; a mute does not.
 - Human and orchestrator mentions bypass rate and cooldown.
+- A `limit:` line in a bot post, the orchestrator's included, changes nothing;
+  an owner's applies.
 - A scheduled job starts in its own thread despite the rate limit.
 - A reply in a thread marked open at turn start still posts when a mute arrives
   while the turn runs.

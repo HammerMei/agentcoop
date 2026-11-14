@@ -940,3 +940,180 @@ Notes:
 
 **Status: settled for this PR** — closed by the stop rule and an owner decision,
 not by a clean round. The ten findings are decided; none is open.
+
+## 2026-11-10 — PR #202 round 0 (internal review before Codex, `tools/roomsim/`)
+
+**Increment:** §8.2 row 0 — the simulator, all of section 5, outside the runtime.
+**Rater:** one internal reviewer (three lenses: spec-vs-code, event ordering,
+rule-count correctness), probes run against scripted sandboxes. No blind second
+rater and no control for this round: every finding passed the `cheap` gate or was
+a spec reading, so nothing was scored. **Cost:** ~10 min reviewer, ~40 min fixes.
+
+Question 2 passes for every finding: the increment owns all of section 5.
+
+| | finding | gate | outcome |
+|---|---|---|---|
+| F1 | a gateway counted its own post after the other gateways received it; the same scenario traced differently by hosting (5.3, 8.3 "equal lists converge") | cheap | **FIX** — `Simulation.append`/`deliver` split; own post counted between |
+| F2 | `restart` mid-turn left the dead turn's end event on the heap: two concurrent turns, a duplicate reply | cheap (one counter) | **FIX** — per-bot generation; a stale end is dropped, its job goes back to pending |
+| F3 | parseable output with wrong types crashed the run and left `running=True` | cheap | **FIX** — type checks raise `ParseError`; `limit` shape validated |
+| F4 | a thread archived during a turn re-entered the unfinished set | cheap | **FIX** |
+| F5 | `counted_holds.clear()` on any start re-counted unrelated holds | cheap | **FIX** — only the started key is dropped |
+| F6 | the sweep tried only the oldest addressing post; a held bot mention hid a newer human mention (4.1 row 1) | cheap | **FIX** + §5.7 item 1 reworded ("each checked against the turn table") |
+| F7 | the orchestrator was held by cooldown (4.1) | cheap | **FIX** |
+| F8 | an owner's control-only post neither cleared the window nor released held bots (5.3) | cheap | **FIX** — clear before the control-only return |
+| F9 | job cap: no notice, off by one, `0` dropped the job (3.1, 5.11) | cheap | **FIX** |
+| F10 | a degraded bot was still offered to the classifier (5.10) | cheap | **FIX** — and mode-independent (F16c) |
+| F11 | pending jobs came before addressing posts in the sweep order; 5.7 lists no jobs | cheap | **FIX** — after unfinished, before catch-up; §5.7 item 3 added |
+| F12 | a DM post without `@` started no turn (section 3) | cheap | **FIX** |
+| F13 | the classifier request was built at result time, so later posts leaked in | cheap | **FIX** — built at call time |
+| F14 | a new human mention held by `one_turn` behind a turn that then failed waits for the backoff | — | **DROP** — the §5.10 text written in this PR says "like any other sweep-started turn"; the backoff is about the backend, not the trigger. Reversal: a lab transcript where a human's follow-up mention sits unanswered through a backoff and the human notices |
+| F15 | enforcement off counted a turn started where enforcement on would have held it as `violated`, whose counterpart is `held`, not `rejected` | cheap (two columns) | **FIX** — `held_complied` / `held_violated`; report and §8.1 reworded |
+| F16 | denominators differed by mode: catch-up/unfinished filters, classifier offers, items dropped between attempts, missing `to` structural | cheap | **FIX** — classifier offers and candidate filters mode-independent (a closed thread is not a candidate in either mode, per 5.7's wording; my first fix re-offered it every sweep and looped); items counted across attempts; missing `to` is a `recipients` rule |
+
+Notes:
+- F1 and F6 are the ones with an operator-visible consequence in a live room (a
+  hold that depends on hosting; a human mention that waits for a second mention).
+  Both were invisible to the 106 tests because every test hosted all bots on one
+  gateway and addressed a bot once at a time.
+- Tests that passed by sharing a bug (reviewer's list): `test_enforce.py` parity
+  assertions, `test_scheduler_classifier.py` cap count, `test_envelope.py` `to`
+  as structural — all rewritten with the fix. 128 tests after the round.
+- Spec amendments carried in the PR: §5.7 candidate order, §8.1 count wording.
+  Two points left to the owner: invalid-envelope retries without backoff; a live
+  measure-only run.
+
+## 2026-11-11 — PR #202 round 1 (Codex on `3f0ae08`, `tools/roomsim/`)
+
+**Increment:** §8.2 row 0 — the simulator, all of section 5, outside the runtime,
+plus the enforcement switch and per-mechanism counts.
+**Chain-check:** 11 findings, one round, no chain (run from the working tree).
+**Rater:** Codex (11 inline, 4×P1 7×P2; the security review did not run — the
+paying account had no credits). Blind second rater: a fresh agent given the
+findings, the method, the constants and the owner's scoping sentence, not the
+verdicts. **Control:** the log's one settled row (#181 r9 F1, `settled:
+implemented`) was slipped in as a twelfth finding. It did not work as a control:
+presented against HEAD, a settled-*implemented* entry can only be found "already
+fixed" (the rater traced it to #182 and DROPped it as `cannot-occur`, correctly
+for HEAD). A control must be a DROP/FILE whose code still exists. **Agreement in
+this round is therefore uncorroborated.** **Cost:** ~25 min author, ~21 min rater
+(169k tokens), ~45 min fixes and tests.
+
+Owner's input this round, verbatim: "let's not too tie up on too many corner case
+with the simulator.. I mainly want to use simulator to get a sense of how well the
+mechanism works, but not intend to use it to exercise all corner cases." Applied
+as a `hits_per_year` factor (what a scenario file can express — the loader has
+only `human`/`archive`/`post`, so restart and replay are API/test-only) and to
+question 2, never as a coined discount. Both raters: it changes no verdict here,
+because every finding but one cleared `cheap`; it would have bitten on F3 and F6
+had `cheap` been refused.
+
+Question 2 passes for all eleven (§5.1, 3.1, 5.9, 8.1, 5.3, 5.11, 5.4).
+
+| | finding | gate | outcome |
+|---|---|---|---|
+| F1 | `"schedule": null` raised `TypeError`, not `ParseError`; the whole run aborted (live model only; loud) | cheap | **FIX** — `null` reads as empty, any other non-list is a schema error |
+| F2 | a gateway hosting only the author returned before `_count_for_rate` on replay: the window after `restart` depended on hosting (5.3; 8.3 "equal lists converge") | cheap (2-line move) | **FIX** — count, then return on no copies; test parametrised on `hosted` |
+| F3 | `classifier_timeout_seconds` was read nowhere; the test named "timeout" exercised errors only (8.3 "timeout … observable") | cheap at the edge (~6 lines), silent | **FIX** — a call slower than the timeout fails at the timeout and is never answered; test gap closed |
+| F4 | `_drop_stale` put the job back to pending and requested no sweep; with `sweep_interval_seconds=0` it never re-fired | cheap | **FIX** — one `_request_sweep`; test pins the second start at the drop time |
+| F5 | `Decision.reasons` reached no trace or report (5.1 "every fallback and reason is logged") | cheap | **FIX** — one field on `classifier_decision` |
+| F6 | `turn_hash` omitted `TurnInput.error`, so a retry turn replayed against a changed prompt | cheap | **FIX** — included only when set, so clean-turn hashes are unchanged. The rater flags this as the one the owner's sentence most plausibly waives; taken because it is the advertised contract and one line |
+| F7 | a replay that used a prefix of the recording exited 0 (silent) | cheap, silent | **FIX** — `[ERROR] replay used N of M recorded turns`, exit 1 |
+| F8 | a control first seen in replay got `last_activity=now`, so a mute older than the TTL stayed for a fresh TTL (5.4) | **not cheap** — the one-line fix (`setdefault(last_activity=post.time)`) is wrong: with a second replayed post inside the TTL of the mute, it expires a mute that §5.4 keeps (rater's trace, re-traced by the author; not run). Silent | **MAKE IT LOUD** — `age` field on `control_applied` (0 live; > TTL only in a replay). Behaviour not fixed. Rater's score: 0.01–0.1 h/y against 0.2 h/y tax, net ≤ 0 |
+| F9 | `classifier_posts=0` showed nothing instead of everything (3.1 "0 disables") | cheap | **FIX** — `or None` |
+| F10 | `"done": "false"` was truthy; an item with no other action was accepted as done and the cursor saved (silent discard) | cheap, silent | **FIX** — `done` must be a JSON boolean; wrong-types test extended |
+| F11 | `to` listing the sender among others passed; §5.9 said both "never the sender" (contract) and "addresses only the sender" (invalid list) | cheap; layer = §5.9 | **FIX** — code follows the contract sentence; the invalid-list line now says "names the sender among its recipients". Owner's call to reverse |
+
+**Where the two raters differed:** F8 only. Author had it `cheap` with exactly the
+one-line fix the rater showed wrong (checkable: two replayed posts, one thread,
+`_thread()` compares `now()` with the mute's time on the second post). Converged
+by evidence, not deference. Pattern for the file: *a one-line fix in replay
+bookkeeping that changes a §5.4 outcome is not `cheap` — the gate's "correct"
+clause, not its line count, is what fails.*
+
+**Where this differs from Codex's badges:** the three silent ones (F3, F10, F7)
+rank highest here; two carried P2. F1, F2 and F4 carried P1 and are bounded: F1
+fails loudly and needs a live model; F2 and F4 are unreachable from scenario YAML,
+and F4 is a ≤30 s delay under every shipped scenario.
+
+**Adoption:** 10 FIX + 1 MAKE IT LOUD of 11 — near 100 %, which the skill says to
+watch. Every one cleared `cheap` on the touched function (highest C901 in
+`tools/roomsim` after the round is 8, `_item` and `render_hint`) and lands as one assertion in an existing test file; the
+pattern response for envelope types (round 0 F3, this round F1/F10) is the
+extended wrong-types parametrize rather than two more point fixes. 137 tests after
+the round.
+
+Also in the round, not a finding: live bot sessions now start with `--agent claude`
+so the operator's configured persona does not reach the first turn (owner's ask).
+It does not cover later turns: the adapter resumes with `--system-prompt-snapshot
+off` and without `--agent`, so the system prompt is rebuilt and the `agent` setting applies again — the brainstorm live run's session log shows the full
+persona in the resumed turn's system prompt. A self-report probe had said otherwise;
+the request shape in the log is the evidence, not the model's answer.
+
+---
+
+## 2026-11-13 — PR #202 round 2 (Codex on `7aa069e`, `tools/roomsim/`)
+
+Twelve inline findings, posted 2026-11-11 09:25, thirteen minutes after the
+`@codex review` request. **They sat unread for two days**: the author checked the
+issue's reactions and not `pulls/202/reviews`. Triaged at HEAD `c3bd791`, five
+commits later (the `limit` control moved to owners in between).
+
+**chain-check** (working tree): 23 findings over 2 rounds, no chain; round 2 has
+2 findings on `gateway.py` and 1 on `__main__.py` landing on the previous round's
+fixes, streak 1 each — noise, not the signal.
+
+**Depth rule for this round, set by the owner before the verdicts:** the simulator
+exists to give a rough understanding of the mechanisms; a count off by one in a
+rare case is acceptable; do not re-request a Codex pass unless a major gap appears;
+spend the effort on running the scenarios. The cut line applied: **fix what is
+true and a few lines in a function well under the complexity limit, file or drop
+the rest in this entry.** F7 (two lines) is of the same off-by-one class as F5
+(seven lines plus a restart-only trigger); the line count, not the class, put them
+on different sides.
+
+**Blind second rater** (general-purpose agent; findings, method, constants, HEAD;
+no verdicts of the author's; it did not have the owner's depth rule). **No control
+finding was available; agreement in this round is not evidence of independence.**
+All twelve re-verified by the rater at HEAD with run reproductions.
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | replay classifier history included posts newer than the trigger | yes (Python API only) | **FIX** (1 line) | FIX | — |
+| F2 | an in-flight classifier result survives `restart` and starts a picked turn on a post the replay excluded | yes; silent; Python API only | **FILE** | FILE | — |
+| F3 | `"in_seconds": NaN` passed and stalled the whole run at the heap root; the report looked normal | yes; silent; live model or recording | **FIX** (1 line, finiteness) | FIX | — |
+| F4 | `--show-rules` never reached `report` | yes; every live run this week | **FIX** (3 lines) | FIX | — |
+| F5 | a stale turn dropped by `restart` kept its token/cost out of the totals | yes; silent; Python API only | **FILE** | FIX (cheap) | owner's depth rule |
+| F6 | `done` with `to` recorded nowhere (8.3 names it) | yes; silent | **FIX** (2 lines + trace kind `done`) | FIX | — |
+| F7 | a first attempt's rule rejections uncounted when the retry fails at the backend | yes; silent | **FIX** (2 lines, `attempt > 1` guard — the bare call miscounts first-attempt failures) | FIX | — |
+| F8 | a picked turn held by mute leaves the cached selection usable after unmute (§5.1: mute recovery does not reuse the decision) | yes; silent; needs a `classifier:` block no scenario has | **FILE** | FIX (~5 lines) | owner's depth rule; revisit with the model-backed classifier |
+| F9 | an owner may designate a guest as orchestrator (the `limit` half closed by `c3bd791`; the `mute` half stands) | partly | **DROP** | FIX (low value) | owner's depth rule; the state is owner-created and traced |
+| F10 | `classifier_fallback: everybody` accepted; the trace printed the typo while behaving as addressed-only | yes; silent | **FIX** (3 lines in `Params.__post_init__`, the layer that owns the contract) | FIX at `Params` | — |
+| F11 | delayed turns start in archived threads | true as mechanics, not as a defect: §5.9 prescribes the refusal, it terminates, `refused` is loud | **DROP** | DROP | — |
+| F12 | `BackendBot` kept a session whose introductory send failed; every later prompt lacked identity, roster and contract | yes; silent; live only | **FIX** (3 lines) | FIX | — |
+
+Exit obligations:
+
+- **FILE F2** — reversal: a restart test where a `classifier_decision` for post N
+  precedes the replay's own `classifier_call` for N. **FILE F5** — reversal: a restart
+  experiment whose totals are compared across runs. **FILE F8** — reversal: a
+  scenario with a `classifier:` block and a mute inside a hold. All three revisit
+  **2027-02-13** or when the model-backed classifier lands, whichever first. No
+  issues opened (owner's call); the threads stay open.
+- **DROP F9** — reason: the designation is an owner's visible post and every
+  control it enables is traced with the author; reversal: a guest orchestrator in
+  a live run that nobody noticed from the trace; revisit 2027-02-13.
+- **DROP F11** — reason: the observed behaviour is §5.9's; reversal: an archived
+  thread producing more than one `refused` per bot, or a job in one firing twice;
+  revisit 2027-02-13.
+
+**Badges vs consequence:** the three P1s are a replay-only input difference (F1),
+a restart-only stale callback (F2) and a model emitting `NaN` (F3). Of the twelve,
+F12 (silent corruption of every later live prompt) and F4 (a flag that did nothing
+in six live runs) had the only consequences anyone met this week; both carried P2.
+
+**Adoption:** 7 FIX, 3 FILE, 2 DROP. Highest C901 after the round: 8. 146 tests.
+No `@codex review` re-requested: commits after `7aa069e` are unreviewed by Codex,
+by the owner's decision, so the project's 👍 bar is not met on this PR as it stands.
+
+**Cost:** one rater run (~18 minutes, ~220k tokens), ~40 minutes of author time
+including the fixes.

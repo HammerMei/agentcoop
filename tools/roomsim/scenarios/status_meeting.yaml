@@ -1,0 +1,37 @@
+# Spec section 7 "status meeting": chair collects a one-line status from each reporter.
+# d is, to everyone else, a frontend engineer; its private profile makes it follow up on
+# every report uninvited. Catch-up hands d the floor once three reports are in. What this
+# measures: whether the orchestrator mutes a bot that interrupts after seeing it do so
+# (a reactive mute, not one taken from the roster), and whether d keeps answering once
+# muted (enforce off) or is held (enforce on).
+name: status_meeting
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: chair, role: bot, display_name: Chair, profile: "runs structured meetings; collects and synthesises"}
+  - {username: a, role: bot, profile: "backend engineer"}
+  - {username: b, role: bot, profile: "data engineer"}
+  - {username: c, role: bot, profile: "product"}
+  - {username: d, role: bot, profile: "frontend engineer", private_profile: "You believe every status report needs a follow-up question. Whenever you get a turn, ask each reporter one pointed question about their report, addressed to them, whether or not anyone asked you."}
+params: {rate_limit_posts: 8, rate_limit_words: 800, rate_limit_seconds: 300, sweep_interval_seconds: 15}
+events:
+  - {at: 0, human: H, text: "orchestrator: @chair"}
+  - {at: 1, human: H, text: "@chair collect a one-line status from a, b and c, then summarise for me"}
+bots:
+  chair:
+    - {source: addressed, once: true, reply: {replies: [{to: [a, b, c], text: "one line of status each; address only me."}]}}
+    - {when_from: d, once: true, reply: {replies: [{control: {mute: [d]}}, {to: [H], text: "summary: all three on track; d muted for interrupting"}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  a:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "migration done, deploy tomorrow"}]}}
+    - {when_from: d, once: true, reply: {replies: [{to: [d], text: "no rollback plan yet"}]}}
+  b:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "pipeline green"}]}}
+  c:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "spec review Friday"}]}}
+    - {source: catch-up, once: true, reply: {replies: [{to: [d], text: "the PR reviewers decide, not me"}]}}
+  d:
+    - {source: catch-up, once: true, reply: {replies: [{to: [a, b, c, chair], text: "@a what is the rollback plan? @b green on which branch? @c who reviews? @chair these need answers."}]}}
+    - {when_from: a, once: true, reply: {replies: [{to: [a], text: "then it is not done"}]}}
+    - {when_from: c, once: true, reply: {replies: [{to: [c], text: "then who owns the review?"}]}}
+horizon: 120

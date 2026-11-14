@@ -21,9 +21,9 @@ coverage: ## Run the test suite with branch coverage and print the gaps
 
 lint: ## Run ruff check (if installed)
 	@if command -v ruff >/dev/null 2>&1; then \
-	    ruff check gateway/ tests/; \
+	    ruff check gateway/ tests/ tools/; \
 	elif uv run ruff --version >/dev/null 2>&1; then \
-	    uv run ruff check gateway/ tests/; \
+	    uv run ruff check gateway/ tests/ tools/; \
 	else \
 	    echo "ruff not installed — skipping lint"; \
 	fi

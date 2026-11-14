@@ -1,0 +1,30 @@
+# Spec section 6.2 with an uninvited voice: nobody is muted, chair collects one idea each,
+# and d has an opinion on everything. Catch-up gives d a turn once three posts pile up in
+# main (params: catch_up_post_threshold 3). What this measures: does d speak without
+# being asked, and does the orchestrator reach for mute or limit when it does.
+name: brainstorm_kibitz
+room: team
+members:
+  - {username: H, role: owner}
+  - {username: chair, role: bot, display_name: Chair, profile: "runs structured meetings; collects and synthesises"}
+  - {username: a, role: bot, profile: "backend engineer"}
+  - {username: b, role: bot, profile: "frontend engineer"}
+  - {username: c, role: bot, profile: "product"}
+  - {username: d, role: bot, profile: "enthusiastic teammate; has an opinion on every idea and shares it whether or not anyone asked"}
+params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 15}
+events:
+  - {at: 0, human: H, text: "orchestrator: @chair"}
+  - {at: 1, human: H, text: "@chair run a short brainstorm on how to cut the build time: one idea each from a, b and c, then summarise for me"}
+bots:
+  chair:
+    - {source: addressed, once: true, reply: {replies: [{to: [a, b, c], text: "one post each with your best idea; address only me."}]}}
+    - {thread: main, reply: {replies: [{done: true}]}}
+  a:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "cache the dependency layer"}]}}
+  b:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "split the test suite into shards"}]}}
+  c:
+    - {source: addressed, once: true, reply: {replies: [{to: [chair], text: "drop the e2e suite from PR builds"}]}}
+  d:
+    - {source: catch-up, once: true, reply: {replies: [{to: [a, b, c], text: "all three are good but have you considered a monorepo build tool like Bazel?"}]}}
+horizon: 180
