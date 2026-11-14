@@ -10,6 +10,14 @@ TurnSource = Literal["addressed", "picked", "catch-up", "unfinished", "job"]
 PostKind = Literal["human", "bot", "notice", "integration"]
 Role = Literal["owner", "guest", "bot", "integration"]
 Fallback = Literal["addressed-only", "everyone", "addressed-or-everyone"]
+# Simulator experiments on catch-up (not section 3.1 parameters): ``all`` is the spec's
+# catch-up; ``flagged`` gives catch-up turns only for a bot post the classifier flagged
+# as worth checking, in ``catch_up_order``: every bot at once, one at a time in roster
+# order, or one at a time by the classifier's speak score. ``on-revision`` drops the
+# rest of the queue once a post revises the thread.
+CatchUpPolicy = Literal["all", "flagged"]
+CatchUpOrder = Literal["parallel", "roster", "score"]
+FlagClear = Literal["never", "on-revision"]
 
 ALL = "all"
 MAIN_THREAD = "main"
@@ -50,6 +58,9 @@ class Params:
     def __post_init__(self) -> None:
         if self.classifier_fallback not in get_args(Fallback):
             raise ValueError(f"classifier_fallback: {self.classifier_fallback!r} is not one of {get_args(Fallback)}")
+        for name, kind in (("catch_up_policy", CatchUpPolicy), ("catch_up_order", CatchUpOrder), ("flag_clear", FlagClear)):
+            if getattr(self, name) not in get_args(kind):
+                raise ValueError(f"{name}: {getattr(self, name)!r} is not one of {get_args(kind)}")
     classifier_decision_ttl_seconds: float = 600
     follow_up_retry_cap: int = 3
     failure_backoff_seconds: float = 30
@@ -57,6 +68,9 @@ class Params:
     consecutive_invalid_limit: int = 3
     # Simulator switches, not section 3.1 parameters.
     classifier_enabled: bool = True
+    catch_up_policy: CatchUpPolicy = "all"
+    catch_up_order: CatchUpOrder = "parallel"
+    flag_clear: FlagClear = "never"
     # ``False`` keeps every threshold and every HINT but holds no turn and rejects no
     # rule violation that an agent could have obeyed itself; the counters record what
     # the enforced mode would have blocked (plan amendment, 2026-11-10).
@@ -181,6 +195,8 @@ class Hint:
     previous_failure: str | None = None
     backoff_until: float | None = None
     degraded: bool = False
+    # Posts of the starting thread flagged for checking, when this is a flagged catch-up turn.
+    flagged: tuple[int, ...] = ()
 
     def group_of(self, thread: str) -> ThreadGroup | None:
         for group in self.threads:
@@ -231,6 +247,11 @@ class Decision:
     remove: tuple[str, ...] = ()
     reasons: dict[str, str] = field(default_factory=dict)
     fallback: str | None = None
+    # Post-level grades for the flagged catch-up experiment: the post makes a claim worth
+    # checking; the post corrects or revises an earlier post; the speak score per bot.
+    flag: bool = False
+    revises: bool = False
+    scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

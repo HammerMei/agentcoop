@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--scripted-bots", default="", help="comma-separated bots that follow the scenario script while the rest run live")
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")
+    parser.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
+                        help="override a scenario param, e.g. catch_up_order=roster (repeatable)")
     args = parser.parse_args(argv)
     if args.config_dir:
         os.environ["CLAUDE_CONFIG_DIR"] = str(Path(args.config_dir).expanduser())
@@ -90,13 +92,15 @@ def main(argv: list[str] | None = None) -> int:
         args.workdir = args.workdir or tempfile.mkdtemp(prefix="roomsim-")
 
     enforce = None if args.enforce is None else args.enforce == "on"
-    preview = load(args.scenario, enforce)
+    overrides = dict(p.split("=", 1) for p in args.param)
+    preview = load(args.scenario, enforce, params=overrides)
     runner = _runner(args, list(preview.sim.room.members.values()), preview.sim.room.name)
     recorder = Recorder(runner) if (args.record and runner is not None) else None
     if args.record and runner is None:
         recorder = Recorder(preview.sim.gateways[0].runner)
     scripted = frozenset(b for b in args.scripted_bots.split(",") if b)
-    scenario = load(args.scenario, enforce, recorder or runner, scripted, _classifier(args, preview.sim.room.name))
+    scenario = load(args.scenario, enforce, recorder or runner, scripted, _classifier(args, preview.sim.room.name),
+                    params=overrides)
     sim = asyncio.run(run(scenario))
     print(report(sim, scenario.name, args.show_rules))
     if isinstance(runner, Replayer) and runner.unused():

@@ -78,15 +78,31 @@ class Scenario:
     script: ScenarioScript
 
 
-def _params(raw: dict | None, enforce: bool | None) -> Params:
-    known = {f.name for f in fields(Params)}
+def _params(raw: dict | None, enforce: bool | None, overrides: dict[str, str] | None = None) -> Params:
+    """The scenario's params, then ``overrides`` (``--param name=value``) parsed by the
+    field's default type."""
+    known = {f.name: f.default for f in fields(Params)}
     values = {k: v for k, v in (raw or {}).items() if k in known}
-    unknown = set(raw or {}) - known
+    for name, text in (overrides or {}).items():
+        if name not in known:
+            raise ValueError(f"unknown param: {name}")
+        values[name] = _parse_param(text, known[name])
+    unknown = set(raw or {}) - set(known)
     if unknown:
         raise ValueError(f"unknown params: {sorted(unknown)}")
     if enforce is not None:
         values["enforce"] = enforce
     return Params(**values)
+
+
+def _parse_param(text: str, default) -> object:
+    if isinstance(default, bool):
+        return text.lower() in ("1", "true", "yes", "on")
+    if isinstance(default, int):
+        return int(text)
+    if isinstance(default, float):
+        return float(text)
+    return text
 
 
 def _classifier(raw: dict | None, live: Classifier | None) -> Classifier:
@@ -96,21 +112,24 @@ def _classifier(raw: dict | None, live: Classifier | None) -> Classifier:
     if live is not None:
         failures = {int(k): int(v) for k, v in (raw.get("failures") or {}).items()}
         return InjectedFailures(live, failures, float(raw.get("latency", 0.5))) if failures else live
-    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())))
+    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())),
+                                  flag=bool(v.get("flag", False)), revises=bool(v.get("revises", False)),
+                                  scores={b: float(p) for b, p in (v.get("scores") or {}).items()})
                  for k, v in (raw.get("decisions") or {}).items()}
     return ScriptedClassifier(decisions=decisions, latency=float(raw.get("latency", 0.5)),
                               failures={int(k): int(v) for k, v in (raw.get("failures") or {}).items()})
 
 
 def load(path: str | Path, enforce: bool | None = None, runner: BotRunner | None = None,
-         scripted_bots: frozenset[str] = frozenset(), classifier: Classifier | None = None) -> Scenario:
+         scripted_bots: frozenset[str] = frozenset(), classifier: Classifier | None = None,
+         params: dict[str, str] | None = None) -> Scenario:
     data = yaml.safe_load(Path(path).read_text())
     members = [Member(m["username"], m["role"], m.get("display_name", ""), m.get("nickname", ""), m.get("profile", ""),
                       m.get("private_profile", ""))
                for m in data["members"]]
     room = Room(data.get("room", data["name"]), members, is_dm=bool(data.get("dm", False)))
     sim = Simulation(room)
-    params = _params(data.get("params"), enforce)
+    params = _params(data.get("params"), enforce, params)
     script = ScenarioScript({
         bot: [ScriptRule(**rule) for rule in rules] for bot, rules in (data.get("bots") or {}).items()
     })

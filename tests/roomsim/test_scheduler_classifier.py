@@ -385,8 +385,10 @@ async def test_the_report_summarises_classifier_attempts_and_latency():
 
 # ── Jev: probabilities, not text ───────────────────────────────────────────────
 
-def _jev_answers(**nouls):
+def _jev_answers(stakes=0.1, wrong=0.1, revises=0.1, **nouls):
     answers = {f"speak_{bot}": {"type": "noul", "noul": p} for bot, p in nouls.items()}
+    answers.update({"stakes": {"type": "noul", "noul": stakes}, "wrong": {"type": "noul", "noul": wrong},
+                    "revises": {"type": "noul", "noul": revises}})
     return json.dumps({"model": "jev-1.13.0", "answers": answers, "usage": {"input_tokens": 300, "output_tokens": 9},
                        "cost_usd": 0.0000126, "latency_ms": 140})
 
@@ -402,10 +404,12 @@ async def test_jev_asks_one_yes_no_question_per_offered_bot_and_adds_those_over_
     result = await classifier.classify(_request(addressed=("b",)))
     assert sent[0][0][:3] == ["jev", "eval", "-f"] and "model" not in sent[0][1]
     body = sent[0][1]
-    assert set(body["questions"]) == {"speak_a", "speak_b", "speak_c"}
-    assert all(q["type"] == "noul" and "answer the new post" in q["instructions"] for q in body["questions"].values())
+    assert set(body["questions"]) == {"speak_a", "speak_b", "speak_c", "stakes", "wrong", "revises"}
+    assert all(q["type"] == "noul" for q in body["questions"].values())
+    assert all("answer the new post" in body["questions"][f"speak_{b}"]["instructions"] for b in "abc")
     assert "Addressed bots: b" in body["state"] and "Answer with one JSON object" not in body["state"]
-    assert result.decision == Decision(add=("a",), remove=("b",), reasons={"a": "p(answer)=0.91", "b": "p(answer)=0.12"})
+    assert result.decision == Decision(add=("a",), remove=("b",), reasons={"a": "p(answer)=0.91", "b": "p(answer)=0.12"},
+                                       scores={"a": 0.91, "b": 0.12, "c": 0.55})
     assert result.latency == 0.2 and result.input_tokens == 300 and result.cost_usd == 0.0000126
 
 

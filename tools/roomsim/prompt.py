@@ -71,12 +71,18 @@ def render_hint(hint: Hint) -> str:
         lines.append(f"You are in backoff until t={hint.backoff_until:.0f}.")
     if hint.degraded:
         lines.append("You are degraded in this room after repeated invalid replies.")
+    if hint.flagged:
+        posts = ", ".join(f"#{seq}" for seq in hint.flagged)
+        lines.append(f"Flagged for checking in {hint.starting_thread}: post {posts} makes a claim that may be "
+                     "wrong or incomplete. If it has already been corrected, or you have nothing to add, reply done.")
     return "\n".join(lines)
 
 
 CLASSIFIER_CONTRACT = """Answer with one JSON object and nothing else:
 {"add": [{"username": "<unaddressed bot that should speak>", "reason": "..."}],
- "remove": [{"username": "<addressed bot that seems unnecessary>", "reason": "..."}]}
+ "remove": [{"username": "<addressed bot that seems unnecessary>", "reason": "..."}],
+ "flag": <true when the post states a fact, diagnosis or plan that looks wrong, or whose wrongness would mislead the team>,
+ "revises": <true when the post corrects or revises a claim made earlier in the thread>}
 Use empty lists when nobody should be added or removed. Name only bots from the list
 above. Choose the smallest useful set: add a bot when the post needs it, not because it
 could answer. An addressed bot answers anyway; "remove" only records your doubt."""
