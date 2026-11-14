@@ -1173,3 +1173,53 @@ ten lines. 181 tests. No `@codex review` re-requested (owner's rule).
 **Cost:** one rater run (~13 minutes, ~155k tokens), ~50 minutes of author time
 including the fixes and the reruns that confirmed the experiment's numbers did
 not move.
+
+## 2026-11-14 — PR #204 round 1 (Codex on `fc70661`, `docs/design/multi-agent-enhancement.md`)
+
+Six inline findings on the flagged catch-up rewrite of the design document.
+Documentation only; the simulator merged in #203 is the reference for what the
+prose meant. The security review Codex triggers beside the code review failed
+again on the paying account's credits.
+
+**chain-check** (working tree): 6 findings over 1 round, no chain.
+
+**Depth rule, set by the owner before the review:** one round, to make sure
+nothing was overlooked. The `cheap` gate for a design document was read as:
+≤10 lines, no new named concept, mechanism or section.
+
+**Blind second rater** (general-purpose agent; findings, method, constants,
+the file at HEAD and the simulator as reference; no verdicts of the author's,
+and told not to read this log). **Control:** `#181 r9 F1` (settled: FILE held)
+sent as a seventh finding against its own commit. The control was
+distinguishable in kind (code among prose) and the rater disclosed that one
+`git grep` over `docs/` printed one row of this log — a *sibling* finding on
+#181, not the control's row. The rater's verdict on the control was FIX, the
+direction the settled row calls right (a rater who drops it is wrong), so the
+control passed, weakly: it does not test the bias that matters for a batch of
+prose findings. The author's verdicts were written to a scratch file before the
+rater reported.
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | an unflagged post in an idle room stays behind a bot's cursor; the invariant "every bot eventually sees everything" over-promises | yes as a description; the consequence is the increment's deliberate trade (the live `all` run: same corrections, 10 posts for 3) | **FIX** the wording (delivery on the next turn, none started only to deliver); the safety net is a decision for the owner | FIX the wording; decline the mechanism on scope, record it in §9 with a reversal observation | — (the rater's §9 entry adopted; the owner still decides) |
+| F2 | the document gives the flag and its queue no lifetime; an implementer tying them to the decision TTL silently loses looks | yes | **FIX** (a bullet in §5.5, a restart paragraph in §5.7) | FIX | — |
+| F3 | "the next at the previous turn's end" and "keeps its place" are ambiguous; one reading stalls the queue on a failing bot | yes; the same class as #203 F1/F2, now in prose | **FIX** (normal end; a held or failed head moves to the back, as the simulator does) | FIX, same shape; not the finding's (advance only on completion would stall the queue) | — |
+| F4 | `catch_up_age_seconds = 0` reads as "disabled" under the preamble, "at once" under the algorithm | yes; silent either way | **FIX** (one phrase) | FIX | — |
+| F5 | the author of a flagged post is queued for it and can never leave the head | yes; the simulator excludes the author | **FIX** (three words, two places) | FIX | — |
+| F6 | the flag makes the classifier judge content, against goal 3, the no-model invariant and the "does not decide who is correct" non-goal, and the document does not reconcile them | yes as a rationale defect; goal 3 and the non-goal still hold (a flag is a look, not a ruling) | **FIX** wording in §2; no redesign, the owner wants the classifier to grade correctness | FIX wording in §2; the non-semantic trigger is the increment inverted, DROP | — |
+
+Verdicts agree on all six. Control passed, with the caveats above.
+
+Exit obligations: six FIX. One open decision recorded in §9 (whether an
+unselected, unflagged post needs a safety net; §8.1's unselected-to-later-reply
+rate decides).
+
+**Badges vs consequence:** of Codex's P1s, F5 is the one a literal
+implementation turns into a stalled queue; F1 is a promise the document no
+longer kept. F3 carried the consequence among the P2s (a persistently failing
+bot blocking every later look).
+
+**Adoption:** 6 FIX of 6; every fix a wording change under ten lines.
+
+**Cost:** one rater run (~14 minutes, ~146k tokens), ~35 minutes of author time
+including the fixes.

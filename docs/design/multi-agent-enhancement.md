@@ -83,7 +83,8 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
   without getting a turn for that post, and a delivered thread may be closed
   to replies.
 - **Every bot eventually sees everything.** A bot has one cursor per room, not
-  per thread.
+  per thread. Delivery happens on the bot's next turn, whatever starts it; no
+  turn is started only to deliver.
 - **One bot runs at most one turn per room at a time.** No queue of waiting
   turns is persisted; eligibility is reconstructed from backlog and state.
 - **The platform is the shared record.** Gateways do not exchange private
@@ -91,7 +92,8 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
 - **The gateway enforces mechanics, not collaboration policy.** Meetings,
   handoffs, deadlines, and brainstorms live in agent skills. Delivery,
   eligibility, authority, and reply validation are deterministic gateway
-  rules, with no model involved, so a bot cannot bypass them.
+  rules, so a bot cannot bypass them. The classifier only proposes who speaks
+  or looks; every proposal passes the same rules.
 
 ### 2.3 Non-goals
 
@@ -99,7 +101,9 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
   notices about who did not answer.
 - Hidden information or anonymous voting. A room is the visibility boundary.
 - Semantic convergence. The gateway slows loops; it does not decide who is
-  correct or when a discussion is finished.
+  correct or when a discussion is finished. A flag marks a post as worth a
+  second look; the bots decide whether it was wrong, and the gateway acts on
+  the flag only by starting one turn per queued bot.
 - Fair allocation of a thread's speaking allowance.
 - Ordering bots selected by the same post. They start in parallel.
 
@@ -146,7 +150,7 @@ A count or duration of `0` disables that limit.
 | `rate_limit_seconds` | Window in which an agent post remains recent. |
 | `cooldown_seconds` | Minimum interval between one bot's posts in a thread. |
 | `sweep_interval_seconds` | Interval between periodic sweeps for one bot in one room. |
-| `catch_up_age_seconds` | Delay between a flagged post and the first catch-up turn for it, so addressed and selected bots answer first. |
+| `catch_up_age_seconds` | Delay between a flagged post and the first catch-up turn for it, so addressed and selected bots answer first. `0` starts the queue at once. |
 | `control_ttl_days` | Thread inactivity after which settings expire. |
 | `classifier_posts` | Maximum recent thread posts shown to the classifier. |
 | `classifier_timeout_seconds` | Timeout for one classifier call. |
@@ -467,7 +471,9 @@ gateway retains only existing facts:
 
 - the trigger post remains after the cursor;
 - a classifier choice remains in the short-lived decision cache;
-- a delivered closed thread remains in the unfinished set.
+- a delivered closed thread remains in the unfinished set;
+- a flag and its queue remain in memory while a hosted bot's cursor is before
+  the flagged post; the decision TTL does not apply to them.
 
 When a turn ends or the bot becomes free, request a sweep. Becoming free does
 not start a held turn directly. The later turn sees everything posted meanwhile
@@ -537,14 +543,20 @@ only while it has not expired and its source post remains in the backlog.
 
 Catch-up exists for one case: a bot post the classifier flagged (`WHO_SPEAKS`)
 that a bot with knowledge the classifier cannot see might correct. For each
-flagged post the gateway queues every bot it hosts that the post did not
+flagged post the gateway queues every other bot it hosts that the post did not
 address, in roster order. `catch_up_age_seconds` after the post the queue
-starts, one bot at a time per gateway, the next at the previous turn's end, so
-each bot sees what the earlier ones wrote and returns `done` when the
+starts, one bot at a time per gateway, the next at the previous turn's normal
+end, so each bot sees what the earlier ones wrote and returns `done` when the
 correction has been made. A bot leaves the queue without a turn when another
-turn delivers the post to it, or when it is muted or degraded in the thread; a
-bot that is busy or in backoff keeps its place and runs when it is free. The
-queue ends when it is empty.
+turn delivers the post to it, or when it is muted or degraded in the thread. A
+head bot that is busy, in backoff, or in cooldown, or whose turn fails, moves
+to the back of the queue and the next bot starts; it gets its look when it is
+free. The queue ends when it is empty.
+
+A restart drops the queues. Replayed posts are graded again and rebuild them
+for the bots whose cursor is still before the post; a flagged post outside the
+replay window gets no catch-up look and still reaches every bot through the
+cursor.
 
 A thread with no flagged post gets no catch-up turn: its posts reach every bot
 on its next turn through the cursor. Each gateway runs its own queue, so two
@@ -1116,11 +1128,13 @@ The simulator gets these tests first; the gateway reuses them.
   after expiry, only a flag on that post can start it, and the expiry is
   counted in status.
 - A thread without a flagged post gets no catch-up turn. A flagged bot post
-  queues every unaddressed hosted bot in roster order, one turn at a time, the
-  next starting at the previous turn's end, `catch_up_age_seconds` after the
-  post.
+  queues every unaddressed hosted bot other than its author in roster order,
+  one turn at a time, the next starting at the previous turn's normal end,
+  `catch_up_age_seconds` after the post.
 - A bot leaves the queue when another turn delivers the post or when it is
-  muted or degraded; a busy bot or one in backoff keeps its place.
+  muted or degraded; a head that is busy, in backoff, or in cooldown, or whose
+  turn fails, moves to the back and the next bot starts.
+- A restart rebuilds the queues from replayed posts only.
 - A revising post is not flagged, a human post is not flagged, and a fallback
   decision flags nothing.
 - `HINT` names the flagged posts on a catch-up turn.
@@ -1167,6 +1181,8 @@ Decide these from simulator and lab measurements:
 - Whether orchestrator collection turns should bypass classification so one
   turn can collect a full round.
 - `catch_up_age_seconds` and `classifier_flag_threshold`.
+- Whether a post that selects nobody and is not flagged needs a safety net.
+  Section 8.1's unselected-to-later-reply rate decides.
 - Whether the catch-up queue for one post should span gateways in a fixed
   order; section 5.7 runs each gateway's queue on its own.
 - Envelope encoding: a fenced JSON block, the entire response as JSON, or
