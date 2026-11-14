@@ -12,14 +12,16 @@ call sees only its request; its wall-clock duration becomes its latency.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time as _time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from .envelope import ParseError, load_json
 from .model import Decision, Fallback, Member, Post
-from .prompt import render_classifier_prompt
+from .prompt import render_classifier_prompt, render_classifier_state
 
 if TYPE_CHECKING:
     from gateway.agents import AgentBackend
@@ -150,6 +152,82 @@ class BackendClassifier:
 
     def _elapsed(self, started: float) -> float:
         return max(self._clock() - started, 0.0)
+
+
+class JevClassifier:
+    """A classifier on TypeSafe's Jev through the ``jev`` CLI: one ``jev eval`` per post,
+    the request as the state and one yes/no question per offered bot ("should this bot
+    answer?"). Jev returns probabilities, not text, so the set of speakers is the bots
+    whose probability reaches ``threshold``: an unaddressed one is added, an addressed
+    one below ``1 - threshold`` is a remove. The probability is the reason."""
+
+    def __init__(
+        self,
+        room: str,
+        command: str = "jev",
+        model: str | None = None,
+        threshold: float = 0.5,
+        clock: Callable[[], float] = _time.monotonic,
+        run: Callable[[list[str], str], Awaitable[str]] | None = None,
+    ) -> None:
+        self.room = room
+        self.command = command
+        self.model = model
+        self.threshold = threshold
+        self._clock = clock
+        self._run = run or _run_cli
+        self.requests: list[dict] = []
+
+    def request_body(self, request: ClassifierRequest) -> dict:
+        body = {
+            "state": render_classifier_state(request, self.room),
+            "questions": {
+                f"speak_{m.username}": {
+                    "type": "noul",
+                    "instructions": (f"Should bot {m.username} ({m.profile or 'no profile'}) answer the new post? "
+                                     "Yes if the post needs this bot's role; no if it could answer but is not "
+                                     "needed, or if the post is not for it."),
+                }
+                for m in request.agents if m.username != request.post.author
+            },
+        }
+        if self.model:
+            body["model"] = self.model
+        return body
+
+    async def classify(self, request: ClassifierRequest) -> ClassifierResult:
+        started = self._clock()
+        body = self.request_body(request)
+        self.requests.append(body)
+        argv = [self.command, "eval", "-f", "-", "-o", "json"]
+        try:
+            stdout = await self._run(argv, json.dumps(body))
+            data = json.loads(stdout)
+            answers = data["answers"]
+            probabilities = {name[len("speak_"):]: float(answers[name]["noul"]) for name in body["questions"]}
+        except Exception as exc:  # the CLI failed, or its output is not the envelope
+            return ClassifierResult(error=f"{type(exc).__name__}: {exc}", latency=max(self._clock() - started, 0.0))
+        usage = data.get("usage") or {}
+        add = tuple(b for b, p in probabilities.items() if b not in request.addressed and p >= self.threshold)
+        remove = tuple(b for b, p in probabilities.items() if b in request.addressed and p <= 1 - self.threshold)
+        reasons = {b: f"p(answer)={probabilities[b]:.2f}" for b in add + remove}
+        return ClassifierResult(
+            Decision(add=add, remove=remove, reasons=reasons),
+            latency=max(self._clock() - started, 0.0),
+            input_tokens=int(usage.get("input_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or 0),
+            cost_usd=float(data.get("cost_usd") or 0.0),
+        )
+
+
+async def _run_cli(argv: list[str], stdin: str) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    out, err = await proc.communicate(stdin.encode())
+    if proc.returncode != 0:
+        raise RuntimeError(f"{argv[0]} exited {proc.returncode}: {err.decode().strip()[:300]}")
+    return out.decode()
 
 
 def parse_decision(text: str, request: ClassifierRequest) -> Decision:

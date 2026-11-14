@@ -82,7 +82,7 @@ above. Choose the smallest useful set: add a bot when the post needs it, not bec
 could answer. An addressed bot answers anyway; "remove" only records your doubt."""
 
 
-def render_classifier_prompt(request: ClassifierRequest, room: str) -> str:
+def render_classifier_state(request: ClassifierRequest, room: str) -> str:
     """What the speaker classifier sees (section 5.1): the post with its addressed bots,
     recent thread history newest first, and the agent list with profiles. Nothing else."""
     agents = "\n".join(
@@ -100,9 +100,13 @@ def render_classifier_prompt(request: ClassifierRequest, room: str) -> str:
         f"Bots in the room:\n{agents}\n\n"
         f"New post:\n[{post.thread}] #{post.seq} {post.author} ({post.kind}): {post.text}\n"
         f"Addressed bots: {addressed}\n\n"
-        f"Recent posts in this thread, newest first{omitted}:\n{history}\n\n"
-        f"{CLASSIFIER_CONTRACT}"
+        f"Recent posts in this thread, newest first{omitted}:\n{history}"
     )
+
+
+def render_classifier_prompt(request: ClassifierRequest, room: str) -> str:
+    """The state plus the answer contract, for a classifier that writes text."""
+    return f"{render_classifier_state(request, room)}\n\n{CLASSIFIER_CONTRACT}"
 
 
 def render_prompt(turn: TurnInput) -> str:

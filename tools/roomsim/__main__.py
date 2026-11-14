@@ -12,7 +12,9 @@ instructions, hooks, memory) unless ``--config-dir`` points ``CLAUDE_CONFIG_DIR`
 directory set up for the lab; the CLI must be logged in there once, interactively.
 
 ``--classifier claude`` asks a model who should speak (section 5.1), one fresh session
-per post, instead of the scenario's scripted decisions; the scenario's injected failures
+per post, instead of the scenario's scripted decisions; ``--classifier jev`` asks
+TypeSafe's Jev through the ``jev`` CLI, one yes/no question per bot, and adds the bots
+whose probability reaches ``--classifier-threshold``. The scenario's injected failures
 still apply. A recording holds bot turns only, so a run with a live classifier does not
 replay: the scripted decisions change the turns.
 """
@@ -28,7 +30,7 @@ import tempfile
 from pathlib import Path
 
 from .bots import BackendBot, Recorder, Replayer
-from .classifier import BackendClassifier
+from .classifier import BackendClassifier, JevClassifier
 from .report import dump_json, report
 from .scenario import load, run
 
@@ -54,7 +56,9 @@ def _runner(args, members, room_name):
 def _classifier(args, room_name):
     if args.classifier == "scripted":
         return None
-    return BackendClassifier(_backend(args, args.classifier_model), args.workdir, args.timeout, room_name)
+    if args.classifier == "jev":
+        return JevClassifier(room_name, args.jev_command, args.classifier_model, args.classifier_threshold)
+    return BackendClassifier(_backend(args, args.classifier_model or "haiku"), args.workdir, args.timeout, room_name)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,9 +72,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workdir", help="working directory for live agent sessions")
     parser.add_argument("--claude-command", default="claude")
     parser.add_argument("--claude-model", default="sonnet", help="model for the bot sessions (sonnet, haiku, ...)")
-    parser.add_argument("--classifier", choices=["scripted", "claude"], default="scripted",
-                        help="who decides which unaddressed bots speak: the scenario's script or a model")
-    parser.add_argument("--classifier-model", default="haiku", help="model for the classifier calls")
+    parser.add_argument("--classifier", choices=["scripted", "claude", "jev"], default="scripted",
+                        help="who decides which unaddressed bots speak: the scenario's script, a Claude model, or Jev")
+    parser.add_argument("--classifier-model", default=None,
+                        help="model for the classifier calls (claude: haiku by default; jev: the profile's default)")
+    parser.add_argument("--classifier-threshold", type=float, default=0.5,
+                        help="jev: a bot speaks when its probability reaches this")
+    parser.add_argument("--jev-command", default="jev")
     parser.add_argument("--config-dir", help="CLAUDE_CONFIG_DIR for the bot sessions (a lab login, not the operator's)")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--scripted-bots", default="", help="comma-separated bots that follow the scenario script while the rest run live")

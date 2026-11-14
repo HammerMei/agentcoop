@@ -3,6 +3,7 @@ WHO_SPEAKS with its cache, failures and fallbacks."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -14,6 +15,7 @@ from tools.roomsim.classifier import (
     BackendClassifier,
     ClassifierRequest,
     InjectedFailures,
+    JevClassifier,
     ScriptedClassifier,
     parse_decision,
 )
@@ -377,3 +379,46 @@ async def test_the_report_summarises_classifier_attempts_and_latency():
     await sb.run(5)
     line = classifier_summary(sb.sim)
     assert "1 calls, 1 retries" in line and "2 attempts, 1 failed, mean latency 2.0s" in line
+
+
+# ── Jev: probabilities, not text ───────────────────────────────────────────────
+
+def _jev_answers(**nouls):
+    answers = {f"speak_{bot}": {"type": "noul", "noul": p} for bot, p in nouls.items()}
+    return json.dumps({"model": "jev-1.13.0", "answers": answers, "usage": {"input_tokens": 300, "output_tokens": 9},
+                       "cost_usd": 0.0000126, "latency_ms": 140})
+
+
+async def test_jev_asks_one_yes_no_question_per_offered_bot_and_adds_those_over_the_threshold():
+    sent = []
+
+    async def run(argv, stdin):
+        sent.append((argv, json.loads(stdin)))
+        return _jev_answers(a=0.91, b=0.12, c=0.55)
+
+    classifier = JevClassifier("team", run=run, threshold=0.6, clock=_Clock(0.2))
+    result = await classifier.classify(_request(addressed=("b",)))
+    assert sent[0][0][:3] == ["jev", "eval", "-f"] and "model" not in sent[0][1]
+    body = sent[0][1]
+    assert set(body["questions"]) == {"speak_a", "speak_b", "speak_c"}
+    assert all(q["type"] == "noul" and "answer the new post" in q["instructions"] for q in body["questions"].values())
+    assert "Addressed bots: b" in body["state"] and "Answer with one JSON object" not in body["state"]
+    assert result.decision == Decision(add=("a",), remove=("b",), reasons={"a": "p(answer)=0.91", "b": "p(answer)=0.12"})
+    assert result.latency == 0.2 and result.input_tokens == 300 and result.cost_usd == 0.0000126
+
+
+async def test_jev_passes_the_model_through_and_a_failed_cli_is_a_failed_result():
+    async def run(argv, stdin):
+        assert json.loads(stdin)["model"] == "jev-1.13.0"
+        raise RuntimeError("jev exited 3: no API key is configured")
+
+    result = await JevClassifier("team", model="jev-1.13.0", run=run).classify(_request())
+    assert result.failed and "no API key" in result.error
+
+
+async def test_jev_output_without_the_answers_is_a_failed_result():
+    async def run(argv, stdin):
+        return '{"answers": {"speak_a": {"type": "noul", "noul": 0.9}}}'  # b and c missing
+
+    result = await JevClassifier("team", run=run).classify(_request())
+    assert result.failed and "KeyError" in result.error
