@@ -131,7 +131,7 @@ async def test_limit_zero_counts_the_streak_but_degrades_nobody():
 async def test_failure_notice_identity():
     """Starts no turn, no classifier call, counts for catch-up, not for the rate limit,
     not delivered to its own bot."""
-    sb = Sandbox(params=replace(FAST, catch_up_post_threshold=1, catch_up_age_seconds=0),
+    sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10),
                  script=Script().on(fail(), bot="a", once=True))
     await sb.human("@a go")
     await sb.run(1)
@@ -200,8 +200,7 @@ async def test_settings_persist_expire_and_reject_replayed_older_controls():
 
 
 async def test_ttl_expiry_keeps_unfinished_state_and_archive_removes_both():
-    sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24, catch_up_post_threshold=1,
-                                catch_up_age_seconds=0))
+    sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24, catch_up_idle_seconds=10))
     await sb.human("mute: @a")
     await sb.human("question for the room", "main")  # a is muted: the sweeper skips it here
     await sb.human("@a hello over here", "t2")  # ...so a turn elsewhere delivers main as closed

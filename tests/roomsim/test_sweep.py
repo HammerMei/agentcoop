@@ -94,7 +94,7 @@ async def test_becoming_free_starts_nothing_until_the_requested_sweep_runs():
 
 
 async def test_a_sweep_fixes_its_candidate_list_once_and_its_high_water_mark_excludes_later_posts():
-    sb = Sandbox(params=replace(FAST, catch_up_post_threshold=1, catch_up_age_seconds=0))
+    sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10))
     await sb.human("first")
     await sb.run(10)  # periodic sweep at 10: catch-up turns for a, b, c with hwm 1
     sweep = sb.trace.last("sweep", bot="a", reason="periodic")
@@ -135,7 +135,7 @@ async def test_rate_limited_bot_mention_starts_on_a_later_sweep_unless_another_t
 
 async def test_cached_classifier_choice_starts_a_held_bot_later_and_expires_into_catch_up():
     params = replace(FAST, rate_limit_posts=1, rate_limit_seconds=15, classifier_decision_ttl_seconds=12,
-                     sweep_interval_seconds=10, catch_up_post_threshold=10, catch_up_age_seconds=100)
+                     sweep_interval_seconds=10, catch_up_idle_seconds=100)
     classifier = ScriptedClassifier(decisions={1: Decision(add=("b",))}, latency=2.0)
     sb = Sandbox(params=params, classifier=classifier, script=Script().on(reply(["H"], "a answers"), bot="a"))
     await sb.human("@a go")  # a answers at 1; the decision adding b arrives at 2: held by the limit
@@ -147,12 +147,12 @@ async def test_cached_classifier_choice_starts_a_held_bot_later_and_expires_into
     assert sb.trace.count("classifier_expired", bot="b", post=1) == 1
     assert sb.trace.count("turn_start", bot="b", source="picked") == 0
     assert sb.gw.status()["bots"]["b"]["expired_decisions"] == 1
-    await sb.run(100)  # ordinary catch-up by age at the sweep after 100s
+    await sb.run(100)  # periodic catch-up at the sweep after b has been idle 100s
     assert sb.trace.last("turn_start", bot="b").source == "catch-up"
 
 
 async def test_hint_states_the_turn_source_and_the_three_groups():
-    sb = Sandbox(params=replace(FAST, catch_up_post_threshold=1, catch_up_age_seconds=0))
+    sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10))
     await sb.human("mute: @a", "closed")
     await sb.human("in closed", "closed")
     await sb.human("in optional", "optional")
@@ -169,7 +169,7 @@ async def test_hint_states_the_turn_source_and_the_three_groups():
 
 
 async def test_one_room_wide_delivery_satisfies_several_qualifying_threads():
-    sb = Sandbox(params=replace(FAST, catch_up_post_threshold=1, catch_up_age_seconds=0))
+    sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10))
     for thread in ("t1", "t2", "t3"):
         await sb.human("news", thread)
     await sb.run(10)

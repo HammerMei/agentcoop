@@ -1,6 +1,6 @@
 # Spec section 6.2 with an uninvited voice: nobody is muted, chair collects one idea each,
-# and d has an opinion on everything. Catch-up gives d a turn once three posts pile up in
-# main (params: catch_up_post_threshold 3). What this measures: does d speak without
+# and d has an opinion on everything. Catch-up gives d a turn once it has been idle for
+# catch_up_idle_seconds with posts waiting. What this measures: does d speak without
 # being asked, and does the orchestrator reach for mute or limit when it does.
 name: brainstorm_kibitz
 room: team

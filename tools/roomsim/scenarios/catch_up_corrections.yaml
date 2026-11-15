@@ -1,6 +1,7 @@
 # Catch-up as the correction path: a answers H with two wrong claims, one wrong for lack of
 # context (only m remembers the decision), one unverified (only v reads the code). Their
-# public profiles do not say so, so the classifier cannot pick them; only catch-up can.
+# public profiles do not say so, so the classifier cannot pick them; only the periodic
+# catch-up (catch_up_idle_seconds) can, and it wakes x and y as well.
 # A live run needs the code v reads: `--workdir tools/roomsim/scenarios/catch_up_corrections`
 # (db/init.py, db/migrations.py, api/reports.py), with `--scripted-bots a,b` so a makes the
 # claims and b answers as scripted.
@@ -17,7 +18,7 @@ members:
   - {username: v, role: bot, display_name: Vic, profile: "technical writer; owns the docs site and the changelog",
      private_profile: "Before you accept or repeat a claim about what the code does, read the actual implementation in your working directory and answer from what it does."}
 params: {rate_limit_posts: 12, rate_limit_words: 1200, rate_limit_seconds: 300, sweep_interval_seconds: 30,
-         catch_up_post_threshold: 2, catch_up_age_seconds: 60, classifier_timeout_seconds: 60}
+         catch_up_idle_seconds: 60, classifier_timeout_seconds: 60}
 events:
   - {at: 0, human: H, text: "@a /reports has been timing out since the 10:40 deploy and nginx is logging upstream timeouts. what happened, and is there a quick fix?"}
 bots:
@@ -29,11 +30,9 @@ bots:
     - {source: catch-up, when_from: a, once: true, reply: {replies: [{to: [H, a], text: "correction on the cause: the 10:40 deploy did touch nginx. last Tuesday we raised the upstream timeout to 60s because /reports takes 20-40s under load; today's deploy reverted it to 10s. pagination is not the cause. restore the 60s timeout."}]}}
   v:
     - {source: catch-up, when_from: a, once: true, reply: {replies: [{to: [H, a], text: "do not drop the reports table. I read db/init.py: nothing recreates schemas on boot; migrations run only when MIGRATE=1 is set. dropping the table loses the data and the API fails on the missing table."}]}}
-# Scripted grades are Jev's on this text (2026-11-14): a's post flagged (stakes 0.98,
-# wrong 0.79), speak scores by role, both corrections revise the thread.
+# Scripted decision as Jev's on this text (2026-11-14): nobody added for a's post (b is
+# addressed; x, y, m, v score 0.05-0.17 on "anything to add or revise").
 classifier:
   decisions:
-    2: {add: [], flag: true, scores: {b: 0.89, x: 0.05, y: 0.17, m: 0.04, v: 0.05}}
-    4: {revises: true}
-    5: {revises: true}
+    2: {add: []}
 horizon: 600

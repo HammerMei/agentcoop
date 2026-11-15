@@ -11,7 +11,7 @@ members:
   - {username: b, role: bot, display_name: Bob, profile: "frontend engineer; owns the web app and its onboarding screens"}
   - {username: c, role: bot, display_name: Cara, profile: "product manager; owns pricing, roadmap and customer conversations"}
 params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
-         catch_up_post_threshold: 2, catch_up_age_seconds: 60, classifier_timeout_seconds: 60}
+         catch_up_idle_seconds: 60, classifier_timeout_seconds: 60}
 events:
   - {at: 0, human: H, text: "morning all. anyone know why the staging deploy took twenty minutes this morning? it is usually five"}  # expected: a
   - {at: 90, human: H, text: "unrelated: the new onboarding screen looks great, the progress bar is a nice touch"}  # expected: b, or nobody

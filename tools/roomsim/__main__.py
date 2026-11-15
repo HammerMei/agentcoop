@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scripted-bots", default="", help="comma-separated bots that follow the scenario script while the rest run live")
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")
     parser.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
-                        help="override a scenario param, e.g. catch_up_order=roster (repeatable)")
+                        help="override a scenario param, e.g. catch_up_idle_seconds=60 (repeatable)")
     args = parser.parse_args(argv)
     if args.config_dir:
         os.environ["CLAUDE_CONFIG_DIR"] = str(Path(args.config_dir).expanduser())

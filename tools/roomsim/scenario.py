@@ -114,9 +114,7 @@ def _classifier(raw: dict | None, live: Classifier | None) -> Classifier:
     if live is not None:
         failures = {int(k): int(v) for k, v in (raw.get("failures") or {}).items()}
         return InjectedFailures(live, failures, float(raw.get("latency", 0.5))) if failures else live
-    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())),
-                                  flag=bool(v.get("flag", False)), revises=bool(v.get("revises", False)),
-                                  scores={b: float(p) for b, p in (v.get("scores") or {}).items()})
+    decisions = {int(k): Decision(add=tuple(v.get("add", ())), remove=tuple(v.get("remove", ())))
                  for k, v in (raw.get("decisions") or {}).items()}
     return ScriptedClassifier(decisions=decisions, latency=float(raw.get("latency", 0.5)),
                               failures={int(k): int(v) for k, v in (raw.get("failures") or {}).items()})
