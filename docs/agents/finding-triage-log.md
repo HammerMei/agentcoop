@@ -1234,3 +1234,60 @@ asked whether the flagged increment itself was the simplest design that met
 the goal, and the owner's "are we making this too complex" was the question
 that changed the answer. Pattern for the ledger: a scope gate protects an
 increment, it does not vouch for it.
+
+## 2026-11-15 — PR #206 round 1 (Codex on `5ba8c90`, `tools/roomsim/`)
+
+Three inline findings on the periodic catch-up that replaced the flagged queue.
+The security review Codex triggers beside the code review failed again on the
+paying account's credits.
+
+**chain-check** (working tree): 3 findings over 1 round, no chain.
+
+**Blind second rater** (general-purpose agent; findings, method, constants,
+the checkout at HEAD with the simulator runnable; no verdicts of the author's,
+told not to read this log). **Control:** `#181 r9 F1` (settled: FILE held) sent
+as a fourth finding against its own commit. **Compromised again, the same way as
+on #204:** the rater's `git grep` over `docs/` at the old commit printed this
+log's rows for #181, including the control's own row, before it scored. It
+disclosed this and its control verdict (FIX, not DROP) does not count. The
+author's verdicts were written to a scratch file before the rater reported.
+Rule for the next round: tell the rater to exclude `docs/agents/` from every
+search, not only from reading.
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | `brainstorm_kibitz` and `status_meeting` omit `catch_up_idle_seconds`; the 1800 default exceeds their horizons, so d's `source: catch-up` rules never run and the reports look normal | yes, both run; silent | **FIX** (idle override in both scenarios) | FIX; idle 15 (= the sweep interval; 10 lets c answer before d asks), and `status_meeting`'s header still described the deleted count trigger | — (the rater's value and the header taken) |
+| F2 | `debugging`: idle 120 lands on the t=120 human post; the catch-up turn delivers it before its decision and c's pick is dropped, so c never answers | yes, ran it; silent | **FIX** (idle 90 in the scenario, comment on the event boundary) | FIX; **wider:** `support_triage` regresses the same way (6 posts → 4), and 90 does not cover it: 150 is the only value post-for-post identical to main on both | the rater ran the sweep of all eleven scenarios against main; the author ran only the one Codex named (checkable: the four scenarios now match main post for post) |
+| F3 | the design document on main still names `catch_up_post_threshold` and count/age eligibility | yes on main; loud (`unknown param`) | not this PR's: the document change is #204 | FILE, already tracked as #204; merge #204 first | — |
+
+Verdicts agree on all three, with F2's extent corrected by the rater.
+**No valid control; agreement in this round is not evidence of independence.**
+
+Exit obligations: F1 and F2 FIX (`catch_up_idle_seconds` 15 / 15 / 150 / 150 in
+the four scenarios, with the reason in each file; all four match main's run post
+for post); F3 tracked in #204.
+
+Two items the rater raised beyond the findings, for the owner, not fixed here:
+
+- **Design:** a sweep that starts a catch-up turn while a post's classification
+  is pending delivers the post and the pick for it is then dropped (#204 §5.7:
+  a choice is usable only while its post is in the backlog). The window is the
+  classifier's latency against the sweep interval, so in production this is a
+  per-post probability, not a scenario artefact; the consequence is the hint
+  (catch-up instead of picked), not silence. Candidate rule: a thread whose
+  newest post is still being classified is not due for catch-up. Filed against
+  #204 for the owner; decay 2027-11-15; reversal observation: a live trace with
+  `turn_start source=catch-up` at a sweep tick followed by `turn_held
+  gate=one_turn source=picked` for the same bot and post.
+- **Pattern (two findings of one kind):** a scenario whose scripted `once:`
+  rule never fires reports nothing. A report line counting unconsumed rules
+  would have caught all four regressions. New concept; a candidate for the
+  simulator's next increment.
+
+**Badges vs consequence:** both P1s are silent measurement losses in scenario
+files, not gateway defects; for a simulator whose job is measurement the label
+is fair. F3 is a sequencing note.
+
+**Adoption:** 2 FIX of 3, F3 tracked.
+
+**Cost:** one rater run (~15 minutes, ~176k tokens), ~30 minutes of author time.

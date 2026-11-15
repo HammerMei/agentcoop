@@ -10,7 +10,9 @@ members:
   - {username: billing, role: bot, display_name: Billing, profile: "billing specialist; refunds, invoices and duplicate charges. answers when support brings them in"}
   - {username: infra, role: bot, display_name: Infra, profile: "infrastructure specialist; login, outages and account lockouts. answers when support brings them in"}
 params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
-         catch_up_idle_seconds: 120, classifier_timeout_seconds: 60}
+         catch_up_idle_seconds: 150, classifier_timeout_seconds: 60}
+# catch_up_idle_seconds 150 keeps the catch-up sweep off the human event at 120 (see
+# debugging.yaml); the bots' backlog is empty from t≈3.5, so the timer runs from the start.
 events:
   - {at: 0, human: U, text: "hi, I was charged twice for November. invoice numbers 1042 and 1043, same amount"}  # expected: support
   - {at: 150, human: U, text: "thanks. separately, I have not been able to log in since yesterday evening; password reset email never arrives"}  # expected: support
