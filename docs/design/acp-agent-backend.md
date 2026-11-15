@@ -773,14 +773,18 @@ there: `tool: Task`, `params: general|explore`. The gateway ships no such
 rule.
 
 A `Task` rule in `guest_allowed_tools` means more on this profile than on
-`type: claude`. On Claude every tool the subagent calls still passes the
-hook. Here the rule grants the named entry's own ruleset, and the gateway
-cannot re-apply the force-ask behind it: the loader pushes an entry's
-`permissions` after every layer the gateway writes. The gateway therefore
-does two things. The scope gap below names this as part of R4's gap
-statement. Config loading warns on a `guest_allowed_tools`
-rule that matches `Task` on a `type: acp` agent, with the entry names the
-rule's `params` admits when it has any, the same way it warns on a
+`type: claude`. ADR-0002 states that Claude sends every tool through the
+hook. Whether that covers a Claude subagent's own calls is `[unverified]`
+here, like the rest of the Claude profile (§5). Here the rule grants the
+named entry's own ruleset. The gateway cannot re-gate that entry. A later
+config layer's `agents.<name>.permissions` would land after the entry's,
+and `OPENCODE_CONFIG_CONTENT` is such a layer, but the gateway writes it
+at spawn and learns the entry names only from the catalog after attach.
+The layer it can rewrite live, P5's `OPENCODE_CONFIG`, loads before the
+project config. The gateway therefore does two things. The scope gap
+below names this as part of R4's gap statement. Config loading warns on a
+`guest_allowed_tools` rule that matches `Task` on a `type: acp` agent,
+quoting the rule's `params`, the same way it warns on a
 `tool: external_directory` rule (P6). An operator who scopes the rule to
 `general|explore` sees the warning once and keeps the rule.
 
