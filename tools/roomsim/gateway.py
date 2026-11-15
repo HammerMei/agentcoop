@@ -614,7 +614,8 @@ class SimGateway:
     def _due_threads(self, bot: str) -> list[str]:
         """Periodic catch-up (5.7): once the bot has ended no turn for
         ``catch_up_idle_seconds`` (``0`` disables it), every thread holding undelivered
-        posts is due, newest first; a closed or cooling thread is not."""
+        posts is due, newest first; a closed or cooling thread is not, nor one with a post
+        still being classified, whose pick a catch-up turn would otherwise swallow."""
         idle = self.params.catch_up_idle_seconds
         if not idle or self.now() - self.volatile[bot].idle_since < idle:
             return []
@@ -622,8 +623,13 @@ class SimGateway:
         for post in self._backlog(bot):
             by_thread.setdefault(post.thread, []).append(post)
         due = [(max(p.seq for p in posts), thread) for thread, posts in by_thread.items()
-               if not self._closed_by(bot, thread) and not self._in_cooldown(bot, thread)]
+               if not self._closed_by(bot, thread) and not self._in_cooldown(bot, thread)
+               and not any(self._classifying(p) for p in posts)]
         return [t for _, t in sorted(due, reverse=True)]
+
+    def _classifying(self, post: Post) -> bool:
+        cached = self.decisions.get(post.seq)
+        return cached is not None and cached.decision is None
 
     async def _start_candidate(self, bot: str, kind: str, key, hwm: int) -> bool:
         if kind == "job":

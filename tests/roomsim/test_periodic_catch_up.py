@@ -10,7 +10,8 @@ import pytest
 
 from tests.roomsim.helpers import FAST, Sandbox, Script, reply
 from tools.roomsim.bots import fail
-from tools.roomsim.model import Hint, ThreadGroup
+from tools.roomsim.classifier import ScriptedClassifier
+from tools.roomsim.model import Decision, Hint, ThreadGroup
 from tools.roomsim.prompt import render_hint
 from tools.roomsim.scenario import _params, load, run
 
@@ -73,6 +74,21 @@ async def test_a_restart_resets_the_timer_so_a_restart_wakes_nobody_at_once():
     assert _catch_ups(sb) == []  # at 30 the bots have been idle only since the restart at 20
     await sb.run(20)
     assert set(_catch_ups(sb)) == {50.0}
+
+
+async def test_a_thread_with_a_post_still_being_classified_is_not_due_so_the_pick_is_not_lost():
+    # The second post lands just before the sweep at 30 with its decision 2 s away: the
+    # catch-up waits, b is picked at 31.9 with both posts, the others catch up at 40.
+    classifier = ScriptedClassifier(decisions={2: Decision(add=("b",))}, latency=2.0)
+    sb = Sandbox(params=IDLE, classifier=classifier)
+    await sb.human("news for the room")
+    await sb.run(29.9)
+    await sb.human("a question for whoever knows")
+    await sb.run(20.1)
+    assert _catch_ups(sb) == [40.0, 40.0]  # a and c, not at 30
+    picked = sb.trace.last("turn_start", bot="b")
+    assert picked.source == "picked" and picked.time == 31.9 and picked.delivered == [1, 2]
+    assert _catch_ups(sb, "b") == []
 
 
 async def test_a_thread_closed_to_the_bot_is_not_due():
