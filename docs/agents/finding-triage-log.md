@@ -1223,3 +1223,14 @@ bot blocking every later look).
 
 **Cost:** one rater run (~14 minutes, ~146k tokens), ~35 minutes of author time
 including the fixes.
+
+**Postscript (2026-11-15):** the owner then replaced the flagged queue with a
+periodic catch-up (a bot idle for `catch_up_idle_seconds` gets one look at what
+it missed) and a neutral speak question, and set the post-level grade aside
+(section 10). Two findings this round declined on scope, F1's non-speaking
+delivery and F6's non-semantic trigger, describe what the design now does.
+Both raters were right that neither belonged to the flagged increment; neither
+asked whether the flagged increment itself was the simplest design that met
+the goal, and the owner's "are we making this too complex" was the question
+that changed the answer. Pattern for the ledger: a scope gate protects an
+increment, it does not vouch for it.
