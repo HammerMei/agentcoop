@@ -352,7 +352,8 @@ the 1.x SSE parser emits (`gateway/agents/opencode/adapter.py`
 | `agent_message_chunk` | accumulated into the reply text. No event |
 | `agent_thought_chunk` | first chunk per `messageId` → `thinking` (`💭 …`), as the 1.x parser emits one per reasoning part |
 | `tool_call` | `tool_call` (`🔧 <name or title>`), once per `toolCallId` |
-| `tool_call_update` with `status: completed \| failed` | `tool_result` (`✓ <name>`), once per `toolCallId` |
+| `tool_call_update` with `status: completed` | `tool_result` (`✓ <name>`), once per `toolCallId` |
+| `tool_call_update` with `status: failed` | `tool_result` (`✗ <name>`), once per `toolCallId`. The 1.x parser emits `✓` for its `error` status too (`adapter.py:1387`). This backend does not copy that |
 | `usage_update`, `plan`, `available_commands_update`, `config_option_update`, `current_mode_update`, `session_info_update`, `compaction_*`, `notice`, `user_message_chunk` | consumed, not emitted. The backend records `compaction_update` for §3.8 |
 
 The fold also checks R4 at runtime. Every `tool_call` whose normalised name
@@ -422,24 +423,32 @@ is the structure of `ClaudePermissionBroker`, not of the opencode one. Of
 `request_permission()` unchanged (line 82: id, registry, notify, await with
 timeout).
 
-**Ladder.** The broker decides each ask in this order. Both existing brokers
-implement the same ladder.
+**Ladder.** The broker decides each ask in this order. It is the order of
+`ClaudePermissionBroker._decide` (`claude/broker.py:176-230`): the room is
+needed only to ask a human, so the room check sits in front of that step
+and nowhere earlier.
 
-1. No room for the session → deny. Exception: owner + `skip_owner_approval`
-   → allow, because no room is needed for that.
-2. Role from `session_role_map`, default `guest` (fail closed).
-3. Guest → allow when `guest_allowed_tools` matches, else deny. A guest never
+1. Role from `session_role_map`, default `guest` (fail closed).
+2. Guest → allow when `guest_allowed_tools` matches, else deny. A guest never
    reaches a human.
-4. Owner + `skip_owner_approval` → allow.
-5. Owner + `owner_allowed_tools` match → allow.
-6. Owner + `human_approval` false → deny.
+3. Owner + `skip_owner_approval` → allow.
+4. Owner + `owner_allowed_tools` match → allow.
+5. Owner + `human_approval` false → deny.
+6. No room for the session → deny.
 7. Owner → `request_permission()`. Timeout or notification failure → deny.
 
-The ladder is currently written out twice (`claude/broker.py`,
-`opencode/broker.py`). This backend would be the third copy. The increment
-extracts it into one predicate in `gateway/core` that all three brokers call,
-in the same spirit as `is_mention()`. The same change re-points the two
-existing brokers at it, and their tests prove the decision table did not move.
+The ladder is currently written out twice, and the two copies differ in one
+row. The 1.x opencode broker checks the room **first**
+(`opencode/broker.py:247-270`, owner + `skip_owner_approval` excepted), so
+an allow-listed tool on a session with no room is denied there and allowed
+on Claude. The increment extracts the Claude order into one predicate in
+`gateway/core` that all three brokers call, in the same spirit as
+`is_mention()`. The Claude broker re-points at it and its tests prove the
+decision table did not move. The 1.x opencode broker keeps its early room
+check in front of the shared call, the way the Claude broker keeps its
+meta-tool pre-check, so its decision table does not move either. Folding
+that check into the predicate would change a 1.x behaviour, and the 1.x
+backend's changes are its retirement (§9).
 The predicate is the ladder and nothing before it. The Claude broker's
 meta-tool pre-check (`_CLAUDE_META_TOOLS`, `claude/broker.py:195-199`,
 an unconditional allow before any role check) stays in that broker, in
@@ -763,6 +772,18 @@ and `explore` `[docs]` v2 agents, to run without a prompt allow-lists them
 there: `tool: Task`, `params: general|explore`. The gateway ships no such
 rule.
 
+A `Task` rule in `guest_allowed_tools` means more on this profile than on
+`type: claude`. On Claude every tool the subagent calls still passes the
+hook. Here the rule grants the named entry's own ruleset, and the gateway
+cannot re-apply the force-ask behind it: the loader pushes an entry's
+`permissions` after every layer the gateway writes. The gateway therefore
+does two things. The scope gap below names this as part of R4's gap
+statement. Config loading warns on a `guest_allowed_tools`
+rule that matches `Task` on a `type: acp` agent, with the entry names the
+rule's `params` admits when it has any, the same way it warns on a
+`tool: external_directory` rule (P6). An operator who scopes the rule to
+`general|explore` sees the warning once and keeps the rule.
+
 `skill` asks for parity with `type: claude`, where `Skill` goes through the
 ladder. The ask reaches the gateway with `rawInput.id`, and P6 renames it
 to `skill`, the field the shared table's `skill` row already names.
@@ -775,8 +796,8 @@ to ask the human a question. On 1.18.13 the permission key only hides the
 tool when set to `deny`, and the tool itself never asks `[src]`
 `tool/question.ts`, `permission/index.ts` `disabled`. Whether 2.x asks on
 it is not verified and does not matter here: an ask before a question is a
-question. R4's gap statement for this profile is this scope plus the
-action gap below.
+question. R4's gap statement for this profile is this scope, the entry
+ruleset behind a guest-allowed `Task` (above), and the action gap below.
 
 `external_directory` is new in the list, because v2 flipped its default to
 allow.
@@ -901,8 +922,11 @@ that field counts the cached read as well (observed: `inputTokens: 294`,
 `TokenUsage.total_tokens` is defined as input plus output. For cost,
 `usage_update.cost.amount` is the session's cumulative cost in USD `[src]`
 `turn.ts` `sendUsageUpdate`. The profile keeps the last seen value per session
-and reports the difference as `cost_usd`. It reports `None` on the first turn
-after attach.
+and reports the difference as `cost_usd`. A session this backend created
+with `session/new` starts from a baseline of zero, so its first turn's cost
+is the first value seen. A session attached with `session/load` or
+`session/resume` has an unknown prior cumulative, so the profile reports
+`None` for its first turn and the baseline from then on.
 
 **P5 instructions.** Rung (b). opencode selects an agent per session, and an
 agent entry carries a system prompt. The profile gives each watcher its own
