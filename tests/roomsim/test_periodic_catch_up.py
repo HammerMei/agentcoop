@@ -91,6 +91,31 @@ async def test_a_thread_with_a_post_still_being_classified_is_not_due_so_the_pic
     assert _catch_ups(sb, "b") == []
 
 
+async def test_a_post_being_classified_in_another_thread_holds_the_whole_catch_up():
+    # a has old backlog in t2; a post in main is being classified when the sweep at 30 runs.
+    # The catch-up turn would deliver both threads, so it waits; the pick runs at 31.9.
+    classifier = ScriptedClassifier(decisions={2: Decision(add=("a",))}, latency=2.0)
+    sb = Sandbox(params=IDLE, classifier=classifier)
+    await sb.human("old news", "t2")
+    await sb.run(29.9)
+    await sb.human("a question for whoever knows")
+    await sb.run(20.1)
+    picked = sb.trace.last("turn_start", bot="a")
+    assert picked.source == "picked" and picked.time == 31.9 and sorted(picked.delivered) == [1, 2]
+    assert _catch_ups(sb, "a") == [] and _catch_ups(sb) == [40.0, 40.0]
+
+
+async def test_a_failure_notice_alone_makes_nothing_due_and_rides_along_with_the_next_turn():
+    sb = Sandbox(params=IDLE, script=Script().on(fail(), bot="a", once=True))
+    await sb.human("@a @b @c go")  # b and c answer; a fails at 1 and posts a notice: their only backlog
+    await sb.run(40)
+    assert sb.trace.count("notice", bot="a") == 1 and _catch_ups(sb) == []
+    await sb.human("news for the room")
+    await sb.run(40)
+    delivered = [e.delivered for e in sb.trace.of("turn_start", source="catch-up") if e.bot == "b"]
+    assert delivered and sb.trace.last("notice", bot="a").seq in delivered[0]
+
+
 async def test_a_thread_closed_to_the_bot_is_not_due():
     sb = Sandbox(params=IDLE)
     await sb.human("mute: @a")

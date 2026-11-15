@@ -1291,3 +1291,39 @@ is fair. F3 is a sequencing note.
 **Adoption:** 2 FIX of 3, F3 tracked.
 
 **Cost:** one rater run (~15 minutes, ~176k tokens), ~30 minutes of author time.
+
+## 2026-11-15 — PR #206 round 2 (Codex on `e9fcda8`) and PR #204 round 2 (Codex on `bca7523`)
+
+The round the owner asked for so Codex could see the periodic design. One
+finding on the simulator, three on the document; two of the four are the same
+defect in both layers. **chain-check:** #206 no chain; #204 "3 findings on our
+own last fix, streak 1" (once is noise; noted).
+
+**Blind second rater** (one run for both PRs; findings, method, constants, both
+checkouts runnable; no verdicts of the author's; told to exclude `docs/agents/`
+from every search). **Control:** `#181 r9 F1` sent as a fifth finding. The
+rater printed no line of this log, but the control's own commit message
+(`818d833`) states how that round disposed of the finding, and the rater read
+it while locating the change. **Third compromise in three rounds, a different
+leak each time.** This control is burnt: its disposition is in the log, in the
+commit message and in the PR thread. The next round needs a control whose
+history does not discuss it, or runs without one and says so. The author's
+verdicts were written to a scratch file before the rater reported.
+
+| | finding | true at HEAD | author | rater | why they differ |
+|---|---|---|---|---|---|
+| F1 | (#206) the pending-classification guard is per thread, but the catch-up turn delivers the whole room backlog, so a post being classified in thread A is swallowed by a catch-up for thread B | yes (the rater's probe: decision `add=['a']` after `cursor_saved` past the post, no picked turn); silent | **FIX**, room-level guard | FIX, same shape; P1 → P2 (the post is delivered, as optional; the picked framing is what is lost) | — |
+| F2 | (#204) the same, in §5.7 and §8.3 | yes | **FIX** | FIX | — |
+| F3 | (#204) the timer resets on restart; deployments more frequent than `catch_up_idle_seconds` defer the catch-up without bound, against §2.2's "bounds the wait" | yes as written; a stated decision (§5.5 keeps the timer in memory) | **FIX**: persist the last normal turn end beside the cursor, saved at the same moment; a new bot starts at the gateway's start; a restart then leaves an overdue bot overdue | **MAKE IT LOUD**: keep it in memory, state the caveat (the bound holds per gateway process); scored the persistence at ≈7 years payback at the midpoint (`hits_per_year` 3–75, `fix_hours` 3–4, tax 0.3–0.5 h/yr) and names the startup herd it reintroduces | **open, escalated to the owner.** The rater's `fix_hours` prices a mechanism; the author's reading is one field in a record that is already persisted at that moment. Neither side's evidence is a file or a test; it is a cost estimate against a design preference, so it is not a concession case |
+| F4 | (#204) a lone failure notice makes a thread due, so one failure wakes every idle peer, against §5.10 and §8.2 | yes (the rater's probe: two catch-up turns delivering only the notice) | **FIX**: notices do not count toward the due check | FIX, same | — |
+
+F1, F2, F4 fixed in #206 (the commit carrying this entry) and #204 `ada3f6f`; the simulator's
+own test for the single-thread case was kept and a two-thread case added. F3
+is FILE while the escalation is open.
+
+**Badges vs consequence:** F3 is the one with an operator consequence; the
+others cost one lost pick framing or one wasted turn per idle peer.
+
+**Adoption:** 3 FIX of 4, one escalated.
+
+**Cost:** one rater run (~18 minutes, ~190k tokens), ~35 minutes of author time.

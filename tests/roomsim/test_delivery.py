@@ -129,8 +129,8 @@ async def test_limit_zero_counts_the_streak_but_degrades_nobody():
 
 
 async def test_failure_notice_identity():
-    """Starts no turn, no classifier call, counts for catch-up, not for the rate limit,
-    not delivered to its own bot."""
+    """Starts no turn, no classifier call, makes no catch-up due on its own, does not count
+    for the rate limit, is not delivered to its own bot."""
     sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10),
                  script=Script().on(fail(), bot="a", once=True))
     await sb.human("@a go")
@@ -140,7 +140,7 @@ async def test_failure_notice_identity():
     assert sb.trace.count("classifier_call", post=notice.seq) == 0
     assert sb.trace.count("turn_start", thread="main", source="addressed") == 1
     assert sb.gw.status()["threads"]["main"]["recent_posts"] == 0
-    await sb.run(10)  # periodic sweep: b and c catch up on the notice; a does not see it
+    await sb.run(10)  # periodic sweep: b and c catch up on H's post and get the notice with it
     catch_ups = sb.trace.of("turn_start", source="catch-up")
     assert {e.bot for e in catch_ups} == {"b", "c"}
     assert all(notice.seq in e.delivered for e in catch_ups)

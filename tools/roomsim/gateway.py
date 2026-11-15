@@ -614,17 +614,22 @@ class SimGateway:
     def _due_threads(self, bot: str) -> list[str]:
         """Periodic catch-up (5.7): once the bot has ended no turn for
         ``catch_up_idle_seconds`` (``0`` disables it), every thread holding undelivered
-        posts is due, newest first; a closed or cooling thread is not, nor one with a post
-        still being classified, whose pick a catch-up turn would otherwise swallow."""
+        posts is due, newest first; a closed or cooling thread is not. Nothing is due while
+        any post behind the cursor is still being classified: the turn would deliver the
+        whole backlog and swallow the pick. A failure notice alone makes nothing due; it
+        rides along with the next turn."""
         idle = self.params.catch_up_idle_seconds
         if not idle or self.now() - self.volatile[bot].idle_since < idle:
             return []
+        backlog = self._backlog(bot)
+        if any(self._classifying(p) for p in backlog):
+            return []
         by_thread: dict[str, list[Post]] = {}
-        for post in self._backlog(bot):
-            by_thread.setdefault(post.thread, []).append(post)
+        for post in backlog:
+            if post.kind != "notice":
+                by_thread.setdefault(post.thread, []).append(post)
         due = [(max(p.seq for p in posts), thread) for thread, posts in by_thread.items()
-               if not self._closed_by(bot, thread) and not self._in_cooldown(bot, thread)
-               and not any(self._classifying(p) for p in posts)]
+               if not self._closed_by(bot, thread) and not self._in_cooldown(bot, thread)]
         return [t for _, t in sorted(due, reverse=True)]
 
     def _classifying(self, post: Post) -> bool:
