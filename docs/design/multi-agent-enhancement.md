@@ -547,9 +547,12 @@ when something else starts a turn for it. The periodic catch-up bounds that
 wait: a bot that has ended no turn in a room for `catch_up_idle_seconds` gets
 one turn for the posts behind its cursor, every thread holding undelivered
 posts being a candidate, newest first, except a thread closed to the bot or in
-cooldown, or one with a post still being classified: the catch-up turn would
-deliver that post, and the classifier's pick for it would then find the post
-behind the cursor and start nothing, so the catch-up waits for the decision.
+cooldown. Nothing is due while any post behind the bot's cursor is still being
+classified: the catch-up turn delivers the whole backlog, so it would deliver
+that post too, and the classifier's pick for it would then find the post
+behind the cursor and start nothing; the catch-up waits for the decision. A
+failure notice (`FAILURE_NOTICE`) alone makes nothing due; it rides along with
+the next turn that starts for another reason.
 The turn delivers the whole backlog, so one turn per bot per
 interval is the most the mechanism costs, and an empty backlog starts nothing.
 The timer counts from the bot's last normal turn end, and from the gateway's
@@ -791,8 +794,9 @@ itself, which is accepted.
 A recognised notice:
 
 - starts no turn by addressing and is not sent to the classifier;
-- starts no catch-up turn of its own; every other bot receives it on its next
-  turn, and a bot watching a peer can act on it there;
+- starts no catch-up turn of its own and makes none due (`CATCH_UP`); every
+  other bot receives it on its next turn, and a bot watching a peer can act on
+  it there;
 - does not count as a recent agent post for the rate limit;
 - is not seen by the failing bot itself, because a connector drops its own
   account's posts; that bot learns its state from `HINT`.
@@ -1142,9 +1146,11 @@ The simulator gets these tests first; the gateway reuses them.
   with `catch_up_idle_seconds` at `0`, it gets none.
 - The timer counts from the last normal turn end and from a restart; a failed
   catch-up turn leaves it alone and is retried after the backoff.
-- A thread closed to the bot or in cooldown is not a catch-up candidate, nor is
-  one with a post whose classification is pending; the pick for that post
-  starts its turn once the decision arrives.
+- A thread closed to the bot or in cooldown is not a catch-up candidate; no
+  catch-up starts while a post behind the cursor, in any thread, is still being
+  classified, and the pick for that post starts its turn once the decision
+  arrives; a thread whose only undelivered post is a failure notice is not a
+  candidate.
 - `HINT` on a catch-up turn asks for additions or revisions and names no post.
 - `HINT` states the turn source and the three thread groups that match the
   eligibility path that started the turn.
