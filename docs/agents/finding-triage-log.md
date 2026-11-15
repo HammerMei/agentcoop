@@ -906,6 +906,7 @@ Notes:
 Notes:
 - Adoption: 4 of 5, 1 DROP. Verdict kinds: one ADR-scope misread with a true sentence under it (J1), one trust-boundary DROP (J3), three single-sentence spec completions. The useful signal is thinning: nothing this round changed a mechanism.
 - J1 leaves a policy question for the owner (ask for `question`/`subagent`/`skill` on this profile, or not). The next Codex round waits for that answer, because it changes P3.
+- Owner's answer (2026-11-15): ask for `subagent` and `skill`, leave `question`. The reason that settled `subagent` was found while answering, not in the finding: an agent entry's own `permissions` are pushed after the global rules and a child session evaluates against its own agent's ruleset, so the agent name is a permission-profile switch and the gateway's `ask` rules do not reach the child (2.2.6 `config/plugin/agent.ts`, `permission.ts` `configured`; 1.18.13 `subagent-permissions.ts` inherits only `deny`). `question` stays out because on 1.18.13 the tool never asks and the key only hides it. P3 gains the ruleset rows and the rationale, P6 gains the `Task`/`Skill` field mapping, §8 gains item 8.
 - Cost: 4 rounds, about 4 hours across the PR.
 
-**Status: open** — fixes pushed, owner's answer on J1 pending before any further round.
+**Status: open** — fixes pushed, J1 answered and applied, confirming Codex round requested.

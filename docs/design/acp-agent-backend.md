@@ -691,7 +691,9 @@ vocabulary:
   {"action": "edit",               "resource": "*", "effect": "ask"},
   {"action": "webfetch",           "resource": "*", "effect": "ask"},
   {"action": "websearch",          "resource": "*", "effect": "ask"},
-  {"action": "external_directory", "resource": "*", "effect": "ask"}
+  {"action": "external_directory", "resource": "*", "effect": "ask"},
+  {"action": "subagent",           "resource": "*", "effect": "ask"},
+  {"action": "skill",              "resource": "*", "effect": "ask"}
 ]}
 ```
 
@@ -728,16 +730,53 @@ one login under the same variable (P2). The global config directory is not
 moved: `XDG_CONFIG_HOME` is a separate variable, so the operator's providers,
 agents and `opencode.jsonc` still load.
 
-**The scope gap.** The ruleset asks for the five actions above and nothing
-else. opencode 2.x also gates `read`, `glob`, `grep`, `question`,
-`subagent` and `skill` `[docs]` v2 permissions "Defaults", and leaves them
-at `allow` by default (`read` asks for `.env` files). This profile leaves
-them there. For `read`, `glob` and `grep` that is the 1.x scope, which
-ADR-0002 states as bash, edit, webfetch and websearch. `question`,
-`subagent` and `skill` are new actions in 2.x, and on `type: claude` the
-matching calls (`Task`, `Skill`) do go through the ladder. Whether this
-profile asks for them too is a policy choice for the owner. R4's gap
-statement for this profile is this scope plus the action gap below.
+**`subagent` and `skill`.** These two actions are new in 2.x `[docs]` v2
+permissions "Defaults". The 1.x adapter never gated them: `task` and
+`skill` fall under the default `"*": "allow"` `[src]` v1.18.13
+`agent/agent.ts` `defaults`, and `_OPENCODE_GATED_PERMISSIONS` names only
+`edit`, `webfetch` and `websearch` (`gateway/agents/opencode/adapter.py:163`).
+The profile asks for both.
+
+`subagent` asks because the agent name selects a permission ruleset, not
+only a prompt. An agent entry carries its own `permissions`, and the loader
+pushes those rules after the global ones (`[src]` `packages/core/src/config/plugin/agent.ts`,
+the global `permissions` go onto every agent first, an entry's own
+`permissions` go on last). The last matching rule wins `[src]`
+`packages/core/src/permission.ts` `evaluate`. A child session evaluates
+against **its own** agent's ruleset: `configured()` resolves
+`session.agent`, and the `subagent` tool creates the child with
+`agent: agent.id` `[src]` `permission.ts` `configured`,
+`tool/plugin/subagent.ts`. An operator entry such as `deploy` with
+`{"action": "shell", "effect": "allow"}` therefore runs shell with no ask
+whenever any chatter has the agent invoke it. 1.x has the same structure: a
+custom agent's `permission` merges after the user config, and a child
+inherits only the parent's `deny` rules `[src]` v1.18.13 `agent/agent.ts`,
+`agent/subagent-permissions.ts`. The gateway's rules are `ask`, so a child
+inherits none of them from the parent session. The child's gate is its own
+agent's ruleset. That ruleset carries the global rules, so a built-in
+subagent's `shell` and `edit` still ask. An entry's own `permissions` are
+what override them. The ask reaches the gateway with `rawInput.agent` (the
+action and its resource are not on the wire, see the action gap below), and
+P6 renames that field to `subagent_type`, so the ladder sees `Task` with
+the agent id. An operator who wants the two built-in subagents, `general`
+and `explore` `[docs]` v2 agents, to run without a prompt allow-lists them
+there: `tool: Task`, `params: general|explore`. The gateway ships no such
+rule.
+
+`skill` asks for parity with `type: claude`, where `Skill` goes through the
+ladder. The ask reaches the gateway with `rawInput.id`, and P6 renames it
+to `skill`, the field the shared table's `skill` row already names.
+
+**The scope gap.** The ruleset leaves `read`, `glob`, `grep` and
+`question` at opencode's defaults (`read` asks for `.env` files). For
+`read`, `glob` and `grep` that is the 1.x scope, which ADR-0002 states as
+bash, edit, webfetch and websearch. `question` is the tool the agent uses
+to ask the human a question. On 1.18.13 the permission key only hides the
+tool when set to `deny`, and the tool itself never asks `[src]`
+`tool/question.ts`, `permission/index.ts` `disabled`. Whether 2.x asks on
+it is not verified and does not matter here: an ask before a question is a
+question. R4's gap statement for this profile is this scope plus the
+action gap below.
 
 `external_directory` is new in the list, because v2 flipped its default to
 allow.
@@ -783,7 +822,7 @@ absorbs both, so an existing allow-list keeps meaning what it meant.
   - `edit` → `Edit`, `write` → `Write`, `patch` → `Edit`
   - `read` → `Read`
   - `webfetch` → `WebFetch`, `websearch` → `WebSearch`
-  - `subagent` → `Task`
+  - `subagent` → `Task`, `skill` → `Skill`
 
   Rule matching accepts the 1.x spellings as aliases. A rule `tool: bash`
   matches a normalised `Bash`. A rule `tool: edit` matches `Edit` **and**
@@ -796,15 +835,19 @@ absorbs both, so an existing allow-list keeps meaning what it meant.
   (§3.6) tries the rule's `tool` against each alias of the normalised name
   before the plain match. The alias map is per profile, so a `tool: edit`
   rule on a `type: claude` agent keeps covering `Edit` only.
-- *Fields.* The profile renames `path` / `filePath` to `file_path`.
-  `command` and `url` already match `_CLAUDE_PARAM_FIELD`. `query` and
-  `pattern` do not: the table has no `websearch`, `grep` or `glob` row
-  (`gateway/core/tool_match.py:45-54`), so those asks fall back to the whole
-  input as JSON and a `params` rule on them never matches. The increment adds
-  the three rows, `websearch: query`, `grep: pattern`, `glob: pattern`, to
-  the shared table. That is a core change, not a profile one, and it changes
-  `type: claude` the same way, because Claude's WebSearch, Grep and Glob
-  carry the same fields. The shipped `tool: "WebSearch"` preset has no
+- *Fields.* The profile renames `path` / `filePath` to `file_path`, the
+  `subagent` tool's `agent` to `subagent_type` (Claude's `Task` field) and
+  the `skill` tool's `id` to `skill` (the field the table's `skill` row
+  names) `[src]` `tool/plugin/subagent.ts` `Input`, `tool/plugin/skill.ts`
+  `Input`. `command` and `url` already match `_CLAUDE_PARAM_FIELD`. `query`,
+  `pattern` and `subagent_type` do not: the table has no `websearch`,
+  `grep`, `glob` or `task` row (`gateway/core/tool_match.py:45-54`), so
+  those asks fall back to the whole input as JSON and a `params` rule on
+  them never matches. The increment adds the four rows, `websearch: query`,
+  `grep: pattern`, `glob: pattern`, `task: subagent_type`, to the shared
+  table. That is a core change, not a profile one, and it changes
+  `type: claude` the same way, because Claude's WebSearch, Grep, Glob and
+  Task carry the same fields. The shipped `tool: "WebSearch"` preset has no
   `params` and is unaffected. Without the path rename every file-tool ask
   would produce the empty param string and fail every `params` rule. That is
   fail-closed, but the `scratch-dir` preset would stop auto-approving.
@@ -1176,6 +1219,11 @@ is called done. The state of each item on 2.2.6, macOS:
    embeds the base prompt template as plain text.
 7. The vendored preamble in front of the full durable header, on a real
    watcher turn. **Open**: the probe used a one-line `system`.
+8. A `subagent` call under the P3 ruleset asks with `name: "subagent"` and
+   `rawInput.agent`, and a `shell` call inside the child session then asks
+   on the **parent's** `sessionId` (§3.3, child-session updates off).
+   **Open**: `cli/src/acp/permission.ts` and `child.ts` are the evidence
+   until then.
 
 For the Claude and Codex profiles, the `[unverified]` rows in §5 are the
 checklist.
@@ -1372,7 +1420,8 @@ without a `set_mode`.
 
 - opencode `v2.2.5`: `packages/cli/src/acp/{agent,service,sessions,turn,permission,prompt,content,tool,translate,replay,config-option,child,error,capabilities}.ts`, `packages/cli/src/commands/handlers/acp.ts`, `packages/cli/src/services/standalone.ts`, `packages/server/src/handlers/{session,permission}.ts`, `packages/schema/src/{permission,session-inbox}.ts`, `packages/core/src/config/normalize.ts`, `CHANGELOG.md`. Docs: `cli/acp`, `permissions`, `config`, `migrate-v1`.
 - opencode `v2.2.6` (§4 P5): `packages/cli/src/acp/{service,sessions,catalog,config-option}.ts`, `packages/core/src/config.ts`, `packages/core/src/config/watch.ts`, `packages/core/src/session/{model-request,system-prompt}.ts`, `packages/core/src/session/runner/prompt/system.txt`, `packages/schema/src/agent.ts`. Docs: `agents`.
-- opencode `v1.18.13` (§3.8): `packages/opencode/src/session/llm/request.ts`.
+- opencode `v2.2.6` (§4 P3 `subagent`/`skill`, P6): `packages/core/src/permission.ts`, `packages/core/src/config/plugin/agent.ts`, `packages/core/src/tool/plugin/{subagent,skill}.ts`, `packages/cli/src/acp/{permission,child}.ts`.
+- opencode `v1.18.13` (§3.8): `packages/opencode/src/session/llm/request.ts`. (§4 P3): `packages/opencode/src/agent/{agent,subagent-permissions}.ts`, `packages/opencode/src/tool/{task,skill,question}.ts`, `packages/opencode/src/permission/index.ts`.
 - ACP: `agentclientprotocol.com/protocol/v1/*`, `schema/v1/schema.json` (artifact `schema-v1.29.1`), RFDs `client-system-prompt` (Preview), `end-turn-token-usage` (Draft), `session-usage` (Completed). Registry: `cdn.agentclientprotocol.com/registry/v1/latest/registry.json`.
 - Adapters: `agentclientprotocol/claude-agent-acp` @ `1d4418f` (v0.100.0), `agentclientprotocol/codex-acp` @ `519c267` (v2.5.0). Claude Agent SDK permissions docs. `openai/codex` `codex-rs/app-server`.
 - Python SDK: `agentclientprotocol/python-sdk`, PyPI `agent-client-protocol` 0.12.1 / 1.0.0rc3.
