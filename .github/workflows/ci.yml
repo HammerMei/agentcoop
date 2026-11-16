@@ -25,7 +25,7 @@ jobs:
         run: uv sync --dev
 
       - name: Lint (ruff)
-        run: uv run ruff check gateway/ tests/
+        run: uv run ruff check gateway/ tests/ tools/
 
   test:
     runs-on: ${{ matrix.os }}

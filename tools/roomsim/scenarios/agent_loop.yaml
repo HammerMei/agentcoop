@@ -1,0 +1,21 @@
+# Spec section 7 "scheduled or agent-only room": a human starts an exchange between two
+# bots and leaves. Nothing but the rate limit, cooldown and the bots' own `done` can end
+# it. What this measures: how many posts the pair makes before the brake holds them,
+# whether they resume when the window ages out (300 s), and whether they ever say done.
+name: agent_loop
+room: ops
+members:
+  - {username: H, role: owner}
+  - {username: a, role: bot, profile: "backend engineer; argues for caching; keeps the discussion going until the pair agrees and always addresses b"}
+  - {username: b, role: bot, profile: "release engineer; argues for test sharding; keeps the discussion going until the pair agrees and always addresses a"}
+params: {rate_limit_posts: 4, rate_limit_words: 400, rate_limit_seconds: 300, cooldown_seconds: 0, sweep_interval_seconds: 30}
+events:
+  - {at: 0, human: H, text: "@a @b agree on one change to cut the build time. Discuss it between you; I am leaving for the day. Address each other."}
+bots:
+  a:
+    - {source: addressed, once: true, reply: {replies: [{to: [b], text: "caching first; sharding only hides the slow tests"}]}}
+    - {when_from: b, reply: {replies: [{to: [b], text: "caching is cheaper, I still say caching first"}]}}
+  b:
+    - {source: addressed, once: true, reply: {replies: [{to: [a], text: "sharding first; caching needs hermetic builds we do not have"}]}}
+    - {when_from: a, reply: {replies: [{to: [a], text: "sharding needs no new infra, I still say sharding first"}]}}
+horizon: 400
