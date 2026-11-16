@@ -71,21 +71,20 @@ def render_hint(hint: Hint) -> str:
         lines.append(f"You are in backoff until t={hint.backoff_until:.0f}.")
     if hint.degraded:
         lines.append("You are degraded in this room after repeated invalid replies.")
-    if hint.flagged:
-        posts = ", ".join(f"#{seq}" for seq in hint.flagged)
-        lines.append(f"Flagged for checking in {hint.starting_thread}: post {posts} makes a claim that may be "
-                     "wrong or incomplete. If it has already been corrected, or you have nothing to add, reply done.")
+    if hint.source == "catch-up":
+        lines.append(f"Catch-up in {hint.starting_thread}: you were not addressed. Reply only if you have "
+                     "something to add or revise that the thread does not already have; otherwise reply done.")
     return "\n".join(lines)
 
 
 CLASSIFIER_CONTRACT = """Answer with one JSON object and nothing else:
-{"add": [{"username": "<unaddressed bot that should speak>", "reason": "..."}],
- "remove": [{"username": "<addressed bot that seems unnecessary>", "reason": "..."}],
- "flag": <true when the post states a fact, diagnosis or plan that looks wrong, or whose wrongness would mislead the team>,
- "revises": <true when the post corrects or revises a claim made earlier in the thread>}
+{"add": [{"username": "<unaddressed bot with something to add or revise>", "reason": "..."}],
+ "remove": [{"username": "<addressed bot that seems unnecessary>", "reason": "..."}]}
 Use empty lists when nobody should be added or removed. Name only bots from the list
-above. Choose the smallest useful set: add a bot when the post needs it, not because it
-could answer. An addressed bot answers anyway; "remove" only records your doubt."""
+above. Add a bot when its role or knowledge gives the thread something it does not
+already have: a correction, an addition, or a question or opinion that adds value; not
+because it could answer. A greeting or an acknowledgement needs nobody. An addressed
+bot answers anyway; "remove" only records your doubt."""
 
 
 def render_classifier_state(request: ClassifierRequest, room: str) -> str:

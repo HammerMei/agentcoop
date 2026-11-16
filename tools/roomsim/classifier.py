@@ -154,22 +154,6 @@ class BackendClassifier:
         return max(self._clock() - started, 0.0)
 
 
-# Post-level grades asked alongside the speak questions (catch-up experiment): would the
-# post's wrongness matter, does it look wrong, does it revise an earlier post.
-POST_QUESTIONS = {
-    "stakes": {"type": "noul", "instructions": (
-        "Does the new post state a fact, a diagnosis or a plan that, if it were wrong, would mislead the team "
-        "or cause harm, so that a member with better knowledge should check it? No for greetings, thanks, "
-        "acknowledgements, questions, status updates that only report what the author observed, and opinions "
-        "clearly marked as such.")},
-    "wrong": {"type": "noul", "instructions": (
-        "Does the new post contain a factual error or a claim that is incorrect? Judge from what you know and "
-        "from the thread; no if the claim is plausible, unverifiable from here, or clearly marked as an opinion.")},
-    "revises": {"type": "noul", "instructions": (
-        "Does the new post correct, contradict or revise a claim made in an earlier post of this thread?")},
-}
-
-
 class JevClassifier:
     """A classifier on TypeSafe's Jev through the ``jev`` CLI: one ``jev eval`` per post,
     the request as the state and one yes/no question per offered bot ("should this bot
@@ -185,13 +169,11 @@ class JevClassifier:
         threshold: float = 0.5,
         clock: Callable[[], float] = _time.monotonic,
         run: Callable[[list[str], str], Awaitable[str]] | None = None,
-        flag_threshold: float = 0.8,
     ) -> None:
         self.room = room
         self.command = command
         self.model = model
         self.threshold = threshold
-        self.flag_threshold = flag_threshold
         self._clock = clock
         self._run = run or _run_cli
         self.requests: list[dict] = []
@@ -202,14 +184,15 @@ class JevClassifier:
             "questions": {
                 f"speak_{m.username}": {
                     "type": "noul",
-                    "instructions": (f"Should bot {m.username} ({m.profile or 'no profile'}) answer the new post? "
-                                     "Yes if the post needs this bot's role; no if it could answer but is not "
-                                     "needed, or if the post is not for it."),
+                    "instructions": (f"Does bot {m.username} ({m.profile or 'no profile'}) have something to add "
+                                     "or revise on the new post? Yes if its role or knowledge gives the thread "
+                                     "something it does not already have: a correction, an addition, or a question "
+                                     "or opinion that adds value. No for a greeting or an acknowledgement, and no "
+                                     "if nothing in its role or knowledge bears on the topic."),
                 }
                 for m in request.agents if m.username != request.post.author
             },
         }
-        body["questions"].update(POST_QUESTIONS)
         if self.model:
             body["model"] = self.model
         return body
@@ -225,17 +208,14 @@ class JevClassifier:
             answers = data["answers"]
             probabilities = {name[len("speak_"):]: float(answers[name]["noul"])
                              for name in body["questions"] if name.startswith("speak_")}
-            grades = {name: float(answers[name]["noul"]) for name in POST_QUESTIONS}
         except Exception as exc:  # the CLI failed, or its output is not the envelope
             return ClassifierResult(error=f"{type(exc).__name__}: {exc}", latency=max(self._clock() - started, 0.0))
         usage = data.get("usage") or {}
         add = tuple(b for b, p in probabilities.items() if b not in request.addressed and p >= self.threshold)
         remove = tuple(b for b, p in probabilities.items() if b in request.addressed and p <= 1 - self.threshold)
-        reasons = {b: f"p(answer)={probabilities[b]:.2f}" for b in add + remove}
-        revises = grades["revises"] >= self.flag_threshold
-        flag = not revises and max(grades["stakes"], grades["wrong"]) >= self.flag_threshold
+        reasons = {b: f"p(add or revise)={probabilities[b]:.2f}" for b in add + remove}
         return ClassifierResult(
-            Decision(add=add, remove=remove, reasons=reasons, flag=flag, revises=revises, scores=probabilities),
+            Decision(add=add, remove=remove, reasons=reasons),
             latency=max(self._clock() - started, 0.0),
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
@@ -266,11 +246,7 @@ def parse_decision(text: str, request: ClassifierRequest) -> Decision:
     remove = _names(data.get("remove"), "remove", reasons)
     add = tuple(n for n in add if n in offered and n not in request.addressed)
     remove = tuple(n for n in remove if n in offered and n in request.addressed)
-    grades = {name: data.get(name, False) for name in ("flag", "revises")}
-    if any(not isinstance(value, bool) for value in grades.values()):
-        raise ParseError("flag and revises must be booleans")
-    return Decision(add=add, remove=remove, reasons={n: r for n, r in reasons.items() if n in add + remove},
-                    flag=grades["flag"], revises=grades["revises"])
+    return Decision(add=add, remove=remove, reasons={n: r for n, r in reasons.items() if n in add + remove})
 
 
 def _names(raw, key: str, reasons: dict[str, str]) -> list[str]:

@@ -89,6 +89,9 @@ class BotPersisted:
 class BotVolatile:
     running: bool = False
     sweep_requested: bool = False
+    # When the bot last ended a turn normally in this room, or the gateway (re)started:
+    # the periodic catch-up timer counts from here.
+    idle_since: float = 0.0
     last_post: dict[str, float] = field(default_factory=dict)
     retry_after: float = 0.0
     backoff_level: int = 0
@@ -111,18 +114,6 @@ class BotVolatile:
 class CachedDecision:
     decision: Decision | None = None  # None while in flight
     time: float = 0.0
-
-
-@dataclass
-class Flag:
-    """A bot post the classifier flagged for checking (``catch_up_policy: flagged``):
-    the bots still to take a catch-up turn for it, and the ones in that turn now."""
-
-    seq: int
-    thread: str
-    time: float
-    queue: list[str]
-    running: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -190,7 +181,6 @@ class SimGateway:
         self.persisted: dict[str, BotPersisted] = {b: BotPersisted() for b in hosted}
         self.volatile: dict[str, BotVolatile] = {b: BotVolatile() for b in hosted}
         self.decisions: dict[int, CachedDecision] = {}
-        self.flags: list[Flag] = []
         self.replaying = False
         self.rules: dict[str, RuleCount] = {}
         self.totals: dict[str, dict[str, int]] = {b: self._zero_totals() for b in hosted}
@@ -208,6 +198,7 @@ class SimGateway:
 
     def start(self) -> None:
         for bot in self.hosted:
+            self.volatile[bot].idle_since = self.now()
             self._schedule_periodic_sweep(bot)
 
     def _schedule_periodic_sweep(self, bot: str) -> None:
@@ -241,9 +232,9 @@ class SimGateway:
         """Keep persisted state, reset in-memory state, replay recent posts to seed the
         rate window (section 5.3) and as new triggers (section 5.6)."""
         self.thread_state = {}
-        self.volatile = {b: BotVolatile(generation=v.generation + 1) for b, v in self.volatile.items()}
+        self.volatile = {b: BotVolatile(generation=v.generation + 1, idle_since=self.now())
+                         for b, v in self.volatile.items()}
         self.decisions = {}
-        self.flags = []
         self.online = True
         await self._replay(replay_after)
 
@@ -568,132 +559,10 @@ class SimGateway:
         self.sim.trace.add(self.now(), "classifier_decision", gateway=self.name, post=post.seq,
                            add=list(decision.add), remove=list(decision.remove), fallback=decision.fallback,
                            reasons=dict(decision.reasons))
-        if self.params.catch_up_policy == "flagged":
-            self._apply_flag(post, decision)
-            self._wake_flag_heads()
         for bot in self.hosted:
             if bot in decision.add and bot not in addressed and bot != post.author \
                     and post.seq > self.persisted[bot].cursor:
                 await self._try_start(bot, "picked", post.thread, trigger=post)
-
-    # ── flagged catch-up (simulator experiment) ─────────────────────────────
-
-    def _apply_flag(self, post: Post, decision: Decision) -> None:
-        """A revising post closes the thread's open flags under ``on-revision``; a flagged
-        bot post queues every hosted bot it did not address, in roster or score order."""
-        if decision.revises:
-            if self.params.flag_clear == "on-revision":
-                cleared = [f for f in self.flags if f.thread == post.thread and f.seq < post.seq]
-                if cleared:
-                    self.flags = [f for f in self.flags if f not in cleared]
-                    self.sim.trace.add(self.now(), "flag_cleared", gateway=self.name, post=post.seq,
-                                       flags=[f.seq for f in cleared],
-                                       skipped=sorted({b for f in cleared for b in f.queue}))
-            return
-        if decision.flag and post.kind == "bot":
-            queue = [b for b in self.hosted if b != post.author and not post.addresses(b)]
-            if self.params.catch_up_order == "score":
-                if not decision.scores:
-                    raise ValueError("catch_up_order=score, but the classifier's decision carries no speak scores")
-                queue.sort(key=lambda b: -decision.scores.get(b, 0.0))
-            self.flags.append(Flag(post.seq, post.thread, post.time, queue))
-            self.sim.trace.add(self.now(), "flag_set", gateway=self.name, post=post.seq, thread=post.thread,
-                               queue=list(queue))
-
-    def _prune_flags(self) -> None:
-        """Drop queued bots that have read past the flagged post, and flags nobody is left for."""
-        for flag in self.flags:
-            flag.queue = [b for b in flag.queue if self.persisted[b].cursor < flag.seq or b in flag.running]
-        for flag in [f for f in self.flags if not f.queue and not f.running]:
-            self.flags.remove(flag)
-            self.sim.trace.add(self.now(), "flag_done", gateway=self.name, post=flag.seq)
-
-    def _flag_due(self, bot: str) -> list[str]:
-        """Threads with an open flag this bot is next for: any queued bot at once under
-        ``parallel``; only the head of the queue, and only when nobody is in a turn for
-        it, under ``roster`` and ``score``."""
-        self._prune_flags()
-        serial = self.params.catch_up_order != "parallel"
-        due = []
-        for flag in list(self.flags):
-            if bot not in flag.queue or flag.thread in due or bot in flag.running:
-                continue
-            if self._closed_by(bot, flag.thread):
-                if serial and not flag.running and flag.queue[0] == bot:
-                    self._flag_skipped(bot, flag.thread)  # a muted or degraded head must not stall the queue
-                continue
-            if self._in_cooldown(bot, flag.thread):
-                if serial and not flag.running and flag.queue[0] == bot:
-                    self._flag_deferred(bot, flag.thread)
-                continue
-            if self.now() - flag.time < self.params.catch_up_age_seconds:
-                continue
-            if serial and (flag.running or flag.queue[0] != bot or self._grading(flag.thread, flag.seq)):
-                continue
-            due.append(flag.thread)
-        return due
-
-    def _grading(self, thread: str, after: int) -> bool:
-        """A post of ``thread`` after ``after`` whose classifier call has not answered yet:
-        a serial queue waits for it, since the answer may revise the thread."""
-        return any(p.seq in self.decisions and self.decisions[p.seq].decision is None
-                   for p in self.sim.room.thread_posts(thread) if p.seq > after)
-
-    def _flags_for(self, bot: str, thread: str) -> list[Flag]:
-        return [f for f in self.flags if f.thread == thread and bot in f.queue]
-
-    def _flag_turn_started(self, bot: str, thread: str) -> None:
-        for flag in self._flags_for(bot, thread):
-            flag.running.add(bot)
-
-    def _flag_turn_ended(self, bot: str, thread: str, posts: int) -> None:
-        flags = [f for f in self.flags if f.thread == thread and bot in f.running]
-        if not flags:
-            return
-        self.sim.trace.add(self.now(), "flag_turn", gateway=self.name, bot=bot, thread=thread,
-                           flags=[f.seq for f in flags], posts=posts)
-        for flag in flags:
-            flag.running.discard(bot)
-            if bot in flag.queue:
-                flag.queue.remove(bot)
-        self._prune_flags()
-        self._wake_flag_heads()
-
-    def _flag_deferred(self, bot: str, thread: str) -> None:
-        """A head bot held for now (busy, backoff, cooldown, rate) goes to the back of the
-        queue; the next bot runs and this one gets its look when it is free."""
-        for flag in self._flags_for(bot, thread):
-            flag.queue.remove(bot)
-            flag.queue.append(bot)
-        # No wake here: a wake of a head that is itself held would defer again at the same
-        # instant without end. The new head's next periodic sweep, or its turn end, starts it.
-
-    def _flag_turn_failed(self, bot: str, thread: str) -> None:
-        """The turn did not commit: the bot stays queued and runs again after its backoff."""
-        for flag in self.flags:
-            if flag.thread == thread and bot in flag.running:
-                flag.running.discard(bot)
-                flag.queue.remove(bot)
-                flag.queue.append(bot)
-        self._wake_flag_heads()
-
-    def _flag_skipped(self, bot: str, thread: str) -> None:
-        """A head bot the sweep could not start (held, muted, degraded) loses its place."""
-        flags = self._flags_for(bot, thread)
-        for flag in flags:
-            flag.queue.remove(bot)
-        self.sim.trace.add(self.now(), "flag_skipped", gateway=self.name, bot=bot, thread=thread,
-                           flags=[f.seq for f in flags])
-        self._prune_flags()
-        self._wake_flag_heads()
-
-    def _wake_flag_heads(self) -> None:
-        """Serial orders start the next bot at the turn's end, not at its next periodic sweep."""
-        if self.params.catch_up_order == "parallel":
-            return
-        for flag in self.flags:
-            if flag.queue and not flag.running and not self._grading(flag.thread, flag.seq):
-                self._request_sweep(flag.queue[0], "flag next")
 
     def _decision_for(self, bot: str, post: Post) -> bool:
         """Whether a still-valid cached decision selects ``bot`` for ``post``."""
@@ -743,21 +612,29 @@ class SimGateway:
         return found
 
     def _due_threads(self, bot: str) -> list[str]:
-        if self.params.catch_up_policy == "flagged":
-            return self._flag_due(bot)
+        """Periodic catch-up (5.7): once the bot has ended no turn for
+        ``catch_up_idle_seconds`` (``0`` disables it), every thread holding undelivered
+        posts is due, newest first; a closed or cooling thread is not. Nothing is due while
+        any post behind the cursor is still being classified: the turn would deliver the
+        whole backlog and swallow the pick. A failure notice alone makes nothing due; it
+        rides along with the next turn."""
+        idle = self.params.catch_up_idle_seconds
+        if not idle or self.now() - self.volatile[bot].idle_since < idle:
+            return []
+        backlog = self._backlog(bot)
+        if any(self._classifying(p) for p in backlog):
+            return []
         by_thread: dict[str, list[Post]] = {}
-        for post in self._backlog(bot):
-            by_thread.setdefault(post.thread, []).append(post)
-        due = []
-        for thread, posts in by_thread.items():
-            if self._closed_by(bot, thread) or self._in_cooldown(bot, thread):
-                continue
-            count_hit = self.params.catch_up_post_threshold and len(posts) >= self.params.catch_up_post_threshold
-            age_hit = self.params.catch_up_age_seconds and \
-                self.now() - posts[0].time >= self.params.catch_up_age_seconds
-            if count_hit or age_hit:
-                due.append((max(p.seq for p in posts), thread))
+        for post in backlog:
+            if post.kind != "notice":
+                by_thread.setdefault(post.thread, []).append(post)
+        due = [(max(p.seq for p in posts), thread) for thread, posts in by_thread.items()
+               if not self._closed_by(bot, thread) and not self._in_cooldown(bot, thread)]
         return [t for _, t in sorted(due, reverse=True)]
+
+    def _classifying(self, post: Post) -> bool:
+        cached = self.decisions.get(post.seq)
+        return cached is not None and cached.decision is None
 
     async def _start_candidate(self, bot: str, kind: str, key, hwm: int) -> bool:
         if kind == "job":
@@ -777,10 +654,7 @@ class SimGateway:
             if key not in self.persisted[bot].unfinished:
                 return False
             return await self._try_start(bot, "unfinished", key, hwm=hwm, from_sweep=True)
-        started = await self._try_start(bot, "catch-up", key, hwm=hwm, from_sweep=True)
-        if not started and self.params.catch_up_policy == "flagged" and self.params.catch_up_order != "parallel":
-            self._flag_deferred(bot, key)  # a temporary hold (busy, backoff, rate): the bot keeps its place
-        return started
+        return await self._try_start(bot, "catch-up", key, hwm=hwm, from_sweep=True)
 
     # ── FOLLOW_UP: jobs ─────────────────────────────────────────────────────
 
@@ -826,7 +700,6 @@ class SimGateway:
         state = self.volatile[bot]
         threads = {starting} | {p.thread for p in delivered} | set(self.persisted[bot].unfinished)
         groups = tuple(self._group(bot, t, starting, delivered, held_by) for t in sorted(threads))
-        flagged = tuple(f.seq for f in self._flags_for(bot, starting)) if source == "catch-up" else ()
         return Hint(
             source=source,
             starting_thread=starting,
@@ -835,7 +708,6 @@ class SimGateway:
             previous_failure=state.previous_failure,
             backoff_until=state.retry_after if self.now() < state.retry_after else None,
             degraded=state.degraded,
-            flagged=flagged,
         )
 
     def _group(self, bot: str, thread: str, starting: str, delivered: list[Post],
@@ -872,9 +744,7 @@ class SimGateway:
         self.totals[bot]["turns"] += 1
         self.sim.trace.add(self.now(), "turn_start", gateway=self.name, bot=bot, source=source,
                            thread=thread, exempt=self._exempt(source, thread, trigger),
-                           delivered=[p.seq for p in delivered], flagged=list(hint.flagged))
-        if hint.flagged:
-            self._flag_turn_started(bot, thread)
+                           delivered=[p.seq for p in delivered])
         if job is not None:
             job.pending = False
         await self._invoke(TurnRun(turn, job, through if through is not None else self.persisted[bot].cursor,
@@ -1025,11 +895,8 @@ class SimGateway:
             state.retry_after, state.backoff_level, state.backoff_notice_sent = 0.0, 0, False
             state.invalid_streak, state.degraded, state.invalid_notice_sent = 0, False, False
             state.previous_failure = None
+            state.idle_since = self.now()
         self.sim.trace.add(self.now(), "turn_end", gateway=self.name, bot=bot, outcome=outcome, posts=run.posts)
-        if outcome == "normal":
-            self._flag_turn_ended(bot, run.turn.starting_thread, run.posts)
-        else:
-            self._flag_turn_failed(bot, run.turn.starting_thread)
         self._request_sweep(bot, "turn end")
 
     # ── FAILURE_NOTICE ──────────────────────────────────────────────────────

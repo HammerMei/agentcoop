@@ -141,8 +141,8 @@ async def test_a_closed_thread_is_no_catch_up_or_unfinished_candidate_in_either_
     """Spec 5.7: catch-up needs an open thread and an unfinished thread is a candidate once
     it has become open. Both modes therefore see the same (empty) candidate list, and
     the measure-only mode does not loop on a closed unfinished thread."""
-    for params in (replace(ON, catch_up_post_threshold=1, catch_up_age_seconds=0),
-                   replace(OFF, catch_up_post_threshold=1, catch_up_age_seconds=0)):
+    for params in (replace(ON, catch_up_idle_seconds=10),
+                   replace(OFF, catch_up_idle_seconds=10)):
         sb = Sandbox(params=params, bots=("a", "b"))
         await sb.human("mute: @a")
         await sb.human("news for a")

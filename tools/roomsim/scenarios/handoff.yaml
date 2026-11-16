@@ -7,7 +7,7 @@ members:
   - {username: b, role: bot, display_name: Bravo, profile: "deploys the backend"}
   - {username: c, role: bot, display_name: Charlie, profile: "watches production and comments when asked"}
 params: {rate_limit_posts: 6, rate_limit_words: 600, rate_limit_seconds: 300, sweep_interval_seconds: 30,
-         catch_up_post_threshold: 3, catch_up_age_seconds: 120}
+         catch_up_idle_seconds: 120}
 events:
   - {at: 0, human: H, text: "@a run the migration; @b, when a is done, deploy."}
 bots:

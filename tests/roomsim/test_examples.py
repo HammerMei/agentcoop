@@ -25,7 +25,7 @@ async def test_6_1_handoff():
         .on(reply(["H", "b"], "migration complete"), bot="a", source="addressed", once=True)
         .on(reply(["H", "a"], "deployed"), bot="b", when=mentions_from("a"), once=True)
     )
-    sb = Sandbox(params=replace(FAST, catch_up_post_threshold=3), script=script)
+    sb = Sandbox(params=replace(FAST, catch_up_idle_seconds=10), script=script)
     await sb.human("@a run the migration; @b, when a is done, deploy.")
     await sb.run(0)
     assert {e.bot for e in sb.trace.of("turn_start") if e.time == 0.0} == {"a", "b"}  # in parallel

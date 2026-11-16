@@ -31,10 +31,6 @@ _MARKERS = {
     "classifier_decision": lambda e: f"? post {e.post}: add {e.add}{' remove ' + str(e.remove) if e.remove else ''}"
     f"{' fallback ' + e.fallback if e.fallback else ''}",
     "classifier_expired": lambda e: f"? post {e.post}: decision for {e.bot} expired",
-    "flag_set": lambda e: f"⚑ post {e.post} flagged for checking; catch-up queue {e.queue}",
-    "flag_cleared": lambda e: f"⚑ post {e.post} revises the thread; flags {e.flags} cleared, {e.skipped} skipped",
-    "flag_skipped": lambda e: f"⚑ {e.bot} skipped for {e.flags} (could not start)",
-    "flag_done": lambda e: f"⚑ post {e.post}: queue exhausted",
     "job_scheduled": lambda e: f"⏰ {e.bot} scheduled job {e.job} in {e.thread}",
     "job_fired": lambda e: f"⏰ {e.bot} job {e.job} fired",
     "backoff": lambda e: f"⏳ {e.bot} backoff until {e.until:.0f}",
@@ -101,26 +97,12 @@ def classifier_summary(sim: Simulation) -> str:
     return line
 
 
-def flag_summary(sim: Simulation) -> str:
-    """The flagged catch-up experiment: flags set and cleared, and what the catch-up
-    turns they caused did (spoke, or woke and returned done)."""
-    turns = sim.trace.of("flag_turn")
-    spoke = len([e for e in turns if e.posts])
-    cleared = sum(len(e.flags) for e in sim.trace.of("flag_cleared"))
-    return (f"flags: {sim.trace.count('flag_set')} set, {cleared} cleared by revision, "
-            f"{sim.trace.count('flag_skipped')} bots skipped; flagged catch-up turns: {len(turns)} "
-            f"({spoke} spoke, {len(turns) - spoke} done)")
-
-
 def report(sim: Simulation, title: str = "", show_rules: bool = False) -> str:
     gateways = sim.gateways
     mode = "enforced" if all(g.params.enforce for g in gateways) else "measure-only"
     parts = [f"# {title or sim.room.name} ({mode})", "", "## Transcript", "", transcript(sim, show_rules), "",
              "## Totals", "", totals(gateways), "", "## Rules", "", rules(gateways), "",
-             classifier_summary(sim)]
-    if any(g.params.catch_up_policy == "flagged" for g in gateways):
-        parts.append(flag_summary(sim))
-    parts.append("")
+             classifier_summary(sim), ""]
     return "\n".join(parts)
 
 

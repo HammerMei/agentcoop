@@ -11,7 +11,7 @@ members:
   - {username: c, role: bot, display_name: Cara, profile: "product manager; owns customer communication and the status page"}
   - {username: d, role: bot, display_name: Dev, profile: "site reliability; owns nginx, the deploy pipeline and production alerts"}
 params: {rate_limit_posts: 12, rate_limit_words: 1200, rate_limit_seconds: 300, sweep_interval_seconds: 30,
-         catch_up_post_threshold: 3, catch_up_age_seconds: 120, classifier_timeout_seconds: 60}
+         catch_up_idle_seconds: 120, classifier_timeout_seconds: 60}
 events:
   - {at: 0, human: H, text: "prod API has been returning 502s since the 10:40 deploy. nginx logs say 'upstream timed out (110: Connection timed out) while reading response header'. what do we know?"}  # expected: d, a
   - {at: 120, human: H, text: "customers are asking in the support inbox. do we say anything publicly yet?"}  # expected: c
