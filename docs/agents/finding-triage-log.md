@@ -1314,16 +1314,17 @@ verdicts were written to a scratch file before the rater reported.
 |---|---|---|---|---|---|
 | F1 | (#206) the pending-classification guard is per thread, but the catch-up turn delivers the whole room backlog, so a post being classified in thread A is swallowed by a catch-up for thread B | yes (the rater's probe: decision `add=['a']` after `cursor_saved` past the post, no picked turn); silent | **FIX**, room-level guard | FIX, same shape; P1 → P2 (the post is delivered, as optional; the picked framing is what is lost) | — |
 | F2 | (#204) the same, in §5.7 and §8.3 | yes | **FIX** | FIX | — |
-| F3 | (#204) the timer resets on restart; deployments more frequent than `catch_up_idle_seconds` defer the catch-up without bound, against §2.2's "bounds the wait" | yes as written; a stated decision (§5.5 keeps the timer in memory) | **FIX**: persist the last normal turn end beside the cursor, saved at the same moment; a new bot starts at the gateway's start; a restart then leaves an overdue bot overdue | **MAKE IT LOUD**: keep it in memory, state the caveat (the bound holds per gateway process); scored the persistence at ≈7 years payback at the midpoint (`hits_per_year` 3–75, `fix_hours` 3–4, tax 0.3–0.5 h/yr) and names the startup herd it reintroduces | **open, escalated to the owner.** The rater's `fix_hours` prices a mechanism; the author's reading is one field in a record that is already persisted at that moment. Neither side's evidence is a file or a test; it is a cost estimate against a design preference, so it is not a concession case |
+| F3 | (#204) the timer resets on restart; deployments more frequent than `catch_up_idle_seconds` defer the catch-up without bound, against §2.2's "bounds the wait" | yes as written; a stated decision (§5.5 keeps the timer in memory) | **FIX**: persist the last normal turn end beside the cursor, saved at the same moment; a new bot starts at the gateway's start; a restart then leaves an overdue bot overdue | **MAKE IT LOUD**: keep it in memory, state the caveat (the bound holds per gateway process); scored the persistence at ≈7 years payback at the midpoint (`hits_per_year` 3–75, `fix_hours` 3–4, tax 0.3–0.5 h/yr) and names the startup herd it reintroduces | escalated to the owner; **owner chose the rater's exit (MAKE IT LOUD, 2026-11-16)**: no persisted field, the caveat in §2.2/§3.1/§5.7/§8.3 (#204 `81c302c`). The rater's `fix_hours` priced a mechanism; the author's reading was one field in a record already persisted at that moment. Neither side's evidence was a file or a test; the owner decided on preference for fewer persisted fields |
 | F4 | (#204) a lone failure notice makes a thread due, so one failure wakes every idle peer, against §5.10 and §8.2 | yes (the rater's probe: two catch-up turns delivering only the notice) | **FIX**: notices do not count toward the due check | FIX, same | — |
 
 F1, F2, F4 fixed in #206 (the commit carrying this entry) and #204 `ada3f6f`; the simulator's
 own test for the single-thread case was kept and a two-thread case added. F3
-is FILE while the escalation is open.
+was FILE while the escalation was open; the owner settled it the same day
+(caveat, no field).
 
 **Badges vs consequence:** F3 is the one with an operator consequence; the
 others cost one lost pick framing or one wasted turn per idle peer.
 
-**Adoption:** 3 FIX of 4, one escalated.
+**Adoption:** 3 FIX of 4, one escalated and closed as MAKE IT LOUD by the owner.
 
 **Cost:** one rater run (~18 minutes, ~190k tokens), ~35 minutes of author time.
