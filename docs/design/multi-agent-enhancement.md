@@ -5,7 +5,7 @@
 In a room with several bots, the gateway asks one small classifier a narrow
 question for every post:
 
-> Which bots in this room should speak now?
+> Which bots in this room have something to add or revise?
 
 The classifier may add speakers, but it may never silence a bot that the post
 addresses. Every bot still eventually sees every post. If a bot should not
@@ -19,7 +19,7 @@ only a reliable delivery path and a few mechanical controls:
 - one delivery cursor per bot per room;
 - one classifier decision per post per gateway;
 - per-thread mute, rate-limit, and cooldown gates;
-- a sweeper that revisits held work and catches bots up;
+- a sweeper that revisits held work and gives an idle bot one look at what it missed;
 - a structured reply envelope with explicit recipients;
 - scheduled follow-ups for work a bot is waiting on.
 
@@ -67,8 +67,8 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
 ### 2.1 Goals
 
 1. Deliver every post to every bot, in room order, without dropping context.
-2. Start turns only for bots that were addressed, selected, or are due to
-   catch up.
+2. Start turns only for bots that were addressed, selected, or idle long
+   enough to look at what they missed.
 3. Slow loops without asking the gateway to judge what a bot says.
 4. Let humans and a designated orchestrator control a thread through visible
    posts.
@@ -83,7 +83,9 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
   without getting a turn for that post, and a delivered thread may be closed
   to replies.
 - **Every bot eventually sees everything.** A bot has one cursor per room, not
-  per thread.
+  per thread. Delivery happens on the bot's next turn, whatever starts it; the
+  periodic catch-up bounds how long that wait can be within one gateway
+  process.
 - **One bot runs at most one turn per room at a time.** No queue of waiting
   turns is persisted; eligibility is reconstructed from backlog and state.
 - **The platform is the shared record.** Gateways do not exchange private
@@ -91,7 +93,8 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
 - **The gateway enforces mechanics, not collaboration policy.** Meetings,
   handoffs, deadlines, and brainstorms live in agent skills. Delivery,
   eligibility, authority, and reply validation are deterministic gateway
-  rules, with no model involved, so a bot cannot bypass them.
+  rules, so a bot cannot bypass them. The classifier only proposes who speaks;
+  every proposal passes the same rules.
 
 ### 2.3 Non-goals
 
@@ -99,7 +102,9 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
   notices about who did not answer.
 - Hidden information or anonymous voting. A room is the visibility boundary.
 - Semantic convergence. The gateway slows loops; it does not decide who is
-  correct or when a discussion is finished.
+  correct or when a discussion is finished. Whether a post needs a correction
+  is for the bots: the gateway never grades a post, it only gives each bot a
+  turn in which to say so.
 - Fair allocation of a thread's speaking allowance.
 - Ordering bots selected by the same post. They start in parallel.
 
@@ -116,7 +121,7 @@ Each definition below uses only ordinary language or terms defined above it.
 | **thread** | A platform thread, or all top-level room posts treated as one thread. The rules below apply per thread. |
 | **addressed** | A post mentions a bot. Human posts may use `@bot`, `@all`, or a room-wide mention. Bot posts use only mentions the platform recorded on their post. A bare name is not an address, and a name on a control line (`mute: @a`) is the control's target, not an address. A 1:1 DM addresses its bot by definition. |
 | **scheduled job** | A reminder a bot creates through the existing scheduler. It fires at a chosen time for that bot in one thread, without a new platform post. |
-| **classifier** | A small model that chooses which additional bots should speak for a post. It never writes a reply or removes an addressed bot. |
+| **classifier** | A small model that chooses which additional bots have something to add or revise for a post. It never writes a reply or removes an addressed bot. |
 | **rate limit** | A per-thread post and word allowance. Once reached, it delays further bot invocations unless their source is exempt. |
 | **cooldown** | The minimum interval between one bot's own posts in a thread. |
 | **orchestrator** | A bot designated by an owner for one thread. It is exempt from the rate limit and cooldown and may mute and unmute bots in that thread. |
@@ -146,8 +151,7 @@ A count or duration of `0` disables that limit.
 | `rate_limit_seconds` | Window in which an agent post remains recent. |
 | `cooldown_seconds` | Minimum interval between one bot's posts in a thread. |
 | `sweep_interval_seconds` | Interval between periodic sweeps for one bot in one room. |
-| `catch_up_post_threshold` | Undelivered posts in a thread that trigger catch-up. |
-| `catch_up_age_seconds` | Age of the oldest undelivered post that triggers catch-up. |
+| `catch_up_idle_seconds` | Time without a turn in a room, counted within one gateway process, after which a bot gets one catch-up turn for the posts it has not seen. Default 1800. |
 | `control_ttl_days` | Thread inactivity after which settings expire. |
 | `classifier_posts` | Maximum recent thread posts shown to the classifier. |
 | `classifier_timeout_seconds` | Timeout for one classifier call. |
@@ -223,7 +227,8 @@ minutes.
 2. `a` reports to `[H, b]` that the log is clean. The mention starts `b`, which
    restarts the backend and reports to `[H, a]`.
 3. `a` returns `done`. There are two recent visible agent posts.
-4. Catch-up gives `c` the exchange; `c` returns `done`.
+4. Once `c` has been idle for `catch_up_idle_seconds`, catch-up gives it the
+   exchange; `c` returns `done`.
 5. `H` asks `@all` whether this matches last week's incident. All three start
    and can see the `@all` in the post itself. `a` answers, `b` adds one line
    after seeing `a` in backlog, and `c` returns `done`.
@@ -254,12 +259,21 @@ are gateway concerns.
 
 The answer contains two username lists, each entry with a short reason:
 
-- `add`: unaddressed bots that should speak;
+- `add`: unaddressed bots with something to add or revise;
 - `remove`: addressed bots that appear unnecessary.
+
+The question for each bot is whether its role or knowledge gives the thread
+something it does not already have: a correction, an addition, or a question
+or opinion that adds value. A greeting or an acknowledgement needs nobody. The
+question is deliberately neutral: it does not ask the classifier whether the
+post is wrong, so it does not push a bot into finding something to correct.
 
 Speakers are `addressed + add`. The gateway records `remove` for measurement
 but does not act on it. Addressed bots start immediately while classification
 runs; added bots start when the decision arrives.
+
+A classifier that returns probabilities instead of text answers one yes/no
+question per bot; the gateway adds the bots over its threshold.
 
 #### One call per post per gateway
 
@@ -274,7 +288,7 @@ another turn has already delivered its post. A mute also holds a selected turn,
 but recovery from a mute does not use the decision: the post is delivered as
 closed context, the thread becomes unfinished, and `unmute:` requests a sweep
 (`MUTE`). A decision that expires while its turn is held is counted
-(`STATUS`); the post then waits for ordinary catch-up.
+(`STATUS`); the post then reaches the bot on its next turn.
 
 The agent list given to the classifier includes bots hosted by other gateways,
 so a decision may name a bot this gateway does not run. A gateway starts turns
@@ -299,16 +313,19 @@ After `classifier_retries` timeouts or errors, use the configured fallback:
 | `addressed-or-everyone` | Addressed bots | Every bot, matching current behaviour |
 
 Mute, rate, and cooldown rules still apply. Every fallback and reason is logged
-and visible in room status. Catch-up does not depend on classification, so a
-classifier failure cannot permanently hide a post.
+and visible in room status. A classifier failure cannot hide a post: every bot
+still receives it on its next turn through the cursor, and the periodic
+catch-up (`CATCH_UP`) bounds that wait.
 Processing of a post waits for the classifier no longer than the configured
 attempts: after the final timeout or error, the fallback decision completes
 classification.
 
-The classifier judges relevance from text; it cannot know private bot context.
-It will sometimes miss expertise or corrections. Catch-up is the safety net,
-so its thresholds should initially be more eager than in a design with
-explicit per-thread modes and tuned from simulator results.
+The classifier judges from text and profiles; it cannot know a bot's private
+context or memory, so it will sometimes miss the bot that could correct a
+post. A profile that names the kind of knowledge a bot has (it verifies claims
+against the code; it knows the customer's history) lets the classifier pick
+that bot. Knowledge a profile cannot name, such as what a bot remembers of a
+past decision, reaches a post only through the periodic catch-up.
 
 ### 5.2 Mute (`MUTE`)
 
@@ -455,7 +472,9 @@ gateway retains only existing facts:
 
 - the trigger post remains after the cursor;
 - a classifier choice remains in the short-lived decision cache;
-- a delivered closed thread remains in the unfinished set.
+- a delivered closed thread remains in the unfinished set;
+- the time of the bot's last normal turn end in the room remains in memory,
+  for the periodic catch-up.
 
 When a turn ends or the bot becomes free, request a sweep. Becoming free does
 not start a held turn directly. The later turn sees everything posted meanwhile
@@ -505,7 +524,8 @@ in parallel. It considers, in this order:
    muted bot) cannot hide a newer human mention behind it;
 2. unfinished threads that have become open;
 3. a scheduled-job firing held in backlog (`MUTE`, `FAILURE_NOTICE`);
-4. threads due for catch-up.
+4. threads with undelivered posts, once the bot is due for a periodic
+   catch-up.
 
 The sweep chooses its candidate list once, then rechecks each candidate before
 starting a turn. Because the first turn delivers the entire room backlog, later
@@ -521,14 +541,46 @@ sweep. For example, a bot mention that arrived before a later `mute:` does not
 start a turn after the bot becomes muted. A cached classifier choice is usable
 only while it has not expired and its source post remains in the backlog.
 
-A thread is due for catch-up when the bot is not muted, the thread is open, the
-bot is out of cooldown, and either:
+#### Periodic catch-up
 
-- undelivered posts >= `catch_up_post_threshold`; or
-- the oldest undelivered post is at least `catch_up_age_seconds` old.
+A bot that is never addressed or selected would otherwise see a thread only
+when something else starts a turn for it. The periodic catch-up bounds that
+wait: a bot that has ended no turn in a room for `catch_up_idle_seconds` gets
+one turn for the posts behind its cursor, every thread holding undelivered
+posts being a candidate, newest first, except a thread closed to the bot or in
+cooldown. Nothing is due while any post behind the bot's cursor is still being
+classified: the catch-up turn delivers the whole backlog, so it would deliver
+that post too, and the classifier's pick for it would then find the post
+behind the cursor and start nothing; the catch-up waits for the decision. A
+failure notice (`FAILURE_NOTICE`) alone makes nothing due; it rides along with
+the next turn that starts for another reason.
+The turn delivers the whole backlog, so one turn per bot per
+interval is the most the mechanism costs, and an empty backlog starts nothing.
+The timer counts from the bot's last normal turn end, and from the gateway's
+start or restart; a failed turn does not reset it, and the retry follows the
+backoff (`FAILURE_NOTICE`). `0` disables the periodic catch-up. Each gateway
+keeps the timer in memory for the bots it hosts and persists nothing for it:
+the bound of section 2.2 holds within one gateway process. A restart wakes
+nobody at once, and a restart cadence shorter than the interval defers the
+catch-up until the gateway runs one full interval. A deployment that restarts
+that often has a bigger problem than a late catch-up, and persisting the
+deadline would make every overdue bot wake together after a long outage.
 
-Catch-up candidates are ordered by newest post. This is the bot's independent
-chance to notice something the classifier missed; `done` should be common.
+`HINT` tells the bot it was not addressed and asks whether it has something to
+add or revise that the thread does not already have; otherwise it returns
+`done`, which should be the common outcome. The hint names no post as doubtful:
+the bot decides from the thread alone, the same way a human would reading back.
+
+Bots that reach the interval together wake in parallel and cannot see each
+other's replies; a thread may therefore get two corrections of the same point
+from one interval. The interval is long so that this stays rare, and the
+addressed and selected turns, which carry most corrections, are unaffected.
+
+The periodic catch-up exists because the agents AgentCoop hosts are coding
+agents without a heartbeat of their own; an agent framework with a heartbeat
+gives the same safety net itself. Section 10 records the stronger variant that
+was measured and set aside: a post-level grade that starts a serial queue of
+lookers for a post the classifier found doubtful.
 
 #### Unfinished threads
 
@@ -572,6 +624,9 @@ Every turn receives:
 - whether the bot's previous turn in this room failed and how (backend failure
   or invalid envelope), and whether the bot is in backoff or degraded in this
   room (`FAILURE_NOTICE`);
+- on a catch-up turn, that the bot was not addressed and should reply only
+  with something to add or revise that the thread does not already have, and
+  `done` otherwise;
 - concise instructions to avoid restatement, use `done` when appropriate,
   place controls in `control`, treat `to` as recipients rather than incidental
   mentions, include everyone whose request the backlog reply serves, respond
@@ -745,9 +800,9 @@ itself, which is accepted.
 A recognised notice:
 
 - starts no turn by addressing and is not sent to the classifier;
-- counts as an undelivered post for catch-up (`catch_up_post_threshold`,
-  `catch_up_age_seconds`), so every other bot gets at most one catch-up look at
-  it, and a bot watching a peer can act on it there;
+- starts no catch-up turn of its own and makes none due (`CATCH_UP`); every
+  other bot receives it on its next turn, and a bot watching a peer can act on
+  it there;
 - does not count as a recent agent post for the rate limit;
 - is not seen by the failing bot itself, because a connector drops its own
   account's posts; that bot learns its state from `HINT`.
@@ -845,8 +900,9 @@ Human `H` writes:
 Both bots are addressed and start in parallel. `b` sees that it must wait,
 returns `done`, and schedules a 30-minute follow-up. `a` later replies to
 `[H, b]` that the migration is complete. That mention starts `b`, which deploys
-and replies to `[H, a]`. `a` returns `done`. A third bot eventually receives
-the exchange through catch-up and also returns `done`.
+and replies to `[H, a]`. `a` returns `done`. A third bot receives the
+exchange on its next turn, or on its periodic catch-up if nothing else starts
+one first, and returns `done`.
 
 If `a` had not mentioned `b`, the classifier could infer the dependency from
 the thread. If `a` had said nothing, `b`'s scheduled follow-up would ask for
@@ -896,10 +952,10 @@ resolves to the same explicit bot set when their agent lists agree.
 |---|---|---|
 | Several scenarios in one room | Use `orchestrator:` and `mute: @all` only during structured meetings | Supported: casual talk, meeting, then casual talk again. |
 | Several scenarios in one thread | Change controls on that thread | Supported: a debugging thread can become a vote and return; there is no gateway-owned activity that must be "finished". |
-| Casual conversation | Classifier + catch-up | Supported; catch-up should initially be tuned more eagerly. |
+| Casual conversation | Classifier; periodic catch-up | Supported; a greeting or a thank-you starts nobody unless a bot's profile says it greets. |
 | Brainstorm | Orchestrator skill + `mute: @all` | Supported; costs more orchestrator turns and keeps no gateway round record. |
 | Status, decision, or roadmap meeting | Orchestrator addresses reporters or voters | Supported; the orchestrator mutes a bot that will not stop. |
-| Debugging | Classifier + larger thread limit | Supported; likely experts speak first and others catch up. |
+| Debugging | Classifier + larger thread limit | Supported; the likely experts speak first, and the periodic catch-up gives every other bot one look at the diagnosis. |
 | Divide and collaborate | Mentions + follow-up skill | Supported without gateway deadlines or a completion report; the room is the report. |
 | Support or triage | Answering bot mentions a specialist | Supported. |
 | Scheduled or agent-only room | Rate, cooldown, `done`, mute | Supported, but needs self-termination, a cap, or a mute to end a loop. |
@@ -976,6 +1032,8 @@ Measure classifier quality against blind human labels of the exact classifier
 input. Keep that separate from operational outcomes, including:
 
 - selected-to-`done` and unselected-to-later-reply rates;
+- periodic catch-up turns, how many spoke or returned `done`, and the
+  corrections that came from them rather than from addressed or selected turns;
 - classifier `remove` suggestions and what addressed bots actually did;
 - duplicates, corrections, missed recipients, and closed-thread attempts;
 - unfinished-thread duration and silent handoff stalls;
@@ -1020,8 +1078,8 @@ The simulator gets these tests first; the gateway reuses them.
   it; backend failures do not change the count.
 - With `consecutive_invalid_limit: 0`, the streak is counted and shown but no
   bot is degraded.
-- A failure notice starts no turn, produces no classifier call, counts toward
-  catch-up but not the rate limit, and is not delivered to its own bot.
+- A failure notice starts no turn, produces no classifier call, does not
+  count for the rate limit, and is not delivered to its own bot.
 - Exercise failures at every save/post boundary.
 - Post one turn's replies into two threads and count each in its own thread.
 - Enforce open/closed threads and canonical `to` mentions.
@@ -1087,8 +1145,20 @@ The simulator gets these tests first; the gateway reuses them.
 - A rate-limited bot-to-bot mention starts on a later sweep once eligible, but
   starts nothing if another turn delivered its post first.
 - A still-valid cached classifier choice starts its held bot on a later sweep;
-  after expiry, only ordinary catch-up can start it, and the expiry is counted
-  in status.
+  after expiry, only the periodic catch-up delivers that post, and the expiry
+  is counted in status.
+- A bot idle for `catch_up_idle_seconds` with undelivered posts gets one
+  catch-up turn that delivers every waiting thread; with an empty backlog, or
+  with `catch_up_idle_seconds` at `0`, it gets none.
+- The timer counts from the last normal turn end and from a restart, and is
+  not persisted; a failed catch-up turn leaves it alone and is retried after
+  the backoff.
+- A thread closed to the bot or in cooldown is not a catch-up candidate; no
+  catch-up starts while a post behind the cursor, in any thread, is still being
+  classified, and the pick for that post starts its turn once the decision
+  arrives; a thread whose only undelivered post is a failure notice is not a
+  candidate.
+- `HINT` on a catch-up turn asks for additions or revisions and names no post.
 - `HINT` states the turn source and the three thread groups that match the
   eligibility path that started the turn.
 - One room-wide delivery usually satisfies several qualifying threads.
@@ -1131,7 +1201,8 @@ Decide these from simulator and lab measurements:
   high-water marks.
 - Whether orchestrator collection turns should bypass classification so one
   turn can collect a full round.
-- Catch-up frequency and thresholds.
+- `catch_up_idle_seconds`. Section 8.1's catch-up counts decide: how many
+  periodic turns speak, and how many corrections only they produce.
 - Envelope encoding: a fenced JSON block, the entire response as JSON, or
   backend-native structured output where available. Claude supports
   `--json-schema`; the OpenCode HTTP backend does not. Choose the encoding in
@@ -1169,6 +1240,18 @@ Decide these from simulator and lab measurements:
 - **Job types.** Mutes and backoff delay all jobs equally. Time-sensitive,
   okay-to-delay, and droppable job types are a planned follow-on once the
   follow-up skill has run in the lab.
+- **A post-level grade that starts catch-up.** The variant measured in the
+  simulator: the classifier also grades each post (does it state something
+  that looks wrong, or whose wrongness would mislead the room), and a flagged
+  post starts a serial queue of one look per unaddressed bot, each seeing the
+  earlier looks. It corrected the same errors as the periodic catch-up in
+  fewer posts and sooner, at the cost of a second classifier judgment about
+  content, a queue with its own ordering, restart and failure rules, and a hint
+  that told the bot a post was doubtful. Set aside to keep the design small:
+  for something critical the relevant bot is usually addressed already.
+  Reconsider if production testing shows corrections arriving too late through
+  the periodic catch-up, or an idle interval short enough to catch them
+  costing too many `done` turns.
 - **Classifying failure notices.** A notice bypasses the classifier. Reconsider
   if the lab shows a peer should be chosen to handle a bot's failure.
 - **Backoff and degraded state as permanent features.** Both are provisional
