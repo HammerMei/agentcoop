@@ -84,7 +84,8 @@ delivery, explicit turn eligibility, and a better choice of who speaks.
   to replies.
 - **Every bot eventually sees everything.** A bot has one cursor per room, not
   per thread. Delivery happens on the bot's next turn, whatever starts it; the
-  periodic catch-up bounds how long that wait can be.
+  periodic catch-up bounds how long that wait can be within one gateway
+  process.
 - **One bot runs at most one turn per room at a time.** No queue of waiting
   turns is persisted; eligibility is reconstructed from backlog and state.
 - **The platform is the shared record.** Gateways do not exchange private
@@ -150,7 +151,7 @@ A count or duration of `0` disables that limit.
 | `rate_limit_seconds` | Window in which an agent post remains recent. |
 | `cooldown_seconds` | Minimum interval between one bot's posts in a thread. |
 | `sweep_interval_seconds` | Interval between periodic sweeps for one bot in one room. |
-| `catch_up_idle_seconds` | Time without a turn in a room after which a bot gets one catch-up turn for the posts it has not seen. Default 1800. |
+| `catch_up_idle_seconds` | Time without a turn in a room, counted within one gateway process, after which a bot gets one catch-up turn for the posts it has not seen. Default 1800. |
 | `control_ttl_days` | Thread inactivity after which settings expire. |
 | `classifier_posts` | Maximum recent thread posts shown to the classifier. |
 | `classifier_timeout_seconds` | Timeout for one classifier call. |
@@ -556,9 +557,14 @@ the next turn that starts for another reason.
 The turn delivers the whole backlog, so one turn per bot per
 interval is the most the mechanism costs, and an empty backlog starts nothing.
 The timer counts from the bot's last normal turn end, and from the gateway's
-start or restart, so a restart wakes nobody at once; a failed turn does not
-reset it, and the retry follows the backoff (`FAILURE_NOTICE`). `0` disables
-the periodic catch-up. Each gateway keeps the timer for the bots it hosts.
+start or restart; a failed turn does not reset it, and the retry follows the
+backoff (`FAILURE_NOTICE`). `0` disables the periodic catch-up. Each gateway
+keeps the timer in memory for the bots it hosts and persists nothing for it:
+the bound of section 2.2 holds within one gateway process. A restart wakes
+nobody at once, and a restart cadence shorter than the interval defers the
+catch-up until the gateway runs one full interval. A deployment that restarts
+that often has a bigger problem than a late catch-up, and persisting the
+deadline would make every overdue bot wake together after a long outage.
 
 `HINT` tells the bot it was not addressed and asks whether it has something to
 add or revise that the thread does not already have; otherwise it returns
@@ -1144,8 +1150,9 @@ The simulator gets these tests first; the gateway reuses them.
 - A bot idle for `catch_up_idle_seconds` with undelivered posts gets one
   catch-up turn that delivers every waiting thread; with an empty backlog, or
   with `catch_up_idle_seconds` at `0`, it gets none.
-- The timer counts from the last normal turn end and from a restart; a failed
-  catch-up turn leaves it alone and is retried after the backoff.
+- The timer counts from the last normal turn end and from a restart, and is
+  not persisted; a failed catch-up turn leaves it alone and is retried after
+  the backoff.
 - A thread closed to the bot or in cooldown is not a catch-up candidate; no
   catch-up starts while a post behind the cursor, in any thread, is still being
   classified, and the pick for that post starts its turn once the decision
