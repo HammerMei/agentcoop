@@ -39,6 +39,8 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-09-25 | #186 r4 F1 — a group-writable COOP_HOME (0770/0775) passes `runtime_dir_is_ours` (boundary written in SECURITY.md) | DROP; `silent` | a report of a lower-privileged group member altering COOP_HOME contents | 2027-09-25 | open |
 | 2026-09-25 | #186 r4 F2 — a container started with `COOP_HOME` set splits where the entrypoint writes and `coop` reads | DROP, recorded on #183 | #183's image ships still honouring `COOP_HOME`, or a user report of `coop start` failing in the container | 2027-09-25 | open |
 | 2026-10-07 | #195 r1 F1 — RC replay re-runs the human reset for an unmentioned post; an in-flight agent delivery keeps a free turn | DROP | `Agent chain counters reset … had turns` logged directly after `replaying missed messages` for a room whose human post was unmentioned, or any chain observed past `max_turns+1` | 2027-10-07 | open |
+| 2026-11-14 | #205 r1 F7 — `session/resume` without `mcpServers` is rejected by a conforming agent | DROP (`cannot-occur`: ACP v1 schema `ResumeSessionRequest.required = [sessionId, cwd]`) | an ACP agent answering `invalid_params` naming `mcpServers` on a `session/resume` that omits it | 2027-11-14 | open |
+| 2026-11-14 | #205 r4 J3 — a project `.opencode/` config defining `coop-<path_key>` outranks the gateway's watcher entry | DROP (ADR-0001: the working directory is the agent's own; the ruleset is unaffected) | a `coop-<path_key>` entry found in a project config that neither the operator nor the agent wrote | 2027-11-14 | open |
 
 ---
 
@@ -1328,3 +1330,147 @@ others cost one lost pick framing or one wasted turn per idle peer.
 **Adoption:** 3 FIX of 4, one escalated and closed as MAKE IT LOUD by the owner.
 
 **Cost:** one rater run (~18 minutes, ~190k tokens), ~35 minutes of author time.
+
+---
+
+## 2026-11-14 — PR #205 round 1 (design: ACP agent backend for opencode 2.x)
+
+**Chain detector:** 8 findings on `37aadb3`, first round, `--`, no chain.
+**Control finding:** #181 r9 F1 (`settled: implemented`) was included as F9, blind by
+intent. Rater 2 disclosed that it hit the ledger row while grepping for the finding's
+file, so it was **not blind on the control**. Its F9 answer (FILE at the time, not a
+DROP) matches the settled outcome, but the control did not test independence this
+round. Agreement **uncorroborated**. Tree untouched until rater 2 reported.
+
+Increment: "design doc for a generic ACP agent backend (`type: acp` + per-agent
+profile) that supports opencode 2.x, plus the manual probes behind its live evidence.
+No gateway code changes." A finding on the doc is true when the specified mechanism
+cannot be built from the gateway as it is, or the text cites something that does not
+exist; the "fix" is the document.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F1** a user `allow` rule in `OPENCODE_CONFIG_CONTENT` placed after the gateway's `ask` catch-alls wins, bypassing the broker, "directly contradicts R4/ADR-0002" (P1) | ADR claim untrue: ADR-0002 Decision para says `ask` is injected "unless the user set a value", and the design copies the 1.x merge. Operator-authored env is inside the trust boundary. **DROP** | ADR claim untrue (same clause). Then: the "user value" has **no source** — `AgentConfig` has no `env` field, and the 1.x function reads only `sidecar_env` (`adapter.py:327`), hardcoded by `service.py`, so the respect-user branch is unreachable from the gateway; the design's "the agent's `env:`" (P5) names nothing. `silent`. MAKE IT LOUD: name the input, specify a WARNING, FILE the ADR question | **FIX (doc)** — rater 1 conceded on checkable evidence (`gateway/core/config.py` `AgentConfig`, `adapter.py:327`): the design referenced an input that does not exist. Outcome simpler than either verdict: P3 now states there is no operator input, the profile sets the variable over any inherited value and logs the override at INFO, and R4's gap is "no supported way to weaken a rule", as on 1.x. ADR unchanged |
+| **F2** the lifecycle sends the history handoff before `ensure_durable_instructions`, so the watcher entry cannot be selected "after `session/new`" and the handoff turn runs on the operator's default mode (P2) | true (`watcher_lifecycle.py` steps 3, 3.6, 4; `create_session` carries no `path_key`). On 2.x the default mode is the operator's own agent, a foreign identity. **FIX**: reorder the lifecycle in this increment | true, same trace. The handoff turn runs without the header on every backend today and its reply is discarded, so that half is pre-existing. `cheap` at the backend layer: selection happens in `ensure_durable_instructions` (session attached, so the `config_option_update` wait applies) and on re-attach; the reorder is a lifecycle change for its own increment | **FIX (doc)** on rater 2's shape, the cheapest correct fix inside the increment. P5 steps 2-4 rewritten; the reorder is listed in §9 as later work. Both raters rank this first: a wrong mechanism in the design outranks the bugs |
+| **F3** probe: `clear()` inside `wait_option_update` drops an update that lands before the wait (P2) | `cheap` | partly: real in step 3's fallback branch (an `await` sits between write and wait), `cannot-occur` in steps 4-5 (no yield point). `cheap` | **FIX** — clear moved to the callers |
+| **F4** `backend_identity()` is called with `agent_cfg.type` at all three sites, so `acp:<profile>` cannot be produced (P1) | true (`watcher_lifecycle.py:704`, `:1728`, `config_validate.py:586`). `silent` replay into the wrong store on a profile switch. **FIX (doc)** | true, same sites. Replay unreachable until a second profile ships and then loud (`resume` of a foreign id errors). The real consequence: the persisted string must carry the profile from release one, or a later change refuses every stored ACP session. `cheap` (doc) | **FIX (doc)** — `AgentConfig.identity_type`, the three sites named, "persisted with the profile from the first release". Rater 2's consequence adopted as the stated reason. Also fixed from rater 2's aside: §3.1 said `working_directory` "may be empty today"; the loader requires it (`config.py` `load_config`) |
+| **F5** on expiry the lifecycle reclaims the prompt file even when `delete_session` is unconfirmed, so "entry removed only after the session is closed" cannot be enforced (P2) | premise true (`:731-751`), consequence unreachable: `_maps.remove_session` runs first and the record is gone, so nothing prompts the orphan. `cheap`: reword the guarantee | premise true, plus the reload-removal path keeps the session on purpose (`session_manager.py:786`). Consequence near zero for the same reason. `cheap` at the backend layer: reclaim sends `session/close` to every session it selected onto the entry, then removes it | **FIX (doc)** on rater 2's shape: the backend closes, it does not rely on the caller's order. Invariant 9 reworded. Codex's conditional-reclaim fix declined: it would leak entries forever |
+| **F6** probe: a relative `<config path>` diverges from the child's cwd (P2) | `cheap` | true, not silent (step 1 fails loudly). `cheap` | **FIX** — `os.path.abspath` on both arguments |
+| **F7** `session/resume` must carry `mcpServers`, "a conforming strict agent rejects every reattachment" (P1) | untrue: ACP v1 schema `$defs.ResumeSessionRequest.required = ["sessionId", "cwd"]`. **DROP** | untrue, same field, plus opencode `service.ts` defaults an absent list to `[]`. `cannot-occur`. **DROP** | **DROP** — written on the thread, ledger row added. One phrase added to the §3.4 row so the next reader does not re-derive it |
+| **F8** probe: `kill()` without `wait()` before respawn (P2) | `cheap` | partly: opencode's private server exits on the pipe's EOF (`standalone.ts:24-31`), so the overlap is bounded; a zombie remains. `cheap` ×3 files | **FIX** — `await proc.wait()` after `kill()` in all three probes |
+| **F9** (control) `save()` validates beside the resolved target; a relative `working_directory` through a symlink resolves against the wrong directory | — (known) | not blind (see above). On HEAD untrue: `config_base_dir()` resolves against `$COOP_HOME` (#182, PR #186). Historically FILE, agrees with the ledger | control not independent this round |
+
+Notes:
+- Adoption: 7 of 8 (6 doc or probe fixes, 1 DROP). Verdicts agree on 6; F1 and F2
+  were disagreements on the fix's shape, both converged on rater 2's evidence
+  (F1: the input does not exist; F2: the cheapest correct fix is inside the backend).
+  No rates were needed: every surviving finding passed `cheap` against its cheapest
+  correct fix.
+- Severity re-ranked: Codex's three P1s are one false claim (F7), one false ADR claim
+  with a true unnamed-input problem under it (F1), and one true but unreachable-today
+  defect whose real consequence is the persisted identity format (F4). Its P2 F2 is the
+  top finding of the round.
+- Found outside the nine by rater 2: the PR's CI lint was red. `tests/manual/` is
+  inside `ruff check gateway/ tests/`, and the three probes carried 46 E701/E702/E401/
+  I001 errors plus three C901 (`main` 17 and 16, `pump` 11). Fixed by restructuring
+  the probes (dispatch helpers), no `noqa` added. Lesson already in memory: run lint
+  before push.
+- Cost: 1 round, 2 raters, about 75 minutes of attention.
+
+**Status: open** — fixes pushed, confirming Codex round requested.
+
+---
+
+## 2026-11-14 — PR #205 round 2 (confirming round on `6836a3c`)
+
+**Chain detector:** 14 findings over 2 rounds, round 2 `1 finding(s) on our own last fix, streak 1` for the design doc. Once is noise by the rule. By inspection the six findings land on sections round 1 did not touch (§3.4 create_session row, §3.5 cancel, §3.6 ask shape and invariant 1, §3.8 rung (a), §4 P6), so the round is new ground.
+**Control finding:** #181 r9 F1 again, as G7, with rater 2 told not to open this log. Rater 2 traced it to `config_base_dir()` and #186, called it false on HEAD and outside the PR, and flagged it as the likely control. **Passed**: the category prior points at FIX, the trace points at the fix that already landed. First corroborated agreement in this log. Tree untouched until rater 2 reported.
+
+Increment unchanged from round 1.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **G1** `query` and `pattern` are not in `_CLAUDE_PARAM_FIELD`, so a `websearch` ask falls back to the whole input and a `params` rule stops matching (P2) | true, the design's "already match" sentence is wrong (`tool_match.py:45-54`). `cheap`: two table rows, shared with `type: claude` | true, three rows (`websearch`, `grep`, `glob`); the shipped `tool: "WebSearch"` preset has no `params` and is unaffected; owning layer is the core table, which a profile cannot reach. `cheap` | **FIX (doc)** — P6 corrected, three rows named as a core change that also changes `type: claude`, called out as such |
+| **G2** rung (a) cannot send `systemPrompt` on `session/new` because the content exists only at `ensure_durable_instructions`; close+re-attach is a "change" that Claude applies at the next compaction (P2) | true, same root as round-1 F2. FIX: close + re-attach with `systemPrompt` at ensure time; the lifecycle reorder stays later work | partly: claude-agent-acp records the prompt on the **first request** (`src/client-system-prompt.ts`), so close+re-attach before any turn is an initial delivery and works; the defect is the history handoff being that first request. `hits_per_year` 0 now (no rung-(a) profile ships), 0–18/yr once one does. FIX (doc): state the constraint | **FIX (doc)** on rater 2's evidence: §3.8 (a) now states the first-request rule and that **a rung-(a) profile is unsupported until the lifecycle delivers the durable instructions before the history handoff (§9)**. Converged on a checkable source |
+| **G3** `ToolCallUpdate` fields are optional, so a partial ask patch would normalise to `other` (P2) | schema-true; the fold keeps a per-`toolCallId` record anyway. `cheap`, one sentence | schema-true, `cannot-occur` for the three known adapters without the AIR capability (`permission.ts` `ask`, claude `renderer.ts`, codex `renderPermissionToolCall`), which the backend does not advertise. FIX-cheap anyway: cheaper than writing the assumption down | **FIX (doc)** — §3.6 merges the ask over the fold's record and records the AIR assumption |
+| **G4** `new_session_args` on `type: acp` is ignored at DEBUG, a migrating operator loses a model flag silently (P2) | true as to silence. 1.x opencode already ignored `extra_args`, at WARNING (`adapter.py:872`). FIX: WARNING at start | true as to silence, consequence mostly wrong: on 1.x opencode the field held `opencode serve` flags, not a model; the model case is Claude→acp (§5.1). Owning layer: config load. MAKE IT LOUD at load, do not map onto `opencode acp` | **FIX (doc)** on rater 2's shape: config loading warns on a `type: acp` agent with a non-empty `new_session_args`, beside the `tool: external_directory` warning. Not mapped onto argv |
+| **G5** a saved `always` from any interactive opencode run in the same project beats the injected `ask`, so R4 is false for this profile (P1) | true, `permission.ts:187-188`, silent, operator-caused. FIX: `XDG_DATA_HOME` isolation, operator logs in under the same variable | true, same lines, plus: credentials live in the same database (`credential.ts`), so the env line alone breaks P2; spec the pair with `auth_hint`. 1.x `always` in memory `[unverified]` by rater 2, confirmed by rater 1 (`v1.18.13 permission/index.ts:145-150`). Reachability: one precondition. **Rank 1** | **FIX (doc)** — owner's decision 2026-11-14: `XDG_DATA_HOME=<RUNTIME_DIR>/opencode/data` on the spawn environment (P1), `auth_hint` carries the variable (P2), P3 states the mechanism and why; reading the opencode database at start or per turn was declined by the owner (detection only, and a dependency on opencode's schema). §8 item 4 becomes a runnable probe. Added on top, as the runtime R4 assertion both raters priced as MAKE IT LOUD: the fold logs ERROR when a gated tool runs without an ask (§3.5) |
+| **G6** a cancel that does not drain leaves the session wedged, the next turn fails "indefinitely" (P2) | true. FIX: `session/close` + re-attach, process restart as fallback | partly: opencode's own cancel path bounds the drain at 5 s and frees the slot; the wedge needs the core to hang inside the turn (the Appendix A trigger is a removed entry with no cancel sent). Loud, not silent (`-32603` every turn). `session/close` is the same `FiberMap.remove` on the same fiber (`turn.ts:397-398`) and hangs the same way. FIX (one sentence): terminate the process, `AgentUnavailableError`, lazy re-attach | **FIX (doc)** on rater 2's shape, converged on `turn.ts:397-398`: §3.5 step 5 terminates the process. The finding's "indefinitely" on the cancel path is unsupported and the thread says so |
+| **G7** (control) `save()` validates beside the symlink target | — (known) | false on HEAD (`config_base_dir()` → `RUNTIME_DIR`, #186), outside the PR, DROP; flagged as the likely control | control passed |
+
+Notes:
+- Adoption: 6 of 6. Verdicts agree on all six; the fix shape differed on G2, G4 and G6, and rater 1 conceded each on a source line (`client-system-prompt.ts`, `adapter.py:296/474`, `turn.ts:397-398`). Rates were not needed: every surviving finding passed `cheap` against the cheapest correct fix.
+- Severity re-ranked: G5's P1 stands and leads. The other five P2s are wrong-rationale fixes in a design doc, which CLAUDE.md ranks above small bugs; G6's P2 overstates (loud).
+- Two owner decisions this round: `XDG_DATA_HOME` isolation (G5) and no database reads from the gateway.
+- Cost: 1 round, 2 raters, about 90 minutes of attention, most of it on G5's source trace and the owner's questions about scope and undo.
+
+**Status: open** — fixes pushed, confirming Codex round requested.
+
+---
+
+## 2026-11-14 — PR #205 round 3 (confirming round on `175f29b`)
+
+**Chain detector:** 16 findings over 3 rounds, round 3 `1 finding(s) on our own last fix, streak 2 — STOP` for the design doc. **Checked and found to be an artifact.** `git blame` on the two doc findings' lines (`:210`, `:760`) gives `50f45a1`, the 2026-11-07 text, so neither sits on a round-2 fix. The hit is the three round-2 doc comments (ids 4575367977/85/90, `created_at` 19:41, `original_commit_id 6836a3c`) that GitHub re-anchored to `175f29b` when the file changed. The detector keys on `commit_id`, which moves with the anchor. Same class as the #181 r9 limitation, in the other direction: that one missed a chain, this one invented one. Recorded for the detector; the stop rule was not applied because its precondition did not hold.
+**Arrival check failed once:** the first listing read only two findings. `gh api` without `--paginate` returns one page of 30, and the PR had passed that. The GraphQL count of unresolved threads (4, not 2) caught it before any thread was resolved. Written into memory.
+**Control finding:** none this round. **Rater 2 not run**: all four findings pass the `cheap` gate (two one-liners on probes, two sentences in the design) and the method scores nothing for a `cheap` FIX. Noted as a deliberate shortcut, not a precedent for scored findings.
+
+| | rater 1 (author) | outcome |
+|---|---|---|
+| **H1** probe step 5 waits on a shared event, so when `sid1`'s `config_option_update` lands first the probe reads `c.options[sid2]` before it exists and records `current=None` (P2) | true, and it explains the `current=None` in both live runs (the notification for `sid2` printed `current=watcher_a`). The design does not cite that value, so no doc change. `cheap`: a per-session event | **FIX** — `option_event(sid)`, callers wait on the session they inspect; the re-run reads `current=watcher_a` |
+| **H2** `probe_resume.py` and `probe_new_session.py` pass a relative `<cwd>` through unchanged, and resume's `cwd` must equal the stored absolute directory (P2) | true, loud (attach fails). `cheap` | **FIX** — `os.path.abspath` in both, as `probe_agent_mode.py` already does |
+| **I1** `profile` is mandatory for `type: acp`, but the §3.1 wiring list only adds `acp` to the type enumerations; neither `coop config add agent` (`cli.py:318`, `--type` only) nor the TUI form (`agent_detail.py:122`, type enum, no profile field) can produce a loadable agent (P2) | true. A wrong wiring list the implementer would follow verbatim. `cheap` (doc) | **FIX (doc)** — §3.1 names `--profile` (required with `--type acp`) and a registry-backed `profile` enum on the TUI form shown for `acp` |
+| **I2** the alias "`tool: edit` matches `Edit` and `Write`" cannot come from the shared predicate, which is one `re.fullmatch(rule.tool, tool_name, IGNORECASE)` (`tool_match.py:554`); the design promises the alias without specifying the matcher change (P2) | true. Same class as round-2 G1: a promise with no mechanism. `cheap` (doc). Owning layer: the predicate, with the map per profile so a `tool: edit` rule on a Claude agent keeps meaning `Edit` | **FIX (doc)** — P6 specifies `profile.rule_aliases = {"edit": ("Edit", "Write")}` and the predicate trying each alias before the plain match |
+
+Notes:
+- Adoption: 4 of 4. Two probe one-liners, two design sentences. The round was not "all nits": I1 and I2 are the same class as round 2's G1 (a stated behaviour with no mechanism behind it), so a confirming round is requested rather than stopping here.
+- Codex's security review did not run in any of the three rounds (its paying account reported insufficient credits); the code review ran each time.
+- Cost: 3 rounds, 2 raters in rounds 1 and 2, about 3.5 hours of attention across the PR.
+
+**Status: open** — fixes pushed, confirming Codex round requested.
+
+---
+
+## 2026-11-14 — PR #205 round 4 (confirming round on `adca85a`)
+
+**Chain detector:** 21 findings over 4 rounds, round 4 `1 finding(s) on our own last fix, streak 3 — STOP`. `git blame` on the five anchors: `:683` and `:422` are the 2026-11-07 text, `:878` and `:920` are `37aadb3` (the commit the PR opened on, before any round), `:220` is `adca85a` (round 3's I1). So the real chain is **streak 1** (round 3's was the re-anchoring artifact), which the rule calls noise. The stop rule was not applied. What the one real hit shows is a **pattern**: I1 added an entry to the hand-written wiring list, J5 found the next missing entry. The pattern fix is not a longer list. §3.1 now says the tests own that enumeration (`RELOAD_ACTIONS`' exhaustiveness test, `check_backend_signatures`, the config-load tests) and the list is orientation.
+**Arrival check:** the `created_at > 00:30` filter returned nothing because the review landed at 23:44. The unresolved-thread count (5) and an id-based `--paginate` fetch recovered all five. Filter on the review's own timestamp, not a guess.
+**Control finding:** none. **Rater 2 not run**: every surviving item is a sentence in the design, and one is a DROP on an ADR's stated boundary. Said here so the shortcut is visible.
+
+| | rater 1 (author) | outcome |
+|---|---|---|
+| **J1** the ruleset leaves `read`, `grep`, `glob` and subagent calls at opencode's default allow, so a guest runs them with no ask; "add force-ask entries for every tool category governed by the broker" (P1) | half wrong, half right. ADR-0002's Decision paragraph names the opencode injection scope as bash, edit, webfetch, websearch, so `read`/`grep`/`glob` at default is the ADR's own scope, not this profile's gap. But the P3 sentence "R4's gap statement is then only the action gap" was false: 2.x adds `question`, `subagent`, `skill` as actions (`[docs]` v2 permissions "Defaults"), and on `type: claude` the matching calls go through the ladder. P1 inflated. `cheap` (doc) | **FIX (doc)** — P3 gains "The scope gap", listing the six ungated actions, naming three as 2.x-new, and leaving whether to ask for them as the owner's policy call (put to the owner with this round). The sentence J1 caught was replaced, not appended to |
+| **J2** `RUNTIME_DIR/opencode/<agent id>.jsonc` interpolates the raw config key; the loader does not validate it as one path component (P2) | true: `_parse_one_agent` has no name rule, the CLI does (`cli.py:317`). `cheap` (doc) | **FIX (doc)** — the loader applies the CLI's regex to a `type: acp` agent's key |
+| **J3** a project `.opencode/` config defining `coop-<path_key>` outranks the gateway's entry; the prefix does not enforce the claim (P2) | true as a mechanism, inside the trust boundary: the working directory is the agent's own (ADR-0001) and a project config there is the same class as an `AGENTS.md` the agent can write. The ruleset is unaffected (`OPENCODE_CONFIG_CONTENT` outranks project config). Random names would defend the agent from itself | **DROP** — one sentence in P5 states the boundary. Reversal: a report of a `coop-<path_key>` entry in a project config that the operator did not write and the agent did not write |
+| **J4** re-pointing the Claude broker at the shared predicate loses the `_CLAUDE_META_TOOLS` unconditional allow (P1) | true at `claude/broker.py:195-199`, and already guarded: the design requires the brokers' tests to prove the decision table did not move. P1 inflated. `cheap` (doc) | **FIX (doc)** — §3.6: the predicate is the ladder and nothing before it; the meta-tool pre-check stays in the Claude broker |
+| **J5** `profile` must be classified in `RELOAD_ACTIONS[AgentConfig]` (`config_diff.py:51-71`, exhaustive, tested); the wiring list omits it (P2) | true. Same pattern as I1. `cheap` (doc) | **FIX (doc)** via the pattern move above, with `config_diff.py` added to the orientation list |
+
+Notes:
+- Adoption: 4 of 5, 1 DROP. Verdict kinds: one ADR-scope misread with a true sentence under it (J1), one trust-boundary DROP (J3), three single-sentence spec completions. The useful signal is thinning: nothing this round changed a mechanism.
+- J1 leaves a policy question for the owner (ask for `question`/`subagent`/`skill` on this profile, or not). The next Codex round waits for that answer, because it changes P3.
+- Owner's answer (2026-11-15): ask for `subagent` and `skill`, leave `question`. The reason that settled `subagent` was found while answering, not in the finding: an agent entry's own `permissions` are pushed after the global rules and a child session evaluates against its own agent's ruleset, so the agent name is a permission-profile switch and the gateway's `ask` rules do not reach the child (2.2.6 `config/plugin/agent.ts`, `permission.ts` `configured`; 1.18.13 `subagent-permissions.ts` inherits only `deny`). `question` stays out because on 1.18.13 the tool never asks and the key only hides it. P3 gains the ruleset rows and the rationale, P6 gains the `Task`/`Skill` field mapping, §8 gains item 8.
+- Cost: 4 rounds, about 4 hours across the PR.
+
+**Status: closed** — settles with round 5 below.
+
+## 2026-11-15 — PR #205 round 5 (final round on `05223a2`, after the owner's J1 answer)
+
+**Chain detector:** 28 findings over 5 rounds, round 5 `1 finding(s) on our own last fix, streak 1`, no chain. The one finding (K1) lands on the paragraph `05223a2` added, which is where a finding on a new paragraph has to land.
+**Arrival check:** five inline comments, five unresolved threads, review on `05223a2`. All read with `--paginate`, filtered on the review's own timestamp.
+**Control finding:** none in the batch. Rater 2 pointed out the log does have a settled entry (`#181 r9 F1`, `settled: implemented`) that could have served; it was not sent. Agreement this round is therefore uncorroborated.
+**Rater 2:** blind, same five findings, method and constants, no verdicts. Verdicts agreed on all five (FIX). Ranking agreed on the top two (K5, K1); the tail differed (rater 1 K4 > K3, rater 2 K3 > K4), both far from a band edge. Three fix shapes came from rater 2 and were taken: the K1 load-time warning, the K2 relabel, the K5 "early room check stays in front of the shared call" choice.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **K5** §3.6 ladder puts "no room → deny" first; `ClaudePermissionBroker._decide` checks guest list, owner skip, owner list and `human_approval=false` before needing a room (P2) | true, and the sentence "both existing brokers implement the same ladder" is false: the 1.x opencode broker checks the room first (`opencode/broker.py:247`), Claude only at the ask step (`claude/broker.py:176-230`). Rank 1: a wrong rationale that would change a 1.x broker's row if built as written. `cheap` (doc) | same evidence, same rank. "Pick and state it": fold the early check into the predicate (a 1.x behaviour change) or keep it in front like the meta-tool pre-check | **FIX (doc)** — ladder rewritten in the Claude order, the 1.x divergence named, the 1.x opencode broker keeps its early room check in front of the shared call so its table does not move |
+| **K1** a guest allow-listed for a custom `Task` such as `deploy` runs that entry's `shell: allow` with no ask; "gate or reject subagents with overriding permissions, or apply force-ask after each entry's rules" (P1) | true, needs two operator lines (`agents.deploy.permissions` and a guest `Task` rule); the shipped guest rules carry no `Task`. Silent. The gateway cannot re-apply after an entry's rules (they load last). A profile rule "guests get built-ins only" couples the profile to opencode's built-in names. Rank 2. `cheap` (doc) | same reachability, `hours_per_hit` 5–40 h, `silent` until §8 item 8 is run. FIX (doc) + MAKE IT LOUD: name it in the R4 gap statement, state the `Task`-rule divergence from `type: claude`, extend P6's load-time warning to a guest `Task` rule on a `type: acp` agent. FILE the built-ins-only rule | **FIX (doc) + MAKE IT LOUD** — P3 paragraph on what a guest `Task` rule grants here, the config-load warning, the scope gap names it. The built-ins-only rule is not filed: the warning plus a scoped rule is the guardrail, and a rule bound to opencode's built-in names would drift |
+| **K3** `tool_call_update` `failed` folds to `✓ <name>` like `completed` (P2) | true, inherited: the 1.x parser emits `✓` for `error` too (`adapter.py:1387`). The row is this increment's. `cheap` (doc) | same. Take the `✗` cell, FILE the 1.x parser | **FIX (doc)** — `failed` → `✗ <name>`, the 1.x parity stated and declined. The 1.x parser is not filed: the 1.x backend's changes are its retirement |
+| **K4** cost `None` on the first turn after attach, also for a session created with `session/new`, whose baseline is zero (P2) | true. `cheap` (doc) | same, loud (`n/a` in the usage log) | **FIX (doc)** — zero baseline for `session/new`, `None` only after `load`/`resume` |
+| **K2** README labels a three-action ruleset "the §4 force-ask ruleset" (P2) | true. `cheap` | true, with a trap: `probe_agent_mode.py` carries the same three actions and produced the `[live]` evidence, so expanding the README alone misstates what ran | **FIX** — README shows the seven-action ruleset and says the live evidence and the probe's `RULESET` used the three-action subset |
+
+Notes:
+- Adoption: 5 of 5. Verdict kinds: one wrong rationale in the design (K5), one silent operator-configured bypass (K1), three single-row spec corrections. K1 is the only finding on the previous round's fix, and it was not a chain: the paragraph was new, the finding completed it.
+- Severity re-rank vs Codex: K5 (badged P2) above K1 (badged P1). K1's P1 is category-driven; K5 changes what gets built.
+- Convergence: this was the owner's agreed final round ("answer J1, one confirming round, then stop"). No further round is requested. The merge decision is the owner's.
+- Cost: 5 rounds, about 5 hours across the PR; this round 1 rater, 25 min.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
