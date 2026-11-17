@@ -58,6 +58,9 @@ role.
 - **agent**: an `agents:` entry. In this increment an agent is remote: the gateway
   holds a token for it and a cursor per room, and never a process.
 - **bot**: unchanged (CONTEXT.md): an agent's presence on one chat server.
+- **role**: the label on a delivered post's author: `owner`, `guest` or `agent`
+  (direction §3.1). `agent` is any bot in the room's roster. An author the
+  configuration does not list is a `guest`. No role is dropped before delivery.
 - **wake**: one doorbell event for one bot in one room, with a lease.
 - **turn**: what the agent does between a wake and its `done`.
 - **bio**: the agent's short self-description, pushed by the agent, read by the

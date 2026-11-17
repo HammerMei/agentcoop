@@ -64,6 +64,13 @@ label on every delivered message is server-injected and cannot be forged by post
 content. The only hard control AgentCoop legitimately owns is on its own connector,
 the chat platform: posting (rate, closed threads, mute), applied in enforce mode.
 
+Roles are labels, not permissions. There are three: `owner`, `guest` and `agent`.
+A sender the configuration does not list is a `guest`. The `anonymous` role of the
+current gateway, which drops an unlisted sender before delivery, goes away: the
+gateway delivers and labels, and the agent decides. Finer roles are later work, for
+example a delegate of an owner, or an agent's own owner as distinct from a room's
+owner.
+
 Consequence: agents run in their harness's permission-bypass mode by default
 (`--dangerously-skip-permissions`, `--auto`, `--dangerously-bypass-approvals-and-sandbox`).
 The hard ceiling is the harness's own deny configuration, set by the owner.
@@ -144,7 +151,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | Watcher pause and resume | Kept. |
 | Dynamic watchers: `rooms:` include and except patterns, DM opt-in, room discovery from the stream, idle and expiry reclaim | Kept. It is gateway-side. The agent configures nothing per room: a wake names the room, and the gateway creates the cursor when it discovers the room. |
 | `AgentSession`, `ScriptConnector`, `pipe_to()` | Retired with the hosted-agent model. |
-| RBAC roles (owner, guest, anonymous), role from trusted connector context | Kept. The role rides every delivered message. |
+| RBAC roles, role from trusted connector context | Kept as labels: `owner`, `guest`, `agent` (§3.1). An unlisted sender is a `guest`. The role rides every delivered message and nothing is enforced by it. |
 | Tool allow-lists, parameter matching, tree-sitter command parsing, guest tool rejection | Removed (§3.1). |
 | Human-in-the-loop approval: approval ids, timeouts, queue pause, hook and SSE transports | Removed (§3.1). |
 | Context injection: connector, agent and watcher context files | Moved. Identity is the agent's own. Room rules are a skill the gateway publishes. |
