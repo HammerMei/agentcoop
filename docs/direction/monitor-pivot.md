@@ -162,7 +162,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | CLI: `send` (text, file, stdin) | Kept. It is the agent's send path. |
 | CLI: `fetch-history` | Kept. It is the agent's read path, extended to inject wake metadata. |
 | CLI: `schedule create/list/delete/pause/resume` | Removed (§3.2). |
-| coop-keeper, `coop config add/remove/patch` | Kept. The agent entry changes to a remote agent. |
+| coop-keeper, `coop config add/remove/patch` | Kept, unchanged in place: coop-keeper stays the operator's local admin agent on the gateway host, editing `config.yaml` through the CLI as today. No configuration endpoint is added to the doorbell. What changes is the entry it writes: `type: remote` plus a token, in place of a hosted backend. |
 | Configuration: YAML, templates, `tool_presets`, `rooms:` expansion, schema, validation | Kept, minus the permission fields. |
 | Agent chain: token, per-sender budgets, TTL | Replaced (§3.3). The agent list configuration survives: the classifier and the rate limit need it. |
 
