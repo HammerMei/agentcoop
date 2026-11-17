@@ -142,6 +142,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | Session persistence (`state.json`), session ids across restarts, reset | Session ids move to the utility. The gateway persists the cursor and the agent roster. `reset` stays as a gateway command that tells the utility to start a new session. |
 | Per-room serial queue, queue depth limits | Replaced by one outstanding wake per agent per room (spec §5.5 as a lease). |
 | Watcher pause and resume | Kept. |
+| Dynamic watchers: `rooms:` include and except patterns, DM opt-in, room discovery from the stream, idle and expiry reclaim | Kept. It is gateway-side. The agent configures nothing per room: a wake names the room, and the gateway creates the cursor when it discovers the room. |
 | `AgentSession`, `ScriptConnector`, `pipe_to()` | Retired with the hosted-agent model. |
 | RBAC roles (owner, guest, anonymous), role from trusted connector context | Kept. The role rides every delivered message. |
 | Tool allow-lists, parameter matching, tree-sitter command parsing, guest tool rejection | Removed (§3.1). |
