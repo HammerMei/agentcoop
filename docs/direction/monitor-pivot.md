@@ -119,6 +119,14 @@ permission broker as its centrepiece (R4, §3.6, P3). With the broker gone and a
 in bypass mode, a one-shot command per wake covers Claude Code, Codex and OpenCode
 without ACP. ACP returns in the second phase, when streaming or forwarding asks to an owner is wanted.
 
+### 3.8 Voice gateway: removed
+
+The voice gateway was experimental. It runs `claude -p` per request and answers
+synchronously, so it depends on the hosted backends this direction removes. It is
+out of the pivot. If a use case appears it comes back as a
+separate layer above the gateway, with its own speech handling and a synchronous
+reply path, not as a connector inside the gateway.
+
 ## 4. What is removed, kept, moved
 
 Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
@@ -129,7 +137,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | Message triggering: DM, `@mention`, room-wide mentions | Kept as the `addressed` turn source. The classifier adds `picked`. |
 | Attachments: inbound download, size limits, metadata in prompt | Kept. The CLI read path returns attachment metadata. |
 | Typing and status indicators | Kept. The gateway sends typing on wake. |
-| Voice gateway (experimental) | Depends on the hosted backends (it runs `claude -p` per request and answers synchronously). Open decision in the design document. |
+| Voice gateway (experimental) | Removed (§3.8). If revived, it is a layer above the gateway, not a connector. |
 | Claude CLI backend, OpenCode backend, backend behaviour | Moved into the agent-side utility as one-shot command adapters. Not a gateway component. |
 | Session persistence (`state.json`), session ids across restarts, reset | Session ids move to the utility. The gateway persists the cursor and the agent roster. `reset` stays as a gateway command that tells the utility to start a new session. |
 | Per-room serial queue, queue depth limits | Replaced by one outstanding wake per agent per room (spec §5.5 as a lease). |
@@ -208,6 +216,7 @@ This direction overrides, without editing them yet:
   only in enforce mode), §5.11 (`FOLLOW_UP`, the scheduler is gone), §8.2 (the
   implementation sequence), §10 (remote agents are the mainline, not an extension).
 - `docs/agent-chain.md`.
+- `docs/supported-features.md`, the voice gateway section (removed, §3.8).
 - The permission entries of CONTEXT.md.
 
 ## 9. Evidence

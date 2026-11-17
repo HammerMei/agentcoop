@@ -50,9 +50,8 @@ role.
 - The pre-scan firewall and the `relayed` flag's computation (the field is carried,
   always `false` in this increment).
 - ACP (second phase, direction §3.7).
-- The voice gateway. It runs `claude -p` per request and answers synchronously
-  (`docs/supported-features.md`), so it depends on the hosted backends this
-  increment removes. Its future is an open decision (§8).
+- The voice gateway (removed, direction §3.8). Its code stays on the frozen
+  `gateway/` package and is deleted with it.
 
 ## 2. Vocabulary
 
@@ -395,9 +394,6 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
   per-run flag is not.
 - Whether `coop read` returns attachments as metadata only (as today) or downloads
   them into the agent's working directory.
-- The voice gateway: port it to the utility (one wake per request with a
-  synchronous reply path), keep it on the frozen `gateway/` package until then, or
-  retire it.
 
 ## 9. Supersedes
 
