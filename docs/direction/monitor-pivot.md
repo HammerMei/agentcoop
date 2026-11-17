@@ -135,7 +135,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 |---|---|
 | Rocket.Chat and Mattermost connectors: routing, reconnect, watermark dedup, multi-connector, auth modes | Kept. They are the monitor's eyes. |
 | Message triggering: DM, `@mention`, room-wide mentions | Kept as the `addressed` turn source. The classifier adds `picked`. |
-| Attachments: inbound download, size limits, metadata in prompt | Kept. The CLI read path returns attachment metadata. |
+| Attachments: inbound download, size limits, metadata in prompt | Changed to lazy fetch. `coop read` lists attachments with ids; the agent fetches one through the gateway only when it needs it. The size limit applies at that fetch. |
 | Typing and status indicators | Kept. The gateway sends typing on wake. |
 | Voice gateway (experimental) | Removed (§3.8). If revived, it is a layer above the gateway, not a connector. |
 | Claude CLI backend, OpenCode backend, backend behaviour | Moved into the agent-side utility as one-shot command adapters. Not a gateway component. |

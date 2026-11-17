@@ -161,6 +161,7 @@ POST /v1/agents/me/bio                 {text}
 GET  /v1/rules                         the room-rules skill, with its version
 GET  /v1/agents/me/posts?room&after&through   what coop read calls
 POST /v1/agents/me/posts               what coop send calls in enforce mode
+GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway fetches from the platform
 ```
 
 Authentication: a bearer token per agent, issued by configuration (`coop config add
@@ -219,6 +220,7 @@ coop read  [--room R] [--wake W]   prints the hint, then every post after the cu
 coop send  --thread T --to a,b [--control mute=a,b] TEXT
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
+coop attachment ID [--out PATH]    downloads one attachment through the gateway into the working directory
 ```
 
 `read` fetches from the platform through the gateway's history path
@@ -228,6 +230,19 @@ server-authenticated author and role, and marks the trigger post. In both modes
 the gateway validates against the hint and refuses what §5.9 forbids. In measure
 mode it posts anyway and reports a would-have-been refusal as a warning on the
 CLI's stderr and in its own counters.
+
+Attachments are fetched lazily. `read` lists each attachment as one line with its
+id, name, type, size and the exact command to fetch it
+(`attachment a1: report.pdf application/pdf 3.1 MB -> coop attachment a1`). The
+gateway downloads nothing on receipt and nothing on `read`: `coop attachment`
+asks the gateway, which fetches the file from the platform with the bot's
+account and streams it to the agent. The size limit applies at that fetch. A
+file is transferred only to the agents that ask for it, once each, so a large
+file in a room with several agents is not copied to every one of them. The
+skill states that an agent does not answer about a file it has not fetched. The
+gateway counts wakes whose trigger post carried an attachment and whether the
+agent fetched it before `done`, per agent, so an agent that answers without
+reading is visible in the counters rather than in a wrong reply.
 
 The room-rules skill is one document whose master copy lives in the gateway
 (`/v1/rules`). The gateway is the only place the rules are edited, so a change
@@ -392,8 +407,6 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
   are on one LAN.
 - Codex per-run instructions: `AGENTS.md` in the working directory is confirmed. A
   per-run flag is not.
-- Whether `coop read` returns attachments as metadata only (as today) or downloads
-  them into the agent's working directory.
 
 ## 9. Supersedes
 
