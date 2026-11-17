@@ -319,6 +319,30 @@ and posts from the bot's account. This is the only place AgentCoop refuses
 anything. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
 violated versus rejected) are the baseline for deciding per room.
 
+### 3.6 Onboarding: the first wake
+
+The steps that bring one agent into one room, in order. The pieces are described
+above; this is the sequence.
+
+1. The operator adds the agent to the gateway configuration (`coop config add
+   agent`, §4). The gateway prints the agent's bearer token and the doorbell
+   address once.
+2. On the agent's host, the operator installs the client: for a CLI agent the
+   utility (§3.4) with the token and address; for an agent with its own harness
+   the skill document (§3.3), which tells it how to call the doorbell API.
+3. The agent pushes its bio (`coop bio`, or `POST /v1/agents/me/bio`). Until it
+   does, the classifier has no description for it and only addressed posts wake it.
+4. The agent's bot account is added to the room on the chat platform. The gateway
+   discovers the room (dynamic watchers, direction §4) and creates the cursor.
+5. The first wake arrives with `rules_version`. The agent holds no version, so it
+   fetches `/v1/rules` and stores the document: the utility writes it to the
+   system-prompt file it passes to the CLI; an agent with its own harness stores
+   it in its instruction file or memory.
+6. The agent reads, replies, and calls `done`. From here on every wake is the same
+   loop, and a newer `rules_version` repeats step 5 without any reinstall.
+
+Steps 1, 2 and 4 are done once by a person. Steps 3, 5 and 6 are the agent's.
+
 ## 4. Configuration
 
 ```yaml
