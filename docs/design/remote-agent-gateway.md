@@ -331,7 +331,8 @@ above; this is the sequence.
    utility (§3.4) with the token and address; for an agent with its own harness
    the skill document (§3.3), which tells it how to call the doorbell API.
 3. The agent pushes its bio (`coop bio`, or `POST /v1/agents/me/bio`). Until it
-   does, the classifier has no description for it and only addressed posts wake it.
+   does, the classifier has nothing to match on, so only addressed posts and the
+   periodic catch-up wake it.
 4. The agent's bot account is added to the room on the chat platform. The gateway
    discovers the room (dynamic watchers, direction §4) and creates the cursor.
 5. The first wake arrives with `rules_version`. The agent holds no version, so it
