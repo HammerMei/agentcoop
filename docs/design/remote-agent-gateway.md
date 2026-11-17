@@ -94,6 +94,7 @@ The gateway keeps, per room:
 room:
   agents: [a, b, c]            # the configured agent list (§5.14)
   bios: {a: {text: ..., version: ...}}
+  agents: {a: {last_seen: ...}}   # in memory; last doorbell request of any kind
   threads:
     T1: {muted: [...], orchestrator: ..., limit: ..., set_at: ...}
   bots:
@@ -125,7 +126,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
 | 5.11 | follow-up | Out. The scheduler is removed. The agent's own scheduler posts through `coop send` like any other post. |
 | 5.12 | orchestrator | Unchanged wake-side (exemptions, who may mute). |
-| 5.13 | status | Unchanged, plus per-bot lease state, last `done`, bio version. |
+| 5.13 | status | Unchanged, plus per-bot lease state, last `done`, bio version, and per-agent `online`/`offline` with `last_seen`. |
 | 5.14 | agent list | Unchanged, plus the bio per agent. |
 
 The code comes from `tools/roomsim/gateway.py`: eligibility (`_hard_hold`,
@@ -197,7 +198,10 @@ rules_version: 3                 # the agent re-fetches /v1/rules when this chan
 
 The payload carries no post text. The agent reads the posts itself.
 
-Lease: `lease_expires_at` is the agent's timeout for the room. A `done` after
+Lease: `lease_expires_at` is the agent's timeout for the room. The lease starts
+when the agent's poll picks the wake up, not when the gateway decides to issue it.
+A wake for an agent that is not polling stays pending, the cursor does not move,
+and the agent's first poll on return receives it with the current hwm. A `done` after
 expiry is accepted and logged, but the gateway has already applied the failure
 backoff and may have issued a new wake. One outstanding wake per bot per room: a
 post that arrives while a wake is outstanding stays in the backlog and the next
@@ -206,6 +210,17 @@ coalescing the live Muse agent built.
 
 Busy and dead: a lease that expires without `done` is a backend failure. Two
 expiries in a row trip the backoff like two failed turns.
+
+Liveness: the long-poll is the heartbeat. A live client always has one wake
+request open, so the gateway receives a request from each agent at least once per
+`wait` period. `last_seen` is the time of the agent's last doorbell request of any
+kind. An agent is `offline` when `last_seen` is older than twice `wait`, and
+`online` on its next request. Offline is not a failed turn: no backoff, no lease.
+`coop status` and `list` show the state and `last_seen`. A transition posts the
+optional online/offline notice through the failure-notice path, as today's
+per-watcher notification does. This covers the one transport in this increment.
+A push transport (MCP Events, A2A) gives the gateway no periodic request, so
+liveness for those is decided with them.
 
 Typing: the gateway sends the platform's typing indicator from the bot's account
 when it issues an `addressed` wake, and clears it on `done` or expiry.

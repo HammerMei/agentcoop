@@ -144,6 +144,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | Message triggering: DM, `@mention`, room-wide mentions | Kept as the `addressed` turn source. The classifier adds `picked`. |
 | Attachments: inbound download, size limits, metadata in prompt | Changed to lazy fetch. `coop read` lists attachments with ids; the agent fetches one through the gateway only when it needs it. The size limit applies at that fetch. |
 | Typing and status indicators | Kept. The gateway sends typing on wake. |
+| Online/offline notifications per watcher | Kept, per agent. The long-poll is the heartbeat: an agent that stops polling is offline, and the notice fires on the transition. |
 | Voice gateway (experimental) | Removed (§3.8). If revived, it is a layer above the gateway, not a connector. |
 | Claude CLI backend, OpenCode backend, backend behaviour | Moved into the agent-side utility as one-shot command adapters. Not a gateway component. |
 | Session persistence (`state.json`), session ids across restarts, reset | Session ids move to the utility. The gateway persists the cursor and the agent roster. `reset` stays as a gateway command that tells the utility to start a new session. |
