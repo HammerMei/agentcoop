@@ -212,7 +212,11 @@ implementation. The floor is the skill document plus REST.
   and are later work.
 - A hosted personal-agent VM allows a user-started long-running process. Proven on
   one vendor. Not stated by the others.
-- MCP Events will finalise close to the current draft.
+- MCP Events (SEP-3415) is accepted by the MCP maintainers but not yet in the
+  published specification. The later MCP Events transport (§5) assumes the final
+  version keeps the draft's `events/subscribe` call and webhook delivery. If it
+  changes, that transport is designed again. Nothing in the first increment
+  depends on it.
 
 ## 8. Supersedes
 
