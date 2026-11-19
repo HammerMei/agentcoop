@@ -91,10 +91,12 @@ gateway ──── doorbell ───▶ agent host
 The gateway keeps, per room:
 
 ```yaml
+agents:                        # per agent, across rooms
+  a:
+    bio: {text: ..., version: ...}   # persisted; pushed before any room exists (§3.6)
+    last_seen: ...                   # in memory; last doorbell request of any kind
 room:
   agents: [a, b, c]            # the configured agent list (§5.14)
-  bios: {a: {text: ..., version: ...}}
-  agents: {a: {last_seen: ...}}   # in memory; last doorbell request of any kind
   threads:
     T1: {muted: [...], orchestrator: ..., limit: ..., set_at: ...}
   bots:
@@ -169,7 +171,9 @@ GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway f
 ```
 
 Authentication: a bearer token per agent, issued by configuration (`coop config add
-agent` prints it once). The token reads room history and posts as the bot, so it
+agent` prints the token, the address and, when `gateway.tls` is set, the
+certificate fingerprint, once). The utility refuses a certificate that does not
+match the fingerprint it was given. The token reads room history and posts as the bot, so it
 travels only over TLS: a production listener on any directly reachable address
 terminates TLS, in the gateway (`gateway.tls`, §4: a self-signed certificate whose
 fingerprint the utility pins) or in a proxy in front of it. A plain `http://`
@@ -207,7 +211,9 @@ The payload carries no post text. The agent reads the posts itself.
 Lease: `lease_expires_at` is the agent's timeout for the room. The lease starts
 when the agent's poll picks the wake up, not when the gateway decides to issue it.
 A wake for an agent that is not polling stays pending, the cursor does not move,
-and the agent's first poll on return receives it with the current hwm. A `done` that
+and the agent's first poll on return receives it with the hwm it was issued with,
+as spec §5.6 fixes the mark at turn start. Posts after that mark stay in the
+backlog for the next sweep after `done`. A `done` that
 names a wake with no live lease is logged and moves nothing: the gateway has
 already applied the failure backoff and may have issued a new wake. One outstanding wake per bot per room: a
 post that arrives while a wake is outstanding stays in the backlog and the next
@@ -220,8 +226,9 @@ expiries in a row trip the backoff like two failed turns.
 Liveness: the long-poll is the heartbeat. A live client always has one wake
 request open, so the gateway receives a request from each agent at least once per
 `wait` period. `last_seen` is the time of the agent's last doorbell request of any
-kind. An agent is `offline` when `last_seen` is older than twice `wait`, and
-`online` on its next request. Offline is not a failed turn: no backoff, no lease.
+kind. An agent is `offline` when `last_seen` is older than twice `wait` and it
+holds no live lease (a turn in progress makes no requests while the agent
+thinks), and `online` on its next request. Offline is not a failed turn: no backoff, no lease.
 `coop status` and `list` show the state and `last_seen`. A transition posts the
 optional online/offline notice through the failure-notice path, as today's
 per-watcher notification does. This covers the one transport in this increment.
@@ -229,7 +236,8 @@ A push transport (MCP Events, A2A) gives the gateway no periodic request, so
 liveness for those is decided with them.
 
 Typing: the gateway sends the platform's typing indicator from the bot's account
-when it issues an `addressed` wake, and clears it on `done` or expiry.
+when the agent's poll picks up an `addressed` wake, and clears it on `done` or
+expiry.
 
 ### 3.3 The agent CLI and skill
 
@@ -241,7 +249,9 @@ API directly, following the skill document.
 coop read  [--room R] [--wake W]   prints the hint, then every post after the cursor
                                    through the wake's hwm, one per line:
                                    [thread] #id author (role): text
-coop send  --thread T [--to a,b] [--control mute=a,b] [TEXT]   text needs --to; at least one of text or --control
+coop send  [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+                                   --thread for a reply, --room for a new top-level post;
+                                   text needs --to; at least one of text or --control
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
 coop attachment ID [--out PATH]    downloads one attachment through the gateway into the working directory
@@ -253,7 +263,11 @@ server-authenticated author and role, and marks the trigger post. In both modes
 `send` posts through the gateway, which holds the bot's account. In enforce mode
 the gateway validates against the hint and refuses what §5.9 forbids. In measure
 mode it posts anyway and reports a would-have-been refusal as a warning on the
-CLI's stderr and in its own counters. `done --answered` is needed in both modes: a
+CLI's stderr and in its own counters. `send` is not idempotent and the CLI does
+not retry it. The error for a lost response is written for the agent, inside its
+turn, and says what to do: "the reply may have been posted: the gateway did not
+answer in time. Run `coop read` and post again only if the reply is not in the
+room." `done --answered` is needed in both modes: a
 `must-reply` thread answered with `done` alone leaves no post, so the unfinished
 set (§5.7) cannot be inferred from the platform.
 
@@ -266,9 +280,9 @@ account and streams it to the agent. The size limit applies at that fetch. A
 file is transferred only to the agents that ask for it, once each, so a large
 file in a room with several agents is not copied to every one of them. The
 skill states that an agent does not answer about a file it has not fetched. The
-gateway counts wakes whose trigger post carried an attachment and whether the
-agent fetched it before `done`, per agent, so an agent that answers without
-reading is visible in the counters rather than in a wrong reply.
+gateway counts, per agent, the attachments delivered in a wake's range and
+whether each was fetched before `done`, so an agent that answers without reading
+is visible in the counters rather than in a wrong reply.
 
 The room-rules skill is one document whose master copy lives in the gateway
 (`/v1/rules`). The gateway is the only place the rules are edited, so a change
@@ -352,8 +366,11 @@ forbid. This is the only place AgentCoop refuses anything.
 
 A `send` from a bot with no outstanding wake in that room (its own scheduler, a
 reply after its lease ended, a post on its own initiative) is an unsolicited post.
-The gateway checks it against mute, rate, closed threads and `to` only, there being
-no hint to check against, in both modes, and counts it separately. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
+It names its destination: `--thread` for a reply, which the gateway resolves to
+the thread's room, or `--room` for a new top-level post. The gateway checks it
+against mute, rate, closed threads, `to` and, for a control, §5.9's authority and
+target checks from the thread's settings, there being no hint to check against,
+in both modes, and counts it separately. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
 violated versus rejected) are the baseline for deciding per room.
 
 ### 3.6 Onboarding: the first wake
@@ -362,8 +379,8 @@ The steps that bring one agent into one room, in order. The pieces are described
 above; this is the sequence.
 
 1. The operator adds the agent to the gateway configuration (`coop config add
-   agent`, §4). The gateway prints the agent's bearer token and the doorbell
-   address once.
+   agent`, §4). The gateway prints the agent's bearer token, the doorbell
+   address and, with TLS on, the certificate fingerprint, once.
 2. On the agent's host, the operator installs the client: for a CLI agent the
    utility (§3.4) with the token and address; for an agent with its own harness
    the skill document (§3.3), which tells it how to call the doorbell API.

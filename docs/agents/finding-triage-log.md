@@ -1503,3 +1503,32 @@ Notes:
 - Cost: 1 round, 2 raters, about 50 minutes.
 
 **Status: open** — fixes pushed, re-review requested. The merge decision is the owner's.
+
+## 2026-11-19 — PR #207 round 2 (Codex on `2c23210`, `docs/design/remote-agent-gateway.md`)
+
+**Chain detector:** 22 findings over 2 rounds, round 2 `10 finding(s) on our own last fix, streak 1`, no chain (once is noise). Read: six of the eleven land on round-1 text by `git blame`, five of them *extend* a fix (G275 and G342 complete the unsolicited-post paragraph F88 added, G285 completes F626's TLS rule, G293 is the liveness rule meeting F80's "no new wake during a command", G321 is the lease-at-pickup sentence). None replaces a fix. Watched for round 3: a second streak on the same paragraphs means stop and re-read the increment, not another patch.
+**Arrival check:** 11 inline comments, review on `2c23210`, read with `--paginate` and filtered on the review's timestamp. The security review did not run again (credits).
+**Control finding:** none. The ledger still has no `settled: bit`/`held` row, and round 1 showed a `settled: implemented` row cannot serve against the live tree. Agreement this round is uncorroborated. Rater 2 disclosed that `git show 2c23210` printed round 1's log entry in the diff (F findings only, no G material).
+**Rater 2:** blind, 11 findings, method, constants, the three documents and the simulator, no verdicts. Verdicts agreed on all 11 (10 FIX, G337 DROP). Rater 2's fix shape was taken over rater 1's on G321 (freeze the mark at issue, citing spec §5.6 "fix a high-water mark at turn start", instead of rebuilding the payload at pickup) and on G346/G305 (one restructure, a per-agent block, answers both). Rankings differed at the top (rater 1: G321 first; rater 2: G285, G293, G321); every verdict is FIX, so no band edge is near.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **G321** a pending wake picked up with the *current* hwm while its hint describes the original trigger: a later addressed post is read, then skipped by the saved cursor (P1) | true, `silent`, rank 1; fix: rebuild hint and hwm at pickup | true, `silent`, traced through sim L296/L646; cheaper fix: freeze the hwm at issue, the backlog sentence already covers the rest; spec §5.6 fixes the mark at turn start | **FIX** — hwm frozen at issue; later posts wait for the next sweep |
+| **G285** the utility pins a fingerprint nobody gave it (P1) | true, completes F626 | true; built as written it is TOFU on the path the token travels; security by reachability on the LAN deployment | **FIX** — `config add agent` prints token, address and fingerprint; utility refuses a mismatch; §3.6 step 1 updated |
+| **G312** direction says classifier is fail-open, design says addressed-only (P2) | true, contradiction | true, one site, design is authoritative; wrong rationale in the direction doc | **FIX** — direction says `addressed-only` on error, spec §5.1 |
+| **G275** `send` names only a thread: no top-level unsolicited post, no room for a multi-room agent (P1) | true; `--room` for a new post | true; gate call stated: `cheap` because `--room` already exists on `read`; scored FIX anyway | **FIX** — `[--room R \| --thread T]`, §3.5 names the destination |
+| **G346** bio stored per room, pushed before any room (P1) | true; bio is agent-level | true, loud at build, silent degradation if built per room | **FIX** — per-agent block in the state example |
+| **G342** unsolicited `--control` skips §5.9 authority (P2) | true, one clause | partly: the simulator ignores an unauthorised control, so the consequence is a misleading visible line and an uncounted violation, not an applied mute | **FIX** — authority and target checks added, folded into the §3.5 rewrite with G275 |
+| **G293** a turn longer than 2×`wait` with no calls is marked offline (P2) | true, noise | true, loud, fires on ordinary long turns and posts into the room | **FIX** — offline only without a live lease |
+| **G300** typing at issue, pending wake never clears it (P2) | true, cosmetic | true on Rocket.Chat (explicit clear), auto-clears on Mattermost | **FIX** — typing on pickup, both documents |
+| **G331** attachment counter sees trigger posts only (P2) | true | true, a measurement gap | **FIX** — counts the delivered range |
+| **G305** duplicate `agents` key in the state example (P2) | true, from the liveness commit | true | **FIX** — same restructure as G346 |
+| **G337** `send` retry after a lost response posts twice: add an idempotency key (P2) | true mechanism, not worth a new field plus retained results for a visible duplicate the contract allows; one sentence instead | scored: 0.03–9 hits/yr × 0.05 h, fix 3.5 h, tax 0.5 h/yr → net ≤ 0 across the range; DROP, optional one-liner | **DROP** the key; owner agreed (2026-11-19). Reason: duplicates are inside §14.4 and `net_annual_saving` ≤ 0. Reversal: a duplicate reply in a live room whose gateway log shows the post but no ack. Revisit 2027-11-19. The one-liner is in: the CLI does not retry, and the error names the cause and tells the agent to `read` before posting again |
+
+Notes:
+- Adoption: 10 of 11. All ten are bounded edits, no new mechanism; the one new mechanism proposed (G337) was the one dropped.
+- Severity re-rank vs Codex: G321 (P1) first; G275 (P1) and G346 (P1) mid, loud at build; G312 (P2) up, a direction-doc rationale.
+- Pattern (rater 2): four findings (G275, G321, G342, G346) are "a thing the design names has no stated home or lifecycle" (room on `send`, the mark at pickup, authority on an unsolicited control, the bio before a room). The sweep for round 3 is one pass over every noun in §3.1–3.5 asking where it is stored and when it is fixed.
+- Cost: 1 round, 2 raters, about 45 minutes.
+
+**Status: open** — fixes pushed, re-review requested. The merge decision is the owner's.

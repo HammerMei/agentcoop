@@ -114,7 +114,8 @@ the description to 0.97 with it.
 
 ### 3.6 Classifier and the other gateway mechanics: kept, in shadow first
 
-The classifier (one call per post, one question per agent, fail-open on error),
+The classifier (one call per post, one question per agent, `addressed-only` on
+error, spec §5.1),
 periodic catch-up, cursor, mute, orchestrator, rate and cooldown, the enforce
 switch: spec §5 lands in the gateway. Run in shadow mode on a live room and compare
 scores with what agents actually did before setting thresholds.
@@ -143,7 +144,7 @@ Dispositions of every feature in `docs/supported-features.md` as of 2026-11-17.
 | Rocket.Chat and Mattermost connectors: routing, reconnect, watermark dedup, multi-connector, auth modes | Kept. They are the monitor's eyes. |
 | Message triggering: DM, `@mention`, room-wide mentions | Kept as the `addressed` turn source. The classifier adds `picked`. |
 | Attachments: inbound download, size limits, metadata in prompt | Changed to lazy fetch. `coop read` lists attachments with ids; the agent fetches one through the gateway only when it needs it. The size limit applies at that fetch. |
-| Typing and status indicators | Kept. The gateway sends typing on wake. |
+| Typing and status indicators | Kept. The gateway sends typing when an addressed wake is picked up. |
 | Online/offline notifications per watcher | Kept, per agent. The long-poll is the heartbeat: an agent that stops polling is offline, and the notice fires on the transition. |
 | Voice gateway (experimental) | Removed (§3.8). If revived, it is a layer above the gateway, not a connector. |
 | Claude CLI backend, OpenCode backend, backend behaviour | Moved into the agent-side utility as one-shot command adapters. Not a gateway component. |
