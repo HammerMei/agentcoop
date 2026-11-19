@@ -75,7 +75,7 @@ role.
 
 ```
 platform (Mattermost / Rocket.Chat)
-   ▲ posts                    ▲ posts via CLI (measure) or via gateway (enforce)
+   ▲ posts                    ▲ posts via gateway, both modes (refused only in enforce)
    │                          │
 gateway ──── doorbell ───▶ agent host
   connectors                  utility (CLI agents) ── runs ── claude -p / codex exec / opencode run
@@ -119,7 +119,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.3 | rate limit, cooldown | Wake-side holds unchanged. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. Post-side refusal only in enforce mode. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
 | 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). |
-| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark. `done` carries it back and the gateway saves it as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
+| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat: an agent registered with `heartbeat: agent` gets no periodic catch-up. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Validation: in measure mode `send` warns and records; in enforce mode the gateway refuses. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
@@ -136,7 +136,7 @@ The code comes from `tools/roomsim/gateway.py`: eligibility (`_hard_hold`,
 (`_backend_failure`, backoff fields of `BotVolatile`), the hint (`_build_hint`,
 `_group`, `_allowance`). What changes is the turn: `_start_turn` issues a wake
 instead of invoking a runner, `_end_turn` runs on `done` instead of on a runner's
-output, and `_post_replies` runs only in enforce mode. `tests/roomsim/` becomes the
+output, and `_post_replies` runs on every `send` and refuses only in enforce mode. `tests/roomsim/` becomes the
 gateway's mechanism test suite with a fake agent that answers wakes through the same
 API the CLI uses.
 
@@ -160,16 +160,22 @@ this increment.
 
 ```
 GET  /v1/agents/me/wake?wait=30        long-poll; returns one wake or nothing
-POST /v1/agents/me/done                {wake_id, hwm, answered: [threads], failed?: reason}
+POST /v1/agents/me/done                {wake_id, answered: [threads], failed?: reason}
 POST /v1/agents/me/bio                 {text}
 GET  /v1/rules                         the room-rules skill, with its version
 GET  /v1/agents/me/posts?room&after&through   what coop read calls
-POST /v1/agents/me/posts               what coop send calls in enforce mode
+POST /v1/agents/me/posts               what coop send calls, in both modes; refusal only in enforce mode
 GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway fetches from the platform
 ```
 
 Authentication: a bearer token per agent, issued by configuration (`coop config add
-agent` prints it once). The gateway listens on a configured address. Today the
+agent` prints it once). The token reads room history and posts as the bot, so it
+travels only over TLS: a production listener on any directly reachable address
+terminates TLS, in the gateway (`gateway.tls`, §4: a self-signed certificate whose
+fingerprint the utility pins) or in a proxy in front of it. A plain `http://`
+address is accepted for loopback, an SSH tunnel to loopback, and test
+deployments, and the utility prints a warning when it connects to one. The gateway
+listens on a configured address. Today the
 gateway exposes only a local control socket (`gateway/control.py`). The listener is
 new. Its reachability from each agent's host (the same machine, a LAN, a
 vendor VM) is confirmed per agent before migration (§7).
@@ -201,9 +207,9 @@ The payload carries no post text. The agent reads the posts itself.
 Lease: `lease_expires_at` is the agent's timeout for the room. The lease starts
 when the agent's poll picks the wake up, not when the gateway decides to issue it.
 A wake for an agent that is not polling stays pending, the cursor does not move,
-and the agent's first poll on return receives it with the current hwm. A `done` after
-expiry is accepted and logged, but the gateway has already applied the failure
-backoff and may have issued a new wake. One outstanding wake per bot per room: a
+and the agent's first poll on return receives it with the current hwm. A `done` that
+names a wake with no live lease is logged and moves nothing: the gateway has
+already applied the failure backoff and may have issued a new wake. One outstanding wake per bot per room: a
 post that arrives while a wake is outstanding stays in the backlog and the next
 sweep after `done` picks it up. This is the simulator's `ONE_TURN` and the wake
 coalescing the live Muse agent built.
@@ -235,7 +241,7 @@ API directly, following the skill document.
 coop read  [--room R] [--wake W]   prints the hint, then every post after the cursor
                                    through the wake's hwm, one per line:
                                    [thread] #id author (role): text
-coop send  --thread T --to a,b [--control mute=a,b] TEXT
+coop send  --thread T [--to a,b] [--control mute=a,b] [TEXT]   text needs --to; at least one of text or --control
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
 coop attachment ID [--out PATH]    downloads one attachment through the gateway into the working directory
@@ -247,7 +253,9 @@ server-authenticated author and role, and marks the trigger post. In both modes
 `send` posts through the gateway, which holds the bot's account. In enforce mode
 the gateway validates against the hint and refuses what §5.9 forbids. In measure
 mode it posts anyway and reports a would-have-been refusal as a warning on the
-CLI's stderr and in its own counters.
+CLI's stderr and in its own counters. `done --answered` is needed in both modes: a
+`must-reply` thread answered with `done` alone leaves no post, so the unfinished
+set (§5.7) cannot be inferred from the platform.
 
 Attachments are fetched lazily. `read` lists each attachment as one line with its
 id, name, type, size and the exact command to fetch it
@@ -307,13 +315,22 @@ repository, `[unverified]` to settle before the adapter is called done.
 |---|---|---|---|---|
 | Claude Code | `claude -p --output-format json --append-system-prompt-file rules.md --dangerously-skip-permissions "<wake text>"` `[docs]`; the session id comes from the `session_id` field of the JSON output, as `gateway/agents/claude/adapter.py` reads it today `[src]` | `claude -p -r <session> ...` `[docs]` | `--append-system-prompt-file` `[docs]`, optional `--agent` `[docs]` | `--dangerously-skip-permissions` `[docs]`; hard ceiling via `--disallowedTools` `[docs]` or settings |
 | OpenCode 2.2.6 | `opencode run --session <id> --agent <entry> --format json --auto "<wake text>"` `[help]`; `--session`: "Session ID to continue, or to create if it does not exist" `[help]` | same `--session` `[help]` | an agent entry whose `system` is the rules, in a config file the utility writes. `OPENCODE_CONFIG` was verified live for `opencode acp` only (`acp-agent-backend.md` §8 item 6); `run` talks to a background service unless `--standalone` `[help]`, so the config path is `[unverified]` for `run` | `--auto`: "Auto-approve permissions that are not explicitly denied" `[help]` |
-| Codex | `codex exec --json --dangerously-bypass-approvals-and-sandbox "<wake text>"` `[help]`; reading the thread id from the output is `[unverified]` | `codex exec resume <id>` ("Resume a previous session by id or pick the most recent with --last") `[help]` | `AGENTS.md` in the working directory, written by the utility `[unverified]`: the reference page redirected and was not read | `--dangerously-bypass-approvals-and-sandbox` `[help]`; `--full-auto` `[unverified]` |
+| Codex | `codex exec --json --dangerously-bypass-approvals-and-sandbox "<wake text>"` `[help]`; reading the thread id from the output is `[unverified]` | `codex exec resume <id>` ("Resume a previous session by id or pick the most recent with --last") `[help]` | `[unverified]`: the carrier is settled from `[help]` evidence before the adapter is done. The reference page redirected and was not read. Whatever it is, the utility never writes a file the owner's working directory already holds, so a repository's own `AGENTS.md` is not replaced | `--dangerously-bypass-approvals-and-sandbox` `[help]`; `--full-auto` `[unverified]` |
 
 The wake text is short: the room, the wake id, and "run `coop read --wake <id>`,
 act, then `coop done --wake <id>`". The agent does the reading and sending itself
 with the CLI, which is in its tool set. If the command exits without a `done`
-having been sent, the utility sends `done --failed "no done from agent"` when the
-exit code is non-zero, or `done` with the wake's `hwm` when it is zero.
+having been sent, whatever the exit code, the utility sends `done --failed "no
+done from agent"`: the cursor stays, the failure notice names it, and the next wake
+delivers the same posts again. An agent that sent replies and skipped `done` may
+answer twice, visibly. A fabricated `done` would skip the posts silently, which is
+the worse side of that trade.
+
+The utility stops the command at `lease_expires_at` (terminate, then kill) and
+sends `done --failed "lease expired"`. It takes no new wake while a command runs.
+The skill tells an agent with its own harness not to `send` after
+`lease_expires_at`. A late send from such an agent is an unsolicited post (§3.5),
+best effort.
 
 Session persistence: the utility stores the session or thread id per room in its
 own state file. `coop reset <watcher>` tells the utility, through the next wake's
@@ -328,10 +345,15 @@ Working directory and credentials are the owner's, as today's `agents:` entries.
 
 ### 3.5 Enforce mode
 
-With `enforce: true` for a room, `coop send` hands the reply to the gateway, which
-applies §5.9 validation and the mute, rate and closed-thread rules at posting time,
-and posts from the bot's account. This is the only place AgentCoop refuses
-anything. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
+`coop send` always hands the reply to the gateway, which posts from the bot's
+account. With `enforce: true` for a room the gateway applies §5.9 validation and
+the mute, rate and closed-thread rules at posting time and refuses what they
+forbid. This is the only place AgentCoop refuses anything.
+
+A `send` from a bot with no outstanding wake in that room (its own scheduler, a
+reply after its lease ended, a post on its own initiative) is an unsolicited post.
+The gateway checks it against mute, rate, closed threads and `to` only, there being
+no hint to check against, in both modes, and counts it separately. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
 violated versus rejected) are the baseline for deciding per room.
 
 ### 3.6 Onboarding: the first wake
@@ -370,6 +392,7 @@ agents:
     bio_source: pushed           # pushed | platform | card
 gateway:
   listen: 127.0.0.1:7474         # the doorbell API; set per deployment
+  tls: {cert: gateway/cert.pem, key: gateway/key.pem}   # required off loopback, unless a proxy terminates TLS
 rooms:
   mm-lab:team:
     agents: [a, b, c]
@@ -393,7 +416,7 @@ New top-level package, old `gateway/` frozen until cutover.
 
 ```
 coop/                 the new daemon: connectors moved in, roomsim core ported, doorbell API, CLI
-  connectors/         git mv from gateway/connectors (mattermost, rocketchat); script and voice stay behind
+  connectors/         copied from gateway/connectors (mattermost, rocketchat) until §7 step 6, so the frozen daemon keeps importing its own; script and voice are not copied
   room/               gateway.py, model.py, classifier.py, controls.py, envelope.py, prompt.py from tools/roomsim
   doorbell/           the HTTP API and leases
   cli/                read, send, done, bio, and the utility (coop agent run)
@@ -442,14 +465,8 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
   per set of rooms, which the multi-agent design already allows (gateways
   coordinate only through the platform). Measure before designing further.
 
-- `done` carrying `answered` threads: needed for the unfinished-thread set (§5.7)
-  only in enforce mode? In measure mode the gateway can infer answered threads from
-  observed posts. Decide after the first live week.
-- The listener's exposure: loopback plus an SSH tunnel per agent host, a LAN
-  address, or TLS with the bearer token. Decided per deployment. The first live rooms
-  are on one LAN.
-- Codex per-run instructions: `AGENTS.md` in the working directory is confirmed. A
-  per-run flag is not.
+- Codex per-run instructions: the carrier is `[unverified]` (§3.4). A per-run flag
+  was not found.
 
 ## 9. Supersedes
 
