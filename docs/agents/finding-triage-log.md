@@ -1532,3 +1532,30 @@ Notes:
 - Cost: 1 round, 2 raters, about 45 minutes.
 
 **Status: open** — fixes pushed, re-review requested. The merge decision is the owner's.
+
+## 2026-11-19 — PR #207 round 3 (final round, Codex on `2e03eda`)
+
+**Chain detector:** 30 findings over 3 rounds, round 3 `3 finding(s) on our own last fix, streak 2 — STOP`. The three (H-274, H-283, H-317) all propose extending the `send` grammar and the §3.5 unsolicited-post paragraph a third time (F88 → G275/G342 → these). Response per the method: not another patch. Re-read of the increment: the unsolicited post exists only because the scheduler moved agent-side (direction §3.2), and the hint check that makes its turn-membership matter bites only in enforce mode, off by default. All three are declined, which ends the chain. The five fixes land on text neither fix commit wrote.
+**Owner's rule for this round (2026-11-19):** last round; only a major gap is fixed (silent loss of a post or a required turn, a security-boundary hole, a contradiction between the documents, a block on the one-at-a-time migration). No re-review is requested after it.
+**Arrival check:** 8 inline comments, review on `2e03eda`, `--paginate`, filtered on the review's timestamp. Security review did not run (credits), third time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 8 findings, method, constants, the documents, the simulator and both connectors, no verdicts. Verdicts agreed on the five fixes. Rater 1 conceded on three, each on checkable evidence: H-283 (spec §5.4 lines 426-437: only an owner human sets an orchestrator, so a bot's control in a thread it just opened fails authority by composition), H-274 (design L124/L270: cursor and `answered` are untouched by a mislabelled send; the refusal is loud and enforce-only), H-290's shape (`envelope.py:135-137`, `gateway.py:977`: the simulator already counts a missing must-reply item in measure mode and fails the turn in enforce mode, so the port keeps §6 step 2 replay parity instead of inventing an unfinished-set rule). Rater 2's sweep was taken: H-324, H-333 and H-308 are one pattern, "today's path has a property that contradicts the new contract", written as one sentence group in §3.3 rather than three patches.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **H-324** the copied history filter drops unlisted senders before they can be labelled `guest` (P1) | true, `silent`, `mattermost/connector.py:1002`; major | true, both connectors, and the live path (`sender_allowed`) too; rank 1 | **FIX** — filters deliver an unlisted sender as `guest`; tests change with them |
+| **H-333** one history page, `done` advances past the rest (P1) | true, `rest.py:408-411`; major | true, spec §5.6 names pagination as a requirement; rank 2 | **FIX** — `read` pages until the range is assembled, fails otherwise, cursor stays |
+| **H-308** multiline text forges the header line (P1) | true, `history_context.py:22,130`; security boundary | true, the new renderer replaces the formatter that held the invariant; rank 3 | **FIX** — newlines collapsed to one space |
+| **H-290** `done` without covering a must-reply thread advances the cursor (P1) | true, `silent` (spec L136-137: an open unanswered thread is in no set); fix: into the unfinished set | true with a mode split: measure loses the counter, enforce loses the turn; the simulator already does both; fix by naming that | **FIX** — the 5.9 row names the simulator's behaviour in both modes |
+| **H-302** roster and locally hosted agents conflated (P1) | true, `roomsim/gateway.py:165-186` splits them; blocks §7 | partly: pending leases and offline noise for unmigrated bots, not a double wake; not major, FIX anyway as one sentence | **FIX** — a roster name without an `agents:` entry gets no cursor, lease, token or wake |
+| **H-274** no `wake_id` on `send`; a cron post during a live lease is validated against the wrong hint (P1) | true; proposed `--wake` on `send` to end the chain structurally | true, consequence small: loud refusal in enforce, a mislabelled counter in measure, cursor and `answered` untouched; scored 0–0.4 hits/yr, tax 0.2 h/yr → DROP band; FILE against the enforce rollout | **FILE** — against §6 step 4 (enforce on), decay 2027-11-19. Reversal: a refused unsolicited post inside a lease window in the gateway log. Issue to be opened once the owner agrees |
+| **H-317** `send` grammar omits `--file`, stdin, positional room, `--attach` (P2) | partly true; keep file/stdin, mark `--attach` out | the direction row already says text, file and stdin are kept; room and `--attach` were never promised; the grammar line is the chain line | **DROP as converged** — direction §4 governs; outbound upload is the attachment increment's. Reversal: a remote agent asking how to post a file |
+| **H-283** `--room` with `--control` has no thread to authorise against (P2) | true; require `--thread` | `cannot-occur`: spec §5.4, only an owner human sets an orchestrator, so a bot's control in a fresh thread fails authority by composition | **DROP** — defined by composition. Reversal: a bot-issued top-level control the gateway applies |
+
+Notes:
+- Adoption: 5 of 8 fixed, 1 filed, 2 dropped. The three declined are the chain.
+- Severity re-rank vs Codex: all eight badged P1/P2; the three P1s on the chain (H-274 and two P2s) rank last. H-324 first: daily, silent, on the default path.
+- Convergence: this is the owner's agreed final round. No further review is requested. The merge decision is the owner's.
+- Cost: 3 rounds, 2 raters each, about 2.5 hours across the PR; this round about 50 minutes.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.

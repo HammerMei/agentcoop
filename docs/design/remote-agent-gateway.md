@@ -110,7 +110,10 @@ room:
 
 Persisted: cursors, bios, thread settings, unfinished sets. In memory: leases,
 backoff, decision cache, rate window. The roster comes from configuration, as
-today's `agent_usernames`.
+today's `agent_usernames`. A name in `room.agents` without an `agents:` entry
+(another gateway's bot, or nobody's, §5.14) is roster only: no cursor, lease,
+token or wake, as the simulator's `agents` without `hosted`. This is what lets
+§7 move one agent at a time.
 
 Mechanics, each mapped from the multi-agent design:
 
@@ -124,7 +127,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat: an agent registered with `heartbeat: agent` gets no periodic catch-up. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
-| 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Validation: in measure mode `send` warns and records; in enforce mode the gateway refuses. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
+| 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Validation: in measure mode `send` warns and records; in enforce mode the gateway refuses. A must-reply thread with neither a successful `send` nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
 | 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
 | 5.11 | follow-up | Out. The scheduler is removed. The agent's own scheduler posts through `coop send` like any other post. |
 | 5.12 | orchestrator | Unchanged wake-side (exemptions, who may mute). |
@@ -259,7 +262,15 @@ coop attachment ID [--out PATH]    downloads one attachment through the gateway 
 
 `read` fetches from the platform through the gateway's history path
 (`fetch-history` today) bounded by `[cursor, hwm]`, labels every post with the
-server-authenticated author and role, and marks the trigger post. In both modes
+server-authenticated author and role, and marks the trigger post. Three things
+change in that path when it is copied. The connectors' sender filters
+(`sender_allowed` and the history filter) deliver an unlisted sender as `guest`
+instead of dropping it, and the tests that assert the drop change with them.
+`read` pages the platform until `[cursor, hwm]` is assembled, as spec §5.6
+requires and today's single-page fetch does not; when it cannot, `read` fails and
+the agent's `done` is a failed one, so the cursor stays. Newlines in `text` are
+collapsed to one space, as `history_context.py` does today, so no post can forge
+a header line. In both modes
 `send` posts through the gateway, which holds the bot's account. In enforce mode
 the gateway validates against the hint and refuses what §5.9 forbids. In measure
 mode it posts anyway and reports a would-have-been refusal as a warning on the
