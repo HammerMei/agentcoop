@@ -1584,3 +1584,27 @@ Notes:
 - Cost: 4 rounds, 2 raters each, about 3.5 hours across the PR; this round about 35 minutes.
 
 **Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+## 2026-11-20 — PR #207 round 5 (unintended extra round, Codex on `2449ea8`)
+
+**Why:** the owner triggered the review by accident after round 4's wrap-up and asked for a look under the same bar: fix a major gap, decline the rest.
+**Chain detector:** 39 findings over 5 rounds, round 5 `--`: none of the five lands on the previous round's fix by the detector. By pickaxe two touch round-4 sentences (M-821 the read record, M-825 the §3.5 rewrite); both are taken because each found that a round-4 sentence was incomplete (the read record had no API to satisfy it) or wrong (posting-time checks contradicted the spec the row claims to port unchanged), not because of their proposed shape.
+**Arrival check:** 5 new inline comments, review on `2449ea8`. Security review did not run (credits), fifth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 5 findings, method, constants, the documents and the simulator, no verdicts. Verdicts agreed on four. **One disagreement, escalated to the owner** (M-825): both raters saw the contradiction, rater 1 read the fix as the spec's turn-start snapshot (A), rater 2 as keeping posting-time checks with an error telling the agent to close the thread (B). The owner chose A and refined it: an unsolicited `send` is itself a turn start, so one check at turn start covers both kinds of turn, and a refused unsolicited send goes back to the caller with the reason and a `retry_after`. He also ruled out B's "close with `done --answered`" on principle: the rate limit exists to slow a bot so humans keep up, never to drop a post or end a conversation. That sentence was missing from spec §5.3 and is added there.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **M-825** enforce rechecks mutable rules at `send`, refusing a reply valid at turn start; must-reply then fails and is redelivered (P1) | true, a contradiction with spec §5.3 L29 and §5.9 L699 that rounds 3–4 introduced; A | true as a contradiction; consequence smaller (an agent can close with `done --answered`); B, to keep round 4's wording | **FIX, A as the owner refined it** — §3.5 rewritten: two kinds of turn, one check at turn start; a wake send validated against its hint; an unsolicited send is a turn start checked then, refused to the caller with reason and `retry_after`; the gateway drops nothing and never closes a thread for the agent. 5.3 and 5.9 rows and spec §5.3 updated |
+| **M-821** `GET /posts` needs `after` the agent does not know and cannot be tied to the lease the read record requires (P1) | true, a round-4 consistency gap | true; built as written a REST agent either skips silently or fails every turn | **FIX** — `GET /posts?wake=W`, bounds derived and the read recorded; `room&after&through` for wake-less reads, recording nothing |
+| **M-813** a `reset` between a closed thread's delivery and its unfinished wake leaves the new session with nothing to read (P2) | true, narrow; inclined to decline | true, `silent` (a blind `done --answered` looks normal); one sentence is the fix and the detection | **FIX** — a wake with `reset: true` re-serves the unfinished threads' posts and records the read complete |
+| **M-823** roster-only bots have no bio storage; classifier input incomplete (P2) | true; proposed `bio_source: platform` for them | storage gap true, consequence not: the classifier asks per bot, shows `no profile`, and a foreign bot's decision is status only (spec §5.1) | **FIX, one sentence** — a roster-only name has no bio; the classifier sees `no profile` and records its decision for status only |
+| **M-816** `--unsolicited --room` opens a new thread per post, so the per-thread rate window never fills; a runaway scheduler floods an enforced room (P1) | true if the window is per thread; one sentence | per thread confirmed (spec §5.3, sim `_count_for_rate`); loud, bounded by `coop pause`, not a boundary; scored 0.02–0.75 hits/yr against a new per-room window concept → payback ≥ 5 yr; FILE | **DROP** as converged, no issue. Reason: loud, the brake exists, and the owner's rule that the limit slows rather than stops makes a flood a pause-and-fix event. Reversal: one bot's top-level unsolicited posts flooding a room. Revisit 2027-11-20 |
+
+Notes:
+- Adoption: 4 of 5. The escalation produced a rule (the rate limit's intent, now in the spec) worth more than the finding.
+- Severity re-rank vs Codex: M-825 and M-821 first (a contradiction with the ported spec, and a failure loop for REST agents); M-816 (P1) last.
+- Convergence: closed. No further round. The merge decision is the owner's.
+- Cost: this round about 45 minutes, 2 raters plus the owner on one escalation.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
