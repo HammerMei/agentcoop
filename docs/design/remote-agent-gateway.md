@@ -106,9 +106,10 @@ room:
       idle_since: ...          # last normal done
       retry_after: ...         # failure backoff
       unfinished: [T2]
+      paused: false            # coop pause / resume, as today
 ```
 
-Persisted: cursors, bios, thread settings, unfinished sets. In memory: leases,
+Persisted: cursors, bios, thread settings, unfinished sets, the paused flag. In memory: leases,
 backoff, decision cache, rate window. The roster comes from configuration, as
 today's `agent_usernames`. A name in `room.agents` without an `agents:` entry
 (another gateway's bot, or nobody's, §5.14) is roster only: no cursor, lease,
@@ -123,9 +124,9 @@ Mechanics, each mapped from the multi-agent design:
 | 5.2 | mute | Wake-side unchanged: a muted bot is not woken for that thread except by a human or orchestrator mention. Post-side (refusing a muted bot's text) only in enforce mode. Measure mode records the violation. |
 | 5.3 | rate limit, cooldown | Wake-side holds unchanged. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. Post-side refusal only in enforce mode. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
-| 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). |
+| 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). A paused bot (`coop pause`, persisted as today) is held for every thread like a muted one: no wake of any source, the cursor stays, the backlog waits for `resume`. |
 | 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
-| 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat: an agent registered with `heartbeat: agent` gets no periodic catch-up. |
+| 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat (direction §3.4): in this increment the gateway holds it for every agent, since the one transport here gives an agent no way to open a leased catch-up turn of its own. `heartbeat: agent` is defined with the transports that carry one. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules at posting time (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
 | 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
@@ -176,7 +177,9 @@ GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway f
 Authentication: a bearer token per agent, issued by configuration (`coop config add
 agent` prints the token, the address and, when `gateway.tls` is set, the
 certificate fingerprint, once). The utility refuses a certificate that does not
-match the fingerprint it was given. The token reads room history and posts as the bot, so it
+match the fingerprint it was given. The API answers a token only for rooms whose
+roster lists the agent, and an attachment `{id}` is the handle a `read` to that
+agent printed, not a platform id. The token reads room history and posts as the bot, so it
 travels only over TLS: a production listener on any directly reachable address
 terminates TLS, in the gateway (`gateway.tls`, §4: a self-signed certificate whose
 fingerprint the utility pins) or in a proxy in front of it. A plain `http://`
@@ -268,8 +271,12 @@ change in that path when it is copied. The connectors' sender filters
 (`sender_allowed` and the history filter) deliver an unlisted sender as `guest`
 instead of dropping it, and the tests that assert the drop change with them.
 `read` pages the platform until `[cursor, hwm]` is assembled, as spec §5.6
-requires and today's single-page fetch does not; when it cannot, `read` fails and
-the agent's `done` is a failed one, so the cursor stays. Newlines in `text` are
+requires and today's single-page fetch does not. When it cannot, `read` fails.
+The gateway records on the lease whether it served `[cursor, hwm]` complete, and
+a normal `done` on a wake without that record (a failed read, or no read at all
+from a client that skipped it) is treated as `done --failed "no read"`, so the
+cursor stays. A wake with nothing to read, such as an unfinished-thread turn,
+records an empty complete read. Newlines in `text` are
 collapsed to one space, as `history_context.py` does today, so no post can forge
 a header line. In both modes
 `send` posts through the gateway, which holds the bot's account. In enforce mode
@@ -426,7 +433,7 @@ agents:
   a:
     type: remote                 # new; claude / opencode entries become remote + utility
     token_file: agents/a/token
-    heartbeat: gateway           # gateway | agent  (exactly one)
+    heartbeat: gateway           # the only value in this increment (§5.7 row)
     bio_source: pushed           # pushed | platform | card
 gateway:
   listen: 127.0.0.1:7474         # the doorbell API; set per deployment

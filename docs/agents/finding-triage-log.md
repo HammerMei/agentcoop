@@ -1561,3 +1561,26 @@ Notes:
 **Status: closed** — fixes pushed, PR handed to the owner for merge.
 
 Addendum (2026-11-19, after the round): the owner revisited H-274 and spec §5.9 as a design question rather than a finding. Settled: a `send` always states `--wake W` or `--unsolicited` (omitting both is a usage error), the wake id is attribution only (the wake's ledger, checked for must-reply coverage at `done`), every `send` passes the same room rules at posting time, and the specification's "reply only in a delivered or hinted thread" becomes an instruction and a counter, since no mechanism depends on it. H-274 therefore moves from FILE to **incorporated**: the misclassification it described cannot occur when nothing is classified. No issue is opened. The thread is answered and resolved.
+
+## 2026-11-19 — PR #207 round 4 (owner-requested extra round, Codex on `7052c80`)
+
+**Why a fourth round:** round 3 was declared final, then the owner reopened one finding (H-274) as a design question and settled it (`7052c80`: a `send` states its wake or `--unsolicited`, the wake id is attribution only, every send passes the same room rules). Because rounds 1–3 had each found a silent-loss defect, the owner asked for one more round on the settled text, to be wrapped up unless it found a major gap.
+**Chain detector:** 34 findings over 4 rounds, round 4 `4 finding(s) on our own last fix, streak 3`. By blame only one of the four (K-719, line 272) lands on fix text (round 3's `read` paragraph); the other three are on pre-round text. K-719 is taken despite the streak: it replaces round 3's sentence rather than extending it, because round 3 put the concern at the wrong layer (an instruction to the agent) when the gateway serves the read and owns the cursor.
+**Arrival check:** 4 inline comments, review on `7052c80`. Security review did not run (credits), fourth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 4 findings, method, constants, the documents, the connectors' attachment code, no verdicts. Verdicts agreed on all four. Rater 2's shapes taken on K-719 (the empty-read case for unfinished-thread turns) and K-728 (the real omission is the token's room scope, which the design never stated; one sentence closes it and the attachment question together).
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **K-719** a normal `done` after a failed or skipped `read` saves the mark and skips the posts (P1) | true, `silent`, the F58 class; the gateway knows whether it served the read | same; round 3's sentence was an instruction, not a mechanism; `silent` for optional and catch-up posts | **FIX** — the lease records a complete read; a normal `done` without it is `done --failed "no read"` |
+| **K-725** pause kept by the direction, absent from the design's state and wake path (P1) | true, two documents disagree | true, and `requirements.md:89` promises pause persists across restarts; today it does | **FIX** — `paused` persisted; a paused bot is held like a muted one for every thread |
+| **K-723** `heartbeat: agent` has no API to open its own catch-up turn (P1) | true, an option the API cannot honour; remove it from this increment | mechanism true, consequence not a loss (the next wake redelivers from the cursor); cheapest by removal; not major | **FIX by removal** — `heartbeat: gateway` is the only value here; `agent` is defined with the transports that carry one |
+| **K-728** any attachment id is fetched with the bot's credential; bind ids to delivered posts (P1) | mechanism true, reach near zero (random ids, the bot's own account); one cheap sentence | DROP the handle scheme (inside one agent's own account, ADR-0001); the gap is the token's room scope, unstated for `posts?room` too | **DROP** the scheme. The scope sentence written: the API answers only for rooms whose roster lists the agent, and `{id}` is the handle `read` printed. Reversal for the drop: a fetch logged for an id outside any range delivered to that agent. Revisit 2027-11-19 |
+
+Notes:
+- Adoption: 3 of 4 fixed (one by removal), 1 dropped with a one-sentence scope statement.
+- Severity re-rank vs Codex: all four badged P1; K-719 first (silent), K-725 second (contradiction), K-723 and K-728 not major.
+- Convergence: the round found one silent-loss defect (K-719), the same class as rounds 1–3 (F58, G321, H-290, H-324, H-333). Each was on a different sentence. No further round: the owner's rule, and the remaining findings were below the bar.
+- Cost: 4 rounds, 2 raters each, about 3.5 hours across the PR; this round about 35 minutes.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
