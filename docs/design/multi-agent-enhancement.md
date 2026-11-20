@@ -389,6 +389,11 @@ This definition keeps counts consistent across gateways.
 The word limit protects readers: a post count cannot distinguish a one-line
 acknowledgement from a thousand-word analysis.
 
+The limit exists to slow a bot down so that the humans in the room can keep
+up. It delays a turn and never drops a post or ends a conversation: a held turn
+starts when the window allows, and the posts it was held for stay in the backlog
+until it does.
+
 The check applies when a turn starts. A running turn may finish, so the post
 limit can overshoot by at most the number of bots already running in the room,
 plus one additional race per gateway when several gateways share the room.

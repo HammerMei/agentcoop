@@ -1474,3 +1474,167 @@ Notes:
 - Cost: 5 rounds, about 5 hours across the PR; this round 1 rater, 25 min.
 
 **Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+## 2026-11-18 — PR #207 round 1 (Codex on `d4e55f3`, `docs/design/remote-agent-gateway.md`)
+
+**Chain detector:** 11 findings over 1 round, no chain (first round).
+**Arrival check:** 11 inline comments, one review (`d4e55f3`), read with `--paginate`. The security review did not run ("insufficient available credits"); the code review did. The branch was ten commits ahead of the reviewed one (owner-review edits: voice removed, roles, lazy attachments, liveness, onboarding), so one finding (F616) was already answered by the tree.
+**Control finding:** `#181 r9 F1` (`settled: implemented`) was sent as F99, presented as a code finding among doc findings. Rater 2 traced the *current* code and returned `cannot-occur`, correctly: PR #186 moved the base to `COOP_HOME`, so the premise no longer holds in the tree. A finding settled by implementation cannot serve as a control against the live tree, because the right answer is now "fixed", not the ledger's verdict. Rater 1 did not score it (author of the ledger row). **No usable control this round; agreement is uncorroborated.** A usable control needs a DROP or FILE whose premise persists and whose outcome is observed (`settled: bit` or `held`); the ledger has none yet.
+**Rater 2:** blind, 12 findings, method, constants, the three documents, no verdicts, no log. Verdicts agreed on all 11 real findings (10 FIX as document edits, F616 no change). Two additions from rater 2 were taken: F74 is stated in five places, not one (the diagram, the roomsim mapping, the API table, §3.5, direction §2 row 3); F645 is contradicted by §8, which called `AGENTS.md` "confirmed" while the adapter table said `[unverified]`. Ranking differed in the middle (rater 1: F58, F80, F626, F63; rater 2: F58, F645, F74, F609), all far from a band edge since every verdict is FIX.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **F58** utility sends `done` with the wake's hwm on exit 0 without an agent `done`, so the cursor advances over posts the agent never read (P1) | true, `silent` (no log distinguishes a fabricated `done`), `cheap`. Rank 1: the FIX anchor's pattern | same, cites MAE 527 (catch-up starts after the cursor) and MAE 765 (the failure notice makes the skip visible). Rank 1 | **FIX** — any exit without `done` is `done --failed "no done from agent"`; the duplicate-reply case is named as the visible side of the trade |
+| **F63** `done` carries an agent-supplied `hwm` the gateway saves as the cursor (P1) | true, `cheap`: the lease already holds `hwm`, so the fix removes the field | same, adds: own token → own cursor, correctness not security (ADR-0001); a `done` with no live lease must then move nothing | **FIX** — `hwm` dropped from `done`; the gateway saves the lease's mark; a `done` naming a wake with no live lease is logged and moves nothing |
+| **F74** API table says the posting endpoint is enforce-only, §3.3 says both modes (P2) | true, one-line contradiction | true in five places (L78, L139, L167, L331, direction §2); "all five, or it survives" | **FIX** — all five |
+| **F80** a turn running past `lease_expires_at` keeps sending while the gateway issues a new wake; late `done` accepted (P1) | true by the doc's own sentence. Fix without a renewal endpoint: utility kills at expiry, gateway ignores a late `done` | same shape, scored 5–30 hits/yr (P(turn > lease) 0.5–3%, a guess), payback ≪ 1 yr. Adds: utility takes no new wake while a command runs; the skill forbids `send` after expiry for own-harness agents | **FIX** — §3.4 kill at expiry + `done --failed "lease expired"`; no new wake during a command; own-harness late sends are unsolicited posts, best effort. Renewal deferred |
+| **F88** agent-owned cron posts through `coop send` with no wake, so enforce-mode validation against the hint is undefined (P1) | true, unreachable until `enforce` is on; defining the wake-less `send` is the fix and is needed for proactive posts anyway | same, 1–5 hits/yr, adds that measure-mode counts (the enforce baseline) are equally undefined | **FIX** — §3.5 unsolicited post: mute, rate, closed threads, `to` only, both modes, counted separately |
+| **F94** `send` syntax makes `--to` and TEXT mandatory, so a control-only item is unrepresentable (P2) | true, `cheap` | same | **FIX** — both optional, text needs `--to`, one of text or `--control` |
+| **F609** inferring `answered` from observed posts misses a `must-reply` answered by `done` alone (P1) | true, it answers the doc's own open decision | same; a wrong rationale that would produce repeated wakes if built | **FIX** — `answered` in both modes, open decision closed |
+| **F616** migration deletes `gateway/` while voice's disposition is open (P2) | already answered by the owner (direction §3.8, `599d393`): voice is removed and its code goes with the package | not true in the tree: DROP, reversal = a config referencing the voice endpoint before step 6 | **no change** — thread answered and resolved |
+| **F626** a bare LAN listener with a bearer token (P1) | true, reachable in the stated first deployment; security by reachability | same, `cheap` as deployment guidance; proposed TLS by proxy only | **FIX** — owner's decision (2026-11-18): the utility connects over TLS, HTTP only for loopback, tunnel and test with a utility warning; `gateway.tls` with a self-signed certificate the utility pins, or a proxy. Open decision closed |
+| **F637** `git mv` of the connectors leaves the frozen daemon unable to import them mid-migration (P1) | true inside the layout proposal; loud (ImportError on restart). Rank low-mid | same, 1–3 hits in the migration window | **FIX** — copy until §7 step 6, not move |
+| **F645** the utility writes `AGENTS.md` into the owner's working directory (P2) | true; already `[unverified]`; state the constraint | same, `silent` (a repo's constraints vanish, no log); §8 "confirmed" contradicts §3.4 | **FIX** — the utility never writes a file the working directory already holds; carrier `[unverified]`; §8 reconciled |
+
+Notes:
+- Adoption: 10 of 11 (F616 answered by an earlier commit). High, as on every first round of a design document (#198 r1, #204 r1, #205 r1): the findings are on text written once, not on fixes.
+- Severity re-rank vs Codex: F637 (P1) down to low-mid, a migration-plan defect that fails loudly; F74 (P2) up, a contradiction in the spec; F58 first regardless of badge.
+- Method: the control failed as administered, not as judged. Recorded above so the next round does not resend a `settled: implemented` row as a control.
+- Cost: 1 round, 2 raters, about 50 minutes.
+
+**Status: open** — fixes pushed, re-review requested. The merge decision is the owner's.
+
+## 2026-11-19 — PR #207 round 2 (Codex on `2c23210`, `docs/design/remote-agent-gateway.md`)
+
+**Chain detector:** 22 findings over 2 rounds, round 2 `10 finding(s) on our own last fix, streak 1`, no chain (once is noise). Read: six of the eleven land on round-1 text by `git blame`, five of them *extend* a fix (G275 and G342 complete the unsolicited-post paragraph F88 added, G285 completes F626's TLS rule, G293 is the liveness rule meeting F80's "no new wake during a command", G321 is the lease-at-pickup sentence). None replaces a fix. Watched for round 3: a second streak on the same paragraphs means stop and re-read the increment, not another patch.
+**Arrival check:** 11 inline comments, review on `2c23210`, read with `--paginate` and filtered on the review's timestamp. The security review did not run again (credits).
+**Control finding:** none. The ledger still has no `settled: bit`/`held` row, and round 1 showed a `settled: implemented` row cannot serve against the live tree. Agreement this round is uncorroborated. Rater 2 disclosed that `git show 2c23210` printed round 1's log entry in the diff (F findings only, no G material).
+**Rater 2:** blind, 11 findings, method, constants, the three documents and the simulator, no verdicts. Verdicts agreed on all 11 (10 FIX, G337 DROP). Rater 2's fix shape was taken over rater 1's on G321 (freeze the mark at issue, citing spec §5.6 "fix a high-water mark at turn start", instead of rebuilding the payload at pickup) and on G346/G305 (one restructure, a per-agent block, answers both). Rankings differed at the top (rater 1: G321 first; rater 2: G285, G293, G321); every verdict is FIX, so no band edge is near.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **G321** a pending wake picked up with the *current* hwm while its hint describes the original trigger: a later addressed post is read, then skipped by the saved cursor (P1) | true, `silent`, rank 1; fix: rebuild hint and hwm at pickup | true, `silent`, traced through sim L296/L646; cheaper fix: freeze the hwm at issue, the backlog sentence already covers the rest; spec §5.6 fixes the mark at turn start | **FIX** — hwm frozen at issue; later posts wait for the next sweep |
+| **G285** the utility pins a fingerprint nobody gave it (P1) | true, completes F626 | true; built as written it is TOFU on the path the token travels; security by reachability on the LAN deployment | **FIX** — `config add agent` prints token, address and fingerprint; utility refuses a mismatch; §3.6 step 1 updated |
+| **G312** direction says classifier is fail-open, design says addressed-only (P2) | true, contradiction | true, one site, design is authoritative; wrong rationale in the direction doc | **FIX** — direction says `addressed-only` on error, spec §5.1 |
+| **G275** `send` names only a thread: no top-level unsolicited post, no room for a multi-room agent (P1) | true; `--room` for a new post | true; gate call stated: `cheap` because `--room` already exists on `read`; scored FIX anyway | **FIX** — `[--room R \| --thread T]`, §3.5 names the destination |
+| **G346** bio stored per room, pushed before any room (P1) | true; bio is agent-level | true, loud at build, silent degradation if built per room | **FIX** — per-agent block in the state example |
+| **G342** unsolicited `--control` skips §5.9 authority (P2) | true, one clause | partly: the simulator ignores an unauthorised control, so the consequence is a misleading visible line and an uncounted violation, not an applied mute | **FIX** — authority and target checks added, folded into the §3.5 rewrite with G275 |
+| **G293** a turn longer than 2×`wait` with no calls is marked offline (P2) | true, noise | true, loud, fires on ordinary long turns and posts into the room | **FIX** — offline only without a live lease |
+| **G300** typing at issue, pending wake never clears it (P2) | true, cosmetic | true on Rocket.Chat (explicit clear), auto-clears on Mattermost | **FIX** — typing on pickup, both documents |
+| **G331** attachment counter sees trigger posts only (P2) | true | true, a measurement gap | **FIX** — counts the delivered range |
+| **G305** duplicate `agents` key in the state example (P2) | true, from the liveness commit | true | **FIX** — same restructure as G346 |
+| **G337** `send` retry after a lost response posts twice: add an idempotency key (P2) | true mechanism, not worth a new field plus retained results for a visible duplicate the contract allows; one sentence instead | scored: 0.03–9 hits/yr × 0.05 h, fix 3.5 h, tax 0.5 h/yr → net ≤ 0 across the range; DROP, optional one-liner | **DROP** the key; owner agreed (2026-11-19). Reason: duplicates are inside §14.4 and `net_annual_saving` ≤ 0. Reversal: a duplicate reply in a live room whose gateway log shows the post but no ack. Revisit 2027-11-19. The one-liner is in: the CLI does not retry, and the error names the cause and tells the agent to `read` before posting again |
+
+Notes:
+- Adoption: 10 of 11. All ten are bounded edits, no new mechanism; the one new mechanism proposed (G337) was the one dropped.
+- Severity re-rank vs Codex: G321 (P1) first; G275 (P1) and G346 (P1) mid, loud at build; G312 (P2) up, a direction-doc rationale.
+- Pattern (rater 2): four findings (G275, G321, G342, G346) are "a thing the design names has no stated home or lifecycle" (room on `send`, the mark at pickup, authority on an unsolicited control, the bio before a room). The sweep for round 3 is one pass over every noun in §3.1–3.5 asking where it is stored and when it is fixed.
+- Cost: 1 round, 2 raters, about 45 minutes.
+
+**Status: open** — fixes pushed, re-review requested. The merge decision is the owner's.
+
+## 2026-11-19 — PR #207 round 3 (final round, Codex on `2e03eda`)
+
+**Chain detector:** 30 findings over 3 rounds, round 3 `3 finding(s) on our own last fix, streak 2 — STOP`. The three (H-274, H-283, H-317) all propose extending the `send` grammar and the §3.5 unsolicited-post paragraph a third time (F88 → G275/G342 → these). Response per the method: not another patch. Re-read of the increment: the unsolicited post exists only because the scheduler moved agent-side (direction §3.2), and the hint check that makes its turn-membership matter bites only in enforce mode, off by default. All three are declined, which ends the chain. The five fixes land on text neither fix commit wrote.
+**Owner's rule for this round (2026-11-19):** last round; only a major gap is fixed (silent loss of a post or a required turn, a security-boundary hole, a contradiction between the documents, a block on the one-at-a-time migration). No re-review is requested after it.
+**Arrival check:** 8 inline comments, review on `2e03eda`, `--paginate`, filtered on the review's timestamp. Security review did not run (credits), third time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 8 findings, method, constants, the documents, the simulator and both connectors, no verdicts. Verdicts agreed on the five fixes. Rater 1 conceded on three, each on checkable evidence: H-283 (spec §5.4 lines 426-437: only an owner human sets an orchestrator, so a bot's control in a thread it just opened fails authority by composition), H-274 (design L124/L270: cursor and `answered` are untouched by a mislabelled send; the refusal is loud and enforce-only), H-290's shape (`envelope.py:135-137`, `gateway.py:977`: the simulator already counts a missing must-reply item in measure mode and fails the turn in enforce mode, so the port keeps §6 step 2 replay parity instead of inventing an unfinished-set rule). Rater 2's sweep was taken: H-324, H-333 and H-308 are one pattern, "today's path has a property that contradicts the new contract", written as one sentence group in §3.3 rather than three patches.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **H-324** the copied history filter drops unlisted senders before they can be labelled `guest` (P1) | true, `silent`, `mattermost/connector.py:1002`; major | true, both connectors, and the live path (`sender_allowed`) too; rank 1 | **FIX** — filters deliver an unlisted sender as `guest`; tests change with them |
+| **H-333** one history page, `done` advances past the rest (P1) | true, `rest.py:408-411`; major | true, spec §5.6 names pagination as a requirement; rank 2 | **FIX** — `read` pages until the range is assembled, fails otherwise, cursor stays |
+| **H-308** multiline text forges the header line (P1) | true, `history_context.py:22,130`; security boundary | true, the new renderer replaces the formatter that held the invariant; rank 3 | **FIX** — newlines collapsed to one space |
+| **H-290** `done` without covering a must-reply thread advances the cursor (P1) | true, `silent` (spec L136-137: an open unanswered thread is in no set); fix: into the unfinished set | true with a mode split: measure loses the counter, enforce loses the turn; the simulator already does both; fix by naming that | **FIX** — the 5.9 row names the simulator's behaviour in both modes |
+| **H-302** roster and locally hosted agents conflated (P1) | true, `roomsim/gateway.py:165-186` splits them; blocks §7 | partly: pending leases and offline noise for unmigrated bots, not a double wake; not major, FIX anyway as one sentence | **FIX** — a roster name without an `agents:` entry gets no cursor, lease, token or wake |
+| **H-274** no `wake_id` on `send`; a cron post during a live lease is validated against the wrong hint (P1) | true; proposed `--wake` on `send` to end the chain structurally | true, consequence small: loud refusal in enforce, a mislabelled counter in measure, cursor and `answered` untouched; scored 0–0.4 hits/yr, tax 0.2 h/yr → DROP band; FILE against the enforce rollout | **FILE** — against §6 step 4 (enforce on), decay 2027-11-19. Reversal: a refused unsolicited post inside a lease window in the gateway log. Issue to be opened once the owner agrees |
+| **H-317** `send` grammar omits `--file`, stdin, positional room, `--attach` (P2) | partly true; keep file/stdin, mark `--attach` out | the direction row already says text, file and stdin are kept; room and `--attach` were never promised; the grammar line is the chain line | **DROP as converged** — direction §4 governs; outbound upload is the attachment increment's. Reversal: a remote agent asking how to post a file |
+| **H-283** `--room` with `--control` has no thread to authorise against (P2) | true; require `--thread` | `cannot-occur`: spec §5.4, only an owner human sets an orchestrator, so a bot's control in a fresh thread fails authority by composition | **DROP** — defined by composition. Reversal: a bot-issued top-level control the gateway applies |
+
+Notes:
+- Adoption: 5 of 8 fixed, 1 filed, 2 dropped. The three declined are the chain.
+- Severity re-rank vs Codex: all eight badged P1/P2; the three P1s on the chain (H-274 and two P2s) rank last. H-324 first: daily, silent, on the default path.
+- Convergence: this is the owner's agreed final round. No further review is requested. The merge decision is the owner's.
+- Cost: 3 rounds, 2 raters each, about 2.5 hours across the PR; this round about 50 minutes.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+Addendum (2026-11-19, after the round): the owner revisited H-274 and spec §5.9 as a design question rather than a finding. Settled: a `send` always states `--wake W` or `--unsolicited` (omitting both is a usage error), the wake id is attribution only (the wake's ledger, checked for must-reply coverage at `done`), every `send` passes the same room rules at posting time, and the specification's "reply only in a delivered or hinted thread" becomes an instruction and a counter, since no mechanism depends on it. H-274 therefore moves from FILE to **incorporated**: the misclassification it described cannot occur when nothing is classified. No issue is opened. The thread is answered and resolved.
+
+## 2026-11-19 — PR #207 round 4 (owner-requested extra round, Codex on `7052c80`)
+
+**Why a fourth round:** round 3 was declared final, then the owner reopened one finding (H-274) as a design question and settled it (`7052c80`: a `send` states its wake or `--unsolicited`, the wake id is attribution only, every send passes the same room rules). Because rounds 1–3 had each found a silent-loss defect, the owner asked for one more round on the settled text, to be wrapped up unless it found a major gap.
+**Chain detector:** 34 findings over 4 rounds, round 4 `4 finding(s) on our own last fix, streak 3`. By blame only one of the four (K-719, line 272) lands on fix text (round 3's `read` paragraph); the other three are on pre-round text. K-719 is taken despite the streak: it replaces round 3's sentence rather than extending it, because round 3 put the concern at the wrong layer (an instruction to the agent) when the gateway serves the read and owns the cursor.
+**Arrival check:** 4 inline comments, review on `7052c80`. Security review did not run (credits), fourth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 4 findings, method, constants, the documents, the connectors' attachment code, no verdicts. Verdicts agreed on all four. Rater 2's shapes taken on K-719 (the empty-read case for unfinished-thread turns) and K-728 (the real omission is the token's room scope, which the design never stated; one sentence closes it and the attachment question together).
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **K-719** a normal `done` after a failed or skipped `read` saves the mark and skips the posts (P1) | true, `silent`, the F58 class; the gateway knows whether it served the read | same; round 3's sentence was an instruction, not a mechanism; `silent` for optional and catch-up posts | **FIX** — the lease records a complete read; a normal `done` without it is `done --failed "no read"` |
+| **K-725** pause kept by the direction, absent from the design's state and wake path (P1) | true, two documents disagree | true, and `requirements.md:89` promises pause persists across restarts; today it does | **FIX** — `paused` persisted; a paused bot is held like a muted one for every thread |
+| **K-723** `heartbeat: agent` has no API to open its own catch-up turn (P1) | true, an option the API cannot honour; remove it from this increment | mechanism true, consequence not a loss (the next wake redelivers from the cursor); cheapest by removal; not major | **FIX by removal** — `heartbeat: gateway` is the only value here; `agent` is defined with the transports that carry one |
+| **K-728** any attachment id is fetched with the bot's credential; bind ids to delivered posts (P1) | mechanism true, reach near zero (random ids, the bot's own account); one cheap sentence | DROP the handle scheme (inside one agent's own account, ADR-0001); the gap is the token's room scope, unstated for `posts?room` too | **DROP** the scheme. The scope sentence written: the API answers only for rooms whose roster lists the agent, and `{id}` is the handle `read` printed. Reversal for the drop: a fetch logged for an id outside any range delivered to that agent. Revisit 2027-11-19 |
+
+Notes:
+- Adoption: 3 of 4 fixed (one by removal), 1 dropped with a one-sentence scope statement.
+- Severity re-rank vs Codex: all four badged P1; K-719 first (silent), K-725 second (contradiction), K-723 and K-728 not major.
+- Convergence: the round found one silent-loss defect (K-719), the same class as rounds 1–3 (F58, G321, H-290, H-324, H-333). Each was on a different sentence. No further round: the owner's rule, and the remaining findings were below the bar.
+- Cost: 4 rounds, 2 raters each, about 3.5 hours across the PR; this round about 35 minutes.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+## 2026-11-20 — PR #207 round 5 (unintended extra round, Codex on `2449ea8`)
+
+**Why:** the owner triggered the review by accident after round 4's wrap-up and asked for a look under the same bar: fix a major gap, decline the rest.
+**Chain detector:** 39 findings over 5 rounds, round 5 `--`: none of the five lands on the previous round's fix by the detector. By pickaxe two touch round-4 sentences (M-821 the read record, M-825 the §3.5 rewrite); both are taken because each found that a round-4 sentence was incomplete (the read record had no API to satisfy it) or wrong (posting-time checks contradicted the spec the row claims to port unchanged), not because of their proposed shape.
+**Arrival check:** 5 new inline comments, review on `2449ea8`. Security review did not run (credits), fifth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 5 findings, method, constants, the documents and the simulator, no verdicts. Verdicts agreed on four. **One disagreement, escalated to the owner** (M-825): both raters saw the contradiction, rater 1 read the fix as the spec's turn-start snapshot (A), rater 2 as keeping posting-time checks with an error telling the agent to close the thread (B). The owner chose A and refined it: an unsolicited `send` is itself a turn start, so one check at turn start covers both kinds of turn, and a refused unsolicited send goes back to the caller with the reason and a `retry_after`. He also ruled out B's "close with `done --answered`" on principle: the rate limit exists to slow a bot so humans keep up, never to drop a post or end a conversation. That sentence was missing from spec §5.3 and is added there.
+
+| | rater 1 (author) | rater 2 (blind) | outcome |
+|---|---|---|---|
+| **M-825** enforce rechecks mutable rules at `send`, refusing a reply valid at turn start; must-reply then fails and is redelivered (P1) | true, a contradiction with spec §5.3 L29 and §5.9 L699 that rounds 3–4 introduced; A | true as a contradiction; consequence smaller (an agent can close with `done --answered`); B, to keep round 4's wording | **FIX, A as the owner refined it** — §3.5 rewritten: two kinds of turn, one check at turn start; a wake send validated against its hint; an unsolicited send is a turn start checked then, refused to the caller with reason and `retry_after`; the gateway drops nothing and never closes a thread for the agent. 5.3 and 5.9 rows and spec §5.3 updated |
+| **M-821** `GET /posts` needs `after` the agent does not know and cannot be tied to the lease the read record requires (P1) | true, a round-4 consistency gap | true; built as written a REST agent either skips silently or fails every turn | **FIX** — `GET /posts?wake=W`, bounds derived and the read recorded; `room&after&through` for wake-less reads, recording nothing |
+| **M-813** a `reset` between a closed thread's delivery and its unfinished wake leaves the new session with nothing to read (P2) | true, narrow; inclined to decline | true, `silent` (a blind `done --answered` looks normal); one sentence is the fix and the detection | **FIX** — a wake with `reset: true` re-serves the unfinished threads' posts and records the read complete |
+| **M-823** roster-only bots have no bio storage; classifier input incomplete (P2) | true; proposed `bio_source: platform` for them | storage gap true, consequence not: the classifier asks per bot, shows `no profile`, and a foreign bot's decision is status only (spec §5.1) | **FIX, one sentence** — a roster-only name has no bio; the classifier sees `no profile` and records its decision for status only |
+| **M-816** `--unsolicited --room` opens a new thread per post, so the per-thread rate window never fills; a runaway scheduler floods an enforced room (P1) | true if the window is per thread; one sentence | per thread confirmed (spec §5.3, sim `_count_for_rate`); loud, bounded by `coop pause`, not a boundary; scored 0.02–0.75 hits/yr against a new per-room window concept → payback ≥ 5 yr; FILE | **DROP** as converged, no issue. Reason: loud, the brake exists, and the owner's rule that the limit slows rather than stops makes a flood a pause-and-fix event. Reversal: one bot's top-level unsolicited posts flooding a room. Revisit 2027-11-20 |
+
+Notes:
+- Adoption: 4 of 5. The escalation produced a rule (the rate limit's intent, now in the spec) worth more than the finding.
+- Severity re-rank vs Codex: M-825 and M-821 first (a contradiction with the ported spec, and a failure loop for REST agents); M-816 (P1) last.
+- Convergence: closed. No further round. The merge decision is the owner's.
+- Cost: this round about 45 minutes, 2 raters plus the owner on one escalation.
+
+**Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+## 2026-11-20 — PR #207 round 6 (owner-requested, Codex on `b43d086`; reviewed jointly with the owner)
+
+**Chain detector:** 50 findings over 6 rounds, round 6 `4 finding(s) on our own last fix, streak 1`. Noise level; the four are on round-5 text and none extends a fix in the same direction.
+**Arrival check:** 11 inline comments, review `5990305028` on `b43d086`, unanchored (no line numbers). Security review did not run (credits), sixth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 11 findings, method, constants, the documents, the simulator and both connectors' history paths, no verdicts. Verdicts agreed on 8 of 11. Rater 2 moved rater 1 on three with checkable evidence: N-454 (sim L925-942: without a degraded trip a bot that keeps missing a must-reply is re-woken every sweep, a loop; raised from "small" to FIX), N-497 (§7 step 3 adds to the new daemon before removing from the old, an overlap not a gap; the residual defect is the unstated initial cursor), N-508 (a normal cron flips the agent online and offline with a notice each time, loud flapping, not a masked outage). Rater 1 held on N-442 (its own round-2 recovery text cannot work as written) and on N-467 (an implementer cannot build "page until the range is assembled" without a representation), which rater 2 would file to the lab.
+**Owner review (2026-11-20):** the owner read every finding with the scenario, recommendation and reason laid out, and chose: fix N-463, N-454, N-442, N-508, N-486, N-436, N-478; N-523 removed to `pushed` after confirming the gateway stores the pushed bio and that `platform`/`card` serve a later kit increment; N-497 with the ruling that migration is not seamless and claims nothing, the cursor starts at the latest post and an operator asks the agent to read history; N-520 to the lab, plus the owner's addition that every gateway-authored post begins with `SYSTEM:` so the classifier and agents can read it without metadata. **N-467 is still open with the owner** (the review's one unresolved item: write the `(timestamp, post id)` representation now, or leave it to the lab).
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **N-463** wake-side mute/rate holds in measure mode contradict spec §8.1 and §6.2's parity claim (P1) | true, spec contradiction | true, and it breaks the document's own parity promise; rank 2 | **FIX** — measure mode holds nothing an agent could obey itself; pause, backoff, degraded, one-turn always hold |
+| **N-454** no degraded trip for CLI-era invalid turns (P1) | small, one sentence | loop in enforce mode (sim trace); rank 1 | **FIX** — refused send or uncovered must-reply at `done` = one invalid turn; `consecutive_invalid_limit` unchanged |
+| **N-523** `bio_source` advertises two unbuilt values (P1) | remove, as `heartbeat: agent` | same; silent misconfiguration | **FIX by removal** |
+| **N-467** cursor/hwm as orderable post ids on platforms whose ids are opaque (P1) | FIX, one representation sentence | FILE to the §8.1 lab; or the same sentence | **open with the owner** |
+| **N-442** lost-send recovery reads below the hwm (P2) | true, own round-2 error | decline, visible duplicate; the one-liner if touching | **FIX** — `read --room` alone prints cursor through latest |
+| **N-497** migration cursor handoff (P1) | blocks migration | overlap, not a gap; initial cursor unstated | **FIX, one sentence + owner's ruling** — cursor at latest post; migration is not seamless by design |
+| **N-508** `last_seen` on any request keeps a dead poller online (P2) | two phrases | loud flapping, not masking; fold in | **FIX** — `last_seen` is the last wake poll |
+| **N-486** pattern rooms absent from §4 (P2) | half true, one sentence | omission, not contradiction; the sentence | **FIX, two comments** — keys are patterns; a discovered room takes the first match |
+| **N-436** "never refused" reads unconditional (P1) | reword | DROP, the qualifier is there | **reworded** — "on the ground of its wake id" |
+| **N-478** `trigger` required for sweep wakes (P2) | nullable | DROP, example not schema | **comment added** — null for catch-up and unfinished |
+| **N-520** failure-notice metadata carrier undecided (P1) | decline, spec's own lab item | FILE with N-467 to the lab | **lab (§6)** + owner's `SYSTEM:` prefix |
+
+Notes:
+- Adoption: 9 fixed (two by one-line clarification), 1 to the lab, 1 open with the owner.
+- Severity re-rank vs Codex: N-454 and N-463 first; N-436, N-478 (both badged) last.
+- Method: the owner asked for findings to be presented as scenario, recommendation, reason, one per finding. Saved as a standing rule.
+- Cost: this round about 70 minutes including the owner's review.
+
+**Status: closed** — N-467 settled by the owner (2026-11-20): the `(timestamp, post id)` representation is written into the 5.6 row, the lab verifies it. All 50 threads resolved. No further review requested.
