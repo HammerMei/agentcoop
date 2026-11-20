@@ -101,7 +101,7 @@ room:
     T1: {muted: [...], orchestrator: ..., limit: ..., set_at: ...}
   bots:
     a:
-      cursor: 1234             # last post id delivered through a completed turn
+      cursor: 1234             # last post delivered through a completed turn; the simulator's seq, see the 5.6 row for the platform form
       lease: {wake_id: ..., hwm: 1250, issued_at: ..., expires_at: ...}
       idle_since: ...          # last normal done
       retry_after: ...         # failure backoff
@@ -127,7 +127,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.3 | rate limit, cooldown | Wake-side holds unchanged, and the intent stated in §5.3 holds here: the limit slows a bot down so humans can keep up, and it never drops a post or ends a conversation. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. An unsolicited `send` is a turn the agent starts. It inherits the scheduled-job row of §5.3's exemptions, since the agent's own scheduler is what replaced the gateway's: exempt from rate and cooldown, and its post counts toward the window, so a burst of reports holds the other bots as the limit intends. The retry cap and backoff that bounded a gateway job now sit in the agent's own scheduler, outside the gateway. Mute and closed threads are not exempt. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
 | 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). A paused bot (`coop pause`, persisted as today) is held for every thread like a muted one: no wake of any source, the cursor stays, the backlog waits for `resume`. |
-| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
+| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. On a platform the cursor and the mark are a `(timestamp, post id)` pair, ordered by timestamp with the post id as the tie-break, since Mattermost and Rocket.Chat post ids are opaque and their history pages by time. The gateway stores the pair, and `read` has assembled `[cursor, hwm]` when the page containing the mark has been fetched. The simulator's integer seq stands in for the pair. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. The periodic catch-up runs for every agent, including one with a heartbeat of its own: the two have different urgency, the catch-up being the room's safety net and the heartbeat the agent's own routine, so they are kept separate. `catch_up_idle_seconds: 0` disables it for a room, as the specification allows, for an operator who wants the agent's heartbeat to carry that duty. `heartbeat: agent` as a configuration value is defined with the transports that carry one. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules, checked when its turn starts (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
@@ -200,7 +200,7 @@ wake_id: w-7f3a
 room: mm-lab:team
 source: addressed            # addressed | picked | catch-up | unfinished
 starting_thread: T1
-hwm: 1250                    # deliver posts after the cursor through this id
+hwm: 1250                    # deliver posts after the cursor through this mark (simulator seq; platform form in the 5.6 row)
 hint:                        # section 5.8, as the simulator renders it
   threads: [{thread: T1, group: must-reply, posts_left: 3, words_left: 400}]
   previous_failure: null

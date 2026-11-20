@@ -1637,4 +1637,4 @@ Notes:
 - Method: the owner asked for findings to be presented as scenario, recommendation, reason, one per finding. Saved as a standing rule.
 - Cost: this round about 70 minutes including the owner's review.
 
-**Status: open on N-467** — fixes pushed; the remaining decision is the owner's; no further review requested.
+**Status: closed** — N-467 settled by the owner (2026-11-20): the `(timestamp, post id)` representation is written into the 5.6 row, the lab verifies it. All 50 threads resolved. No further review requested.
