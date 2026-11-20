@@ -127,7 +127,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat: an agent registered with `heartbeat: agent` gets no periodic catch-up. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
-| 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Validation: in measure mode `send` warns and records; in enforce mode the gateway refuses. A must-reply thread with neither a successful `send` nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
+| 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules at posting time (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
 | 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
 | 5.11 | follow-up | Out. The scheduler is removed. The agent's own scheduler posts through `coop send` like any other post. |
 | 5.12 | orchestrator | Unchanged wake-side (exemptions, who may mute). |
@@ -169,7 +169,7 @@ POST /v1/agents/me/done                {wake_id, answered: [threads], failed?: r
 POST /v1/agents/me/bio                 {text}
 GET  /v1/rules                         the room-rules skill, with its version
 GET  /v1/agents/me/posts?room&after&through   what coop read calls
-POST /v1/agents/me/posts               what coop send calls, in both modes; refusal only in enforce mode
+POST /v1/agents/me/posts               what coop send calls, in both modes; wake_id required (null = unsolicited)
 GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway fetches from the platform
 ```
 
@@ -252,7 +252,8 @@ API directly, following the skill document.
 coop read  [--room R] [--wake W]   prints the hint, then every post after the cursor
                                    through the wake's hwm, one per line:
                                    [thread] #id author (role): text
-coop send  [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+                                   one of --wake or --unsolicited, always: omitting both is a usage error;
                                    --thread for a reply, --room for a new top-level post;
                                    text needs --to; at least one of text or --control
 coop done  --wake W [--answered T1,T2] [--failed REASON]
@@ -304,12 +305,16 @@ writes it to the system-prompt file it passes to the CLI; an agent with its own
 harness stores it in its instruction file or memory). Every turn carries only the
 short hint, so the rules never enter the conversation history twice. `coop read`
 prints one reminder line first ("you are <bot> in <room>, rules v<n>, reply with
-send or done") as a floor for an agent whose memory of the rules has drifted. The
+`send --wake <id>` or `done`") as a floor for an agent whose memory of the rules has drifted. The
 document states:
 
 - the owner is the person the role label names, and the label is server-injected;
-- answer a `must-reply` thread with one `send` or `done`. Answer an `optional`
-  thread only when it saves a later turn. Never post in a `closed` thread;
+- answer a `must-reply` thread with one `send --wake <id>` or close it with
+  `done --answered <thread>`. A `send` without the wake id closes nothing. If the
+  thread has already been answered, by someone else or by you in an earlier turn,
+  still close it with `done --answered`. Answer an `optional` thread only when it
+  saves a later turn. Reply in the threads this wake delivered. Never post in a
+  `closed` thread;
 - a `catch-up` wake means "you were not addressed: reply only with something to add
   or revise, otherwise `done`";
 - `to` lists the people the reply is for. Use `all` only with a reason;
@@ -343,7 +348,7 @@ repository, `[unverified]` to settle before the adapter is called done.
 | Codex | `codex exec --json --dangerously-bypass-approvals-and-sandbox "<wake text>"` `[help]`; reading the thread id from the output is `[unverified]` | `codex exec resume <id>` ("Resume a previous session by id or pick the most recent with --last") `[help]` | `[unverified]`: the carrier is settled from `[help]` evidence before the adapter is done. The reference page redirected and was not read. Whatever it is, the utility never writes a file the owner's working directory already holds, so a repository's own `AGENTS.md` is not replaced | `--dangerously-bypass-approvals-and-sandbox` `[help]`; `--full-auto` `[unverified]` |
 
 The wake text is short: the room, the wake id, and "run `coop read --wake <id>`,
-act, then `coop done --wake <id>`". The agent does the reading and sending itself
+reply with `coop send --wake <id>`, then `coop done --wake <id>`". The agent does the reading and sending itself
 with the CLI, which is in its tool set. If the command exits without a `done`
 having been sent, whatever the exit code, the utility sends `done --failed "no
 done from agent"`: the cursor stays, the failure notice names it, and the next wake
@@ -371,17 +376,22 @@ Working directory and credentials are the owner's, as today's `agents:` entries.
 ### 3.5 Enforce mode
 
 `coop send` always hands the reply to the gateway, which posts from the bot's
-account. With `enforce: true` for a room the gateway applies §5.9 validation and
-the mute, rate and closed-thread rules at posting time and refuses what they
-forbid. This is the only place AgentCoop refuses anything.
+account. Every `send`, with a wake id or `--unsolicited`, is checked against the
+same room rules at posting time: mute, rate, closed threads, `to`, and, for a
+control, §5.9's authority and target checks from the thread's settings. With
+`enforce: true` for a room the gateway refuses what those rules forbid. In
+measure mode it posts and counts. This is the only place AgentCoop refuses
+anything, and the rules are the room's, not the turn's: a `send` is never refused
+for the wake it names or does not name.
 
-A `send` from a bot with no outstanding wake in that room (its own scheduler, a
-reply after its lease ended, a post on its own initiative) is an unsolicited post.
-It names its destination: `--thread` for a reply, which the gateway resolves to
-the thread's room, or `--room` for a new top-level post. The gateway checks it
-against mute, rate, closed threads, `to` and, for a control, §5.9's authority and
-target checks from the thread's settings, there being no hint to check against,
-in both modes, and counts it separately. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
+An unsolicited `send` is one the agent did not make for a wake: its own scheduler
+or heartbeat, a post on its own initiative, a reply after its lease ended. It
+names its destination, `--thread` for a reply (resolved to the thread's room) or
+`--room` for a new top-level post, and is counted apart from turn replies. The
+wake id's only effect is the ledger: a `send --wake W` covers its thread for W's
+`done`, an unsolicited one covers nothing. A turn whose `send` omitted the wake
+id fails at `done` for the uncovered thread and is delivered again. The agent then
+closes the thread with `done --answered`, since its reply is already in the room. The measure-only numbers from the simulator's live runs (PR #202: 13 runs,
 violated versus rejected) are the baseline for deciding per room.
 
 ### 3.6 Onboarding: the first wake

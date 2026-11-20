@@ -1559,3 +1559,5 @@ Notes:
 - Cost: 3 rounds, 2 raters each, about 2.5 hours across the PR; this round about 50 minutes.
 
 **Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+Addendum (2026-11-19, after the round): the owner revisited H-274 and spec §5.9 as a design question rather than a finding. Settled: a `send` always states `--wake W` or `--unsolicited` (omitting both is a usage error), the wake id is attribution only (the wake's ledger, checked for must-reply coverage at `done`), every `send` passes the same room rules at posting time, and the specification's "reply only in a delivered or hinted thread" becomes an instruction and a counter, since no mechanism depends on it. H-274 therefore moves from FILE to **incorporated**: the misclassification it described cannot occur when nothing is classified. No issue is opened. The thread is answered and resolved.
