@@ -15,7 +15,7 @@ The short, spoken form of AgentCoop. Also the CLI command (`coop`) and the envir
 _Avoid_: acg, coop-ai
 
 **gateway**:
-The AgentCoop daemon process — the thing `coop start` starts, that holds watcher records and talks to connectors. A component of AgentCoop, not a synonym for it. Also the Python package name.
+The AgentCoop daemon process — the thing `coop start` starts, that holds watcher records and talks to connectors. A component of AgentCoop, not a synonym for it. The Python package of the current daemon is `gateway`, frozen until cutover; the remote-agent daemon's package is `coop` (`docs/design/remote-agent-gateway.md` §5).
 _Avoid_: the server, the service (in prose), "the coop" (for the process)
 
 **runtime directory**:
@@ -29,12 +29,36 @@ _Avoid_: ACG Session Identity, Session Identity
 ### Agents and bots
 
 **agent**:
-One `agents:` entry in `config.yaml`: a backend process (`claude` or `opencode`), a working directory and a persona. One agent can be present on several chat servers. When an operator says "agent" in conversation they usually mean an agent and its first bot.
+One `agents:` entry in `config.yaml`. In the current daemon: a backend process (`claude` or `opencode`), a working directory and a persona. In the remote-agent daemon (`type: remote`): a token the gateway holds and a cursor per room, never a process; the agent runs on its own host. One agent can be present on several chat servers. When an operator says "agent" in conversation they usually mean an agent and its first bot.
 _Avoid_: persona (for the entry — the persona is the agent's instruction file), watcher, bot (for the `agents:` entry)
 
 **bot**:
 An agent's presence on one chat server: the connector (the server account), the agent, and the watcher rule binding them. An agent has at most one bot per server; the same agent on Mattermost and Rocket.Chat is two bots.
 _Avoid_: account (that is only the connector's half), agent (for the whole triple)
+
+**role**:
+The label on a delivered post's author: `owner`, `guest` or `agent`. `agent` is any bot in the room's roster; an author the configuration does not list is a `guest`. A label, never a permission: the gateway enforces nothing by it.
+_Avoid_: anonymous (no longer a role), permission level
+
+**wake**:
+One doorbell event for one bot in one room, carrying metadata and never post text, with a lease. The agent reads the posts itself through `coop read`.
+_Avoid_: trigger (that is the post that caused an addressed wake), notification, ping
+
+**turn**:
+What an agent does between a wake and its `done`: read, reply with `send`, finish with `done`. A turn the agent starts on its own (its scheduler, heartbeat or initiative) is an unsolicited `send`.
+_Avoid_: session (that is the agent's own conversation state), invocation
+
+**lease**:
+The gateway's record that a wake is outstanding for a bot in a room, from the agent's poll picking it up until `done` or expiry. One outstanding wake per bot per room.
+_Avoid_: lock, reservation
+
+**bio**:
+The agent's short self-description, pushed by the agent (`coop bio`), stored by the gateway per agent, read by the classifier. Identity, responsibilities, current topics, reply rules; no memory, no credentials.
+_Avoid_: profile (reserved above for admin credentials), persona (the agent's own instruction file), description
+
+**utility**:
+The agent-side process for CLI agents (`coop agent run`): a doorbell client that runs one command per wake (`claude -p`, `codex exec`, `opencode run`) and sends `done` if the agent did not. Not a gateway component.
+_Avoid_: runner, adapter (that is the per-CLI command table inside it), backend
 
 **profile**:
 One chat server's administrative credentials in `admin-profiles.yaml`, read by `coop-provision`. Named after the server host (`mm-labpig`) unless renamed. Distinct from a connector, which holds a bot's own credentials.
