@@ -124,11 +124,11 @@ Mechanics, each mapped from the multi-agent design:
 |---|---|---|
 | 5.1 | classifier | Unchanged. One call per post, one question per unaddressed bot, using the bios. On error or timeout the fallback is `addressed-only` (addressed bots are woken, nobody is picked), and the periodic catch-up is the safety net for the rest. This is the specification's failure policy, not the wake-everyone fail-open some agents use for their own tagging. |
 | 5.2 | mute | Wake-side unchanged: a muted bot is not woken for that thread except by a human or orchestrator mention. Post-side (refusing a muted bot's text) only in enforce mode. Measure mode records the violation. |
-| 5.3 | rate limit, cooldown | Wake-side holds unchanged, and the intent stated in §5.3 holds here: the limit slows a bot down so humans can keep up, and it never drops a post or ends a conversation. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. An unsolicited `send` is a turn the agent starts, so the same check applies to it at that moment (§3.5). In enforce mode a `send` the check holds is refused with the reason and a `retry_after`, since the gateway cannot hold a process it did not start, and the caller decides when to send it. |
+| 5.3 | rate limit, cooldown | Wake-side holds unchanged, and the intent stated in §5.3 holds here: the limit slows a bot down so humans can keep up, and it never drops a post or ends a conversation. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. An unsolicited `send` is a turn the agent starts. It inherits the scheduled-job row of §5.3's exemptions, since the agent's own scheduler is what replaced the gateway's: exempt from rate and cooldown, and its post counts toward the window, so a burst of reports holds the other bots as the limit intends. The retry cap and backoff that bounded a gateway job now sit in the agent's own scheduler, outside the gateway. Mute and closed threads are not exempt. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
 | 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). A paused bot (`coop pause`, persisted as today) is held for every thread like a muted one: no wake of any source, the cursor stays, the backlog waits for `resume`. |
 | 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
-| 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. Exactly-one heartbeat (direction §3.4): in this increment the gateway holds it for every agent, since the one transport here gives an agent no way to open a leased catch-up turn of its own. `heartbeat: agent` is defined with the transports that carry one. |
+| 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. The periodic catch-up runs for every agent, including one with a heartbeat of its own: the two have different urgency, the catch-up being the room's safety net and the heartbeat the agent's own routine, so they are kept separate. `catch_up_idle_seconds: 0` disables it for a room, as the specification allows, for an operator who wants the agent's heartbeat to carry that duty. `heartbeat: agent` as a configuration value is defined with the transports that carry one. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules, checked when its turn starts (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
 | 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
@@ -401,13 +401,14 @@ give. What the hint marks closed, `send` refuses.
 
 A turn the agent starts is an unsolicited `send`: its own scheduler or heartbeat,
 a post on its own initiative, a reply after its lease ended. The `send` is the
-turn's start, so the same check runs on it at that moment, for the thread it
-names (`--thread`, resolved to the thread's room) or the new thread it opens
-(`--room`). A check that holds it is a refusal to the caller, with the reason and
-a `retry_after` for a rate or cooldown hold, because the gateway cannot hold a
-process it did not start. What the caller does next is the caller's: wait and
-send again, send elsewhere, or drop its own post. The gateway drops nothing and
-never closes a thread on the agent's behalf.
+turn's start and is checked at that moment, for the thread it names (`--thread`,
+resolved to the thread's room) or the new thread it opens (`--room`). It is
+exempt from rate and cooldown, as a scheduled-job firing is in spec §5.3, so it
+posts at once and the CLI returns the post id: a script may call `send` and need
+no retry. Mute and a closed thread are not exempt. They refuse with the reason
+and a non-zero exit, because a human closed that thread, and what the caller
+does next is the caller's. A refusal with its reason is not a drop. The gateway
+drops nothing silently and never closes a thread on the agent's behalf.
 
 With `enforce: true` for a room the gateway refuses what the check forbids. In
 measure mode it posts and counts. This is the only place AgentCoop refuses
