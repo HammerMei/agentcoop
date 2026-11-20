@@ -1608,3 +1608,33 @@ Notes:
 - Cost: this round about 45 minutes, 2 raters plus the owner on one escalation.
 
 **Status: closed** — fixes pushed, PR handed to the owner for merge.
+
+## 2026-11-20 — PR #207 round 6 (owner-requested, Codex on `b43d086`; reviewed jointly with the owner)
+
+**Chain detector:** 50 findings over 6 rounds, round 6 `4 finding(s) on our own last fix, streak 1`. Noise level; the four are on round-5 text and none extends a fix in the same direction.
+**Arrival check:** 11 inline comments, review `5990305028` on `b43d086`, unanchored (no line numbers). Security review did not run (credits), sixth time.
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind, 11 findings, method, constants, the documents, the simulator and both connectors' history paths, no verdicts. Verdicts agreed on 8 of 11. Rater 2 moved rater 1 on three with checkable evidence: N-454 (sim L925-942: without a degraded trip a bot that keeps missing a must-reply is re-woken every sweep, a loop; raised from "small" to FIX), N-497 (§7 step 3 adds to the new daemon before removing from the old, an overlap not a gap; the residual defect is the unstated initial cursor), N-508 (a normal cron flips the agent online and offline with a notice each time, loud flapping, not a masked outage). Rater 1 held on N-442 (its own round-2 recovery text cannot work as written) and on N-467 (an implementer cannot build "page until the range is assembled" without a representation), which rater 2 would file to the lab.
+**Owner review (2026-11-20):** the owner read every finding with the scenario, recommendation and reason laid out, and chose: fix N-463, N-454, N-442, N-508, N-486, N-436, N-478; N-523 removed to `pushed` after confirming the gateway stores the pushed bio and that `platform`/`card` serve a later kit increment; N-497 with the ruling that migration is not seamless and claims nothing, the cursor starts at the latest post and an operator asks the agent to read history; N-520 to the lab, plus the owner's addition that every gateway-authored post begins with `SYSTEM:` so the classifier and agents can read it without metadata. **N-467 is still open with the owner** (the review's one unresolved item: write the `(timestamp, post id)` representation now, or leave it to the lab).
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **N-463** wake-side mute/rate holds in measure mode contradict spec §8.1 and §6.2's parity claim (P1) | true, spec contradiction | true, and it breaks the document's own parity promise; rank 2 | **FIX** — measure mode holds nothing an agent could obey itself; pause, backoff, degraded, one-turn always hold |
+| **N-454** no degraded trip for CLI-era invalid turns (P1) | small, one sentence | loop in enforce mode (sim trace); rank 1 | **FIX** — refused send or uncovered must-reply at `done` = one invalid turn; `consecutive_invalid_limit` unchanged |
+| **N-523** `bio_source` advertises two unbuilt values (P1) | remove, as `heartbeat: agent` | same; silent misconfiguration | **FIX by removal** |
+| **N-467** cursor/hwm as orderable post ids on platforms whose ids are opaque (P1) | FIX, one representation sentence | FILE to the §8.1 lab; or the same sentence | **open with the owner** |
+| **N-442** lost-send recovery reads below the hwm (P2) | true, own round-2 error | decline, visible duplicate; the one-liner if touching | **FIX** — `read --room` alone prints cursor through latest |
+| **N-497** migration cursor handoff (P1) | blocks migration | overlap, not a gap; initial cursor unstated | **FIX, one sentence + owner's ruling** — cursor at latest post; migration is not seamless by design |
+| **N-508** `last_seen` on any request keeps a dead poller online (P2) | two phrases | loud flapping, not masking; fold in | **FIX** — `last_seen` is the last wake poll |
+| **N-486** pattern rooms absent from §4 (P2) | half true, one sentence | omission, not contradiction; the sentence | **FIX, two comments** — keys are patterns; a discovered room takes the first match |
+| **N-436** "never refused" reads unconditional (P1) | reword | DROP, the qualifier is there | **reworded** — "on the ground of its wake id" |
+| **N-478** `trigger` required for sweep wakes (P2) | nullable | DROP, example not schema | **comment added** — null for catch-up and unfinished |
+| **N-520** failure-notice metadata carrier undecided (P1) | decline, spec's own lab item | FILE with N-467 to the lab | **lab (§6)** + owner's `SYSTEM:` prefix |
+
+Notes:
+- Adoption: 9 fixed (two by one-line clarification), 1 to the lab, 1 open with the owner.
+- Severity re-rank vs Codex: N-454 and N-463 first; N-436, N-478 (both badged) last.
+- Method: the owner asked for findings to be presented as scenario, recommendation, reason, one per finding. Saved as a standing rule.
+- Cost: this round about 70 minutes including the owner's review.
+
+**Status: open on N-467** — fixes pushed; the remaining decision is the owner's; no further review requested.

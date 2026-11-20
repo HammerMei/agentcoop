@@ -94,7 +94,7 @@ The gateway keeps, per room:
 agents:                        # per agent, across rooms
   a:
     bio: {text: ..., version: ...}   # persisted; pushed before any room exists (§3.6)
-    last_seen: ...                   # in memory; last doorbell request of any kind
+    last_seen: ...                   # in memory; last wake poll
 room:
   agents: [a, b, c]            # the configured agent list (§5.14)
   threads:
@@ -123,7 +123,7 @@ Mechanics, each mapped from the multi-agent design:
 | § | Mechanism | In this increment |
 |---|---|---|
 | 5.1 | classifier | Unchanged. One call per post, one question per unaddressed bot, using the bios. On error or timeout the fallback is `addressed-only` (addressed bots are woken, nobody is picked), and the periodic catch-up is the safety net for the rest. This is the specification's failure policy, not the wake-everyone fail-open some agents use for their own tagging. |
-| 5.2 | mute | Wake-side unchanged: a muted bot is not woken for that thread except by a human or orchestrator mention. Post-side (refusing a muted bot's text) only in enforce mode. Measure mode records the violation. |
+| 5.2 | mute | Wake-side as the simulator's `enforce` switch has it: in enforce mode a muted bot is not woken for that thread except by a human or orchestrator mention. In measure mode no wake is held for mute, rate or cooldown, since those are rules an agent could obey by itself, and the gateway counts whether it did (spec §8.1). Pause, backoff, degraded and one turn per bot hold in both modes. Post-side (refusing a muted bot's text) only in enforce mode. |
 | 5.3 | rate limit, cooldown | Wake-side holds unchanged, and the intent stated in §5.3 holds here: the limit slows a bot down so humans can keep up, and it never drops a post or ends a conversation. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. An unsolicited `send` is a turn the agent starts. It inherits the scheduled-job row of §5.3's exemptions, since the agent's own scheduler is what replaced the gateway's: exempt from rate and cooldown, and its post counts toward the window, so a burst of reports holds the other bots as the limit intends. The retry cap and backoff that bounded a gateway job now sit in the agent's own scheduler, outside the gateway. Mute and closed threads are not exempt. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
 | 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). A paused bot (`coop pause`, persisted as today) is held for every thread like a muted one: no wake of any source, the cursor stays, the backlog waits for `resume`. |
@@ -131,7 +131,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. The periodic catch-up runs for every agent, including one with a heartbeat of its own: the two have different urgency, the catch-up being the room's safety net and the heartbeat the agent's own routine, so they are kept separate. `catch_up_idle_seconds: 0` disables it for a room, as the specification allows, for an operator who wants the agent's heartbeat to carry that duty. `heartbeat: agent` as a configuration value is defined with the transports that carry one. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules, checked when its turn starts (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
-| 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. The invalid-envelope counter becomes a count of refused `send` calls in enforce mode and of warnings in measure mode. The failure notice is unchanged. |
+| 5.10 | failure | Backend failure is reported by `done --failed <reason>` or by lease expiry. Backoff unchanged. A turn whose `send` was refused, or that failed at `done` for an uncovered must-reply thread, is one invalid turn; `consecutive_invalid_limit`, the degraded state and its notice are unchanged, so a bot that keeps failing is held rather than re-woken every sweep. The failure notice is unchanged in content. Every post the gateway writes on its own behalf begins with `SYSTEM:` (`SYSTEM ERROR: ...`, `SYSTEM: x is offline`) so the classifier and the other agents read it as the gateway's, not the bot's. The metadata carrier that lets connectors bypass eligibility for it is the lab question spec §5.10 leaves open (§6). |
 | 5.11 | follow-up | Out. The scheduler is removed. The agent's own scheduler posts through `coop send` like any other post. |
 | 5.12 | orchestrator | Unchanged wake-side (exemptions, who may mute). |
 | 5.13 | status | Unchanged, plus per-bot lease state, last `done`, bio version, and per-agent `online`/`offline` with `last_seen`. |
@@ -205,7 +205,7 @@ hint:                        # section 5.8, as the simulator renders it
   threads: [{thread: T1, group: must-reply, posts_left: 3, words_left: 400}]
   previous_failure: null
   backoff_until: null
-trigger:
+trigger:                     # null for a catch-up or unfinished wake
   post_id: 1250
   author_id: u_abc           # server-authenticated
   author_role: owner         # owner | guest | agent
@@ -234,8 +234,9 @@ expiries in a row trip the backoff like two failed turns.
 
 Liveness: the long-poll is the heartbeat. A live client always has one wake
 request open, so the gateway receives a request from each agent at least once per
-`wait` period. `last_seen` is the time of the agent's last doorbell request of any
-kind. An agent is `offline` when `last_seen` is older than twice `wait` and it
+`wait` period. `last_seen` is the time of the agent's last wake poll, not of its
+other requests: a scheduler that keeps calling `send` while the poller is dead
+does not keep the agent online. An agent is `offline` when `last_seen` is older than twice `wait` and it
 holds no live lease (a turn in progress makes no requests while the agent
 thinks), and `online` on its next request. Offline is not a failed turn: no backoff, no lease.
 `coop status` and `list` show the state and `last_seen`. A transition posts the
@@ -255,9 +256,11 @@ the doorbell API with the agent's token, so an agent without a shell can call th
 API directly, following the skill document.
 
 ```
-coop read  [--room R] [--wake W]   prints the hint, then every post after the cursor
-                                   through the wake's hwm, one per line:
+coop read  [--room R] [--wake W]   with --wake: prints the hint, then every post after the
+                                   cursor through the wake's hwm, one per line:
                                    [thread] #id author (role): text
+                                   with --room alone: the posts after the cursor through the
+                                   latest, which is how an agent checks whether its own reply landed
 coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
                                    one of --wake or --unsolicited, always: omitting both is a usage error;
                                    --thread for a reply, --room for a new top-level post; a wake's send
@@ -424,7 +427,7 @@ drops nothing silently and never closes a thread on the agent's behalf.
 
 With `enforce: true` for a room the gateway refuses what the check forbids. In
 measure mode it posts and counts. This is the only place AgentCoop refuses
-anything, and a `send` is never refused for the wake it names or does not name.
+anything, and a `send` is never refused on the ground of its wake id, present or absent.
 Unsolicited sends are counted apart from turn replies. The wake id's only other
 effect is the ledger: a `send --wake W` covers its thread for W's `done`, an
 unsolicited one covers nothing. A turn whose `send` omitted the wake id fails at
@@ -447,7 +450,8 @@ above; this is the sequence.
    does, the classifier has nothing to match on, so only addressed posts and the
    periodic catch-up wake it.
 4. The agent's bot account is added to the room on the chat platform. The gateway
-   discovers the room (dynamic watchers, direction §4) and creates the cursor.
+   discovers the room (dynamic watchers, direction §4) and creates the cursor at
+   the room's latest post.
 5. The first wake arrives with `rules_version`. The agent holds no version, so it
    fetches `/v1/rules` and stores the document: the utility writes it to the
    system-prompt file it passes to the CLI; an agent with its own harness stores
@@ -465,12 +469,12 @@ agents:
     type: remote                 # new; claude / opencode entries become remote + utility
     token_file: agents/a/token
     heartbeat: gateway           # the only value in this increment (§5.7 row)
-    bio_source: pushed           # pushed | platform | card
+    bio_source: pushed           # the only value in this increment; platform and card return with the kits
 gateway:
   listen: 127.0.0.1:7474         # the doorbell API; set per deployment
   tls: {cert: gateway/cert.pem, key: gateway/key.pem}   # required off loopback, unless a proxy terminates TLS
-rooms:
-  mm-lab:team:
+rooms:                           # keys are patterns, as today's rooms.include / except_for / direct;
+  mm-lab:team:                   # a discovered room takes the first entry that matches it
     agents: [a, b, c]
     enforce: false
     rate_limit_posts: 6
@@ -516,6 +520,10 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
    classifier picks with what agents did, and count would-have-been refusals.
 4. Live, enforce on, for one room where the measure-only counts justify it.
 
+Two questions spec §8.1 leaves to the lab are settled in step 2: how the
+connectors page history to a complete `[cursor, hwm]` bound, and which platform
+field carries the gateway's event kind on a `SYSTEM:` post.
+
 ## 7. Migration of the current rooms
 
 1. Confirm the roster and each agent's host from the production configuration
@@ -524,7 +532,10 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
    with the fake agent. Then with one real CLI agent through the utility.
 3. Production: move agents one at a time. The old gateway keeps the rooms it still
    owns. An agent migrated to the new daemon is removed from the old configuration
-   the same day, so no agent is woken twice.
+   the same day, so no agent is woken twice. Its new cursor starts at the room's
+   latest post (§3.6 step 4). The move is not seamless and does not claim to be:
+   a post in the gap is not delivered by a wake, and an operator who wants it
+   seen asks the agent to read the room's recent history.
 4. Agents that are not AgentCoop-hosted today keep working untouched. They may
    subscribe later for relevance tags and metadata.
 5. Re-home scheduled jobs before removing the old daemon.
