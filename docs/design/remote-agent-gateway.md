@@ -260,7 +260,10 @@ coop read  [--room R] [--wake W]   prints the hint, then every post after the cu
                                    [thread] #id author (role): text
 coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
                                    one of --wake or --unsolicited, always: omitting both is a usage error;
-                                   --thread for a reply, --room for a new top-level post;
+                                   --thread for a reply, --room for a new top-level post; a wake's send
+                                   defaults to the wake's starting thread (a top-level trigger post is
+                                   its own thread root), so a reply threads the conversation unless the
+                                   agent asks for the root;
                                    text needs --to; at least one of text or --control
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
@@ -293,6 +296,14 @@ room." `done --answered` is needed in both modes: a
 `must-reply` thread answered with `done` alone leaves no post, so the unfinished
 set (§5.7) cannot be inferred from the platform.
 
+Where a post lands is guidance, not a rule the gateway enforces. A reply goes in
+the thread it answers, and a top-level trigger post is its own thread, so
+conversations move into threads and the room's root stays readable. The root is
+still available to a wake's `send` for the rare reply that belongs there. An
+unsolicited post usually goes to the root (`--room`), a scheduled report being
+the common case, and to a thread (`--thread`) when it continues a request made
+in that thread, such as a script posting back what someone asked for there.
+
 Attachments are fetched lazily. `read` lists each attachment as one line with its
 id, name, type, size and the exact command to fetch it
 (`attachment a1: report.pdf application/pdf 3.1 MB -> coop attachment a1`). The
@@ -323,7 +334,8 @@ document states:
   `done --answered <thread>`. A `send` without the wake id closes nothing. If the
   thread has already been answered, by someone else or by you in an earlier turn,
   still close it with `done --answered`. Answer an `optional` thread only when it
-  saves a later turn. Reply in the threads this wake delivered. Never post in a
+  saves a later turn. Reply in the thread you were asked in: a top-level post is its own thread.
+  Post at the root only when a thread would be the wrong place. Never post in a
   `closed` thread;
 - a `catch-up` wake means "you were not addressed: reply only with something to add
   or revise, otherwise `done`";
@@ -531,6 +543,12 @@ daemon and the glossary gains the new terms (§2) when this is accepted.
 
 - Codex per-run instructions: the carrier is `[unverified]` (§3.4). A per-run flag
   was not found.
+- Catch-up cadence per thread. This increment keeps `catch_up_idle_seconds` per
+  room, as the specification defines it. A per-thread override through an
+  owner's control word (`catch-up: N seconds`, beside `limit:`) is a later
+  increment, taken if live rooms show threads that need different cadences. The
+  cursor is per room, so a thread's catch-up would deliver every undelivered
+  post in the room, not only that thread's.
 
 ## 9. Supersedes
 
