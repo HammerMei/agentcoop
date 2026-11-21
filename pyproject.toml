@@ -45,7 +45,7 @@ gateway-tui = "gateway.tools.tui:main"
 agent-chat-gateway = "gateway.tombstone:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["gateway"]
+packages = ["gateway", "coop"]
 
 [build-system]
 requires = ["hatchling"]

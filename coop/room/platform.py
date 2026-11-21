@@ -1,0 +1,50 @@
+"""What the core needs from the chat platform, for one room.
+
+The core never talks to a connector. It reads the room's posts between two positions
+(``CURSOR``), looks members and roles up, and posts on a bot's behalf. The test
+platform (``tests/coop/helpers.py`` ``FakePlatform``) is an in-memory room; the
+connectors of a later increment implement the same protocol over Mattermost and
+Rocket.Chat, where a position is a ``(timestamp, post id)`` pair.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from .model import Member, Position, Post, PostKind
+
+
+class RefusedPost(Exception):
+    """The platform refused an outbound post in ``thread``."""
+
+    def __init__(self, thread: str) -> None:
+        super().__init__(f"platform refused a post in thread {thread!r}")
+        self.thread = thread
+
+
+class Platform(Protocol):
+    name: str
+    is_dm: bool
+
+    def members(self) -> dict[str, Member]: ...
+
+    def role_of(self, username: str) -> str | None: ...
+
+    def is_archived(self, thread: str) -> bool: ...
+
+    def posts_after(self, position: Position | None, through: Position | None = None) -> list[Post]:
+        """Posts after ``position`` (exclusive; ``None`` = from the start), through
+        ``through`` (inclusive) when given, in server order."""
+        ...
+
+    def thread_posts(self, thread: str, newest_first: bool = False) -> list[Post]: ...
+
+    def last_position(self) -> Position | None:
+        """The position of the newest post, or ``None`` in an empty room."""
+        ...
+
+    async def post(self, author: str, text: str, thread: str, kind: PostKind | None = None) -> Post:
+        """Post as ``author`` (a bot the gateway holds the account for). Raises
+        :class:`RefusedPost` when the platform refuses it. The post reaches the core
+        again as an inbound post, like every other post in the room."""
+        ...

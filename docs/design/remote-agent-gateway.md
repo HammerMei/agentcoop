@@ -490,7 +490,7 @@ the agent's host. The permission fields (`permissions`, `owner_allowed_tools`,
 `guest_allowed_tools`, `tool_presets` usage) are rejected at load with a message
 naming this document.
 
-## 5. Code layout (proposal)
+## 5. Code layout
 
 New top-level package, old `gateway/` frozen until cutover.
 
@@ -504,8 +504,10 @@ tests/coop/           tests/roomsim moved and extended with the fake agent over 
 gateway/              frozen; deleted when the last room has migrated
 ```
 
-The package name is a proposal. CONTEXT.md already defines **gateway** for the
-daemon and the glossary gains the new terms (§2) when this is accepted.
+The package is `coop`, the name the CLI and the `COOP_` prefix already carry.
+It was not used for the first package because the rename from the old product
+name was already a large move; this increment is the new package's natural start.
+CONTEXT.md carries the new terms of §2.
 
 ## 6. Verification
 
