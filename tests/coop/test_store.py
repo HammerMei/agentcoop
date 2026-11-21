@@ -8,7 +8,7 @@ import json
 import pytest
 
 from coop.room.core import RoomCore
-from coop.room.store import dump_room, load_room
+from coop.room.store import dump_agents, dump_room, load_agents, load_room
 from tests.coop.helpers import Sandbox, Script, reply
 
 
@@ -75,3 +75,19 @@ def test_a_bot_the_room_no_longer_hosts_is_left_out():
     core = Sandbox(bots=("a",)).gw
     load_room(core, {"format": 1, "bots": {"zed": {"cursor": 9}}})
     assert list(core.persisted) == ["a"]
+
+
+async def test_the_agents_document_restores_bios_and_versions_into_the_dict_the_cores_read():
+    sb = Sandbox(bots=("a", "b"))
+    sb.gateway.bio("a", "I run the deploys")
+    sb.gateway.bio("a", "I run the deploys and the on-call")
+    data = json.loads(json.dumps(dump_agents(sb.gateway)))
+    assert data["agents"] == {"a": {"bio": "I run the deploys and the on-call", "bio_version": 2}}  # b never pushed one
+
+    fresh = Sandbox(bots=("a", "b"))
+    load_agents(fresh.gateway, data)
+    assert fresh.gateway.status()["agents"]["a"] == {"bio_version": 2, "last_seen": None}
+    assert fresh.gw.bios is fresh.gateway.bios and fresh.gw.bios == {"a": "I run the deploys and the on-call"}
+    assert fresh.gateway.bio("a", "now the backups too") == 3  # the version continues, it does not restart
+    with pytest.raises(ValueError, match="format"):
+        load_agents(fresh.gateway, {"format": 0, "agents": {}})

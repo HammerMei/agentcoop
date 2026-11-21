@@ -1,6 +1,7 @@
 """The persisted part of a room's state, as one JSON-safe document (design §3.1):
-cursors, unfinished sets, the paused flag, thread settings. The in-memory part
-(leases, backoff, decision cache, rate window) is rebuilt from the platform on
+cursors, unfinished sets, the paused flag, thread settings; and the persisted part of
+what the gateway holds per agent, as another: the bio and its version. The in-memory
+part (leases, backoff, decision cache, rate window, ``last_seen``) is rebuilt on
 restart. Positions are stored as the platform gave them; a tuple position comes
 back as a list and is restored to a tuple, so comparisons keep working.
 """
@@ -11,6 +12,7 @@ from dataclasses import fields
 from typing import Any
 
 from .core import BotPersisted, RoomCore, ThreadSettings
+from .gateway import AgentState, Gateway
 from .model import Position
 
 FORMAT = 1
@@ -84,3 +86,28 @@ def load_room(core: RoomCore, data: dict) -> None:
             last_activity=float(raw.get("last_activity", 0.0)),
             unknown_mutes=list(raw.get("unknown_mutes", [])),
         )
+
+
+def dump_agents(gateway: Gateway) -> dict:
+    """The gateway's persisted agent state: every bio pushed so far, with its version."""
+    return {
+        "format": FORMAT,
+        "agents": {
+            agent: {"bio": state.bio, "bio_version": state.bio_version}
+            for agent, state in gateway.agents.items()
+            if state.bio is not None
+        },
+    }
+
+
+def load_agents(gateway: Gateway, data: dict) -> None:
+    """Restore the bios into ``gateway`` before it starts. The bios dict is updated in
+    place: every room's core holds that same dict for its classifier."""
+    if data.get("format") != FORMAT:
+        raise ValueError(f"agent state format {data.get('format')!r} is not {FORMAT}")
+    for agent, raw in data.get("agents", {}).items():
+        state = gateway.agents.setdefault(agent, AgentState())
+        state.bio = raw.get("bio")
+        state.bio_version = int(raw.get("bio_version", 0))
+        if state.bio is not None:
+            gateway.bios[agent] = state.bio
