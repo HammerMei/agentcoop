@@ -49,7 +49,7 @@ def test_a_post_survives_json_except_the_gateways_own_fields():
     # control line in ``text`` like everyone in the room.
     doc = through_json(encode_post(POST, author_role="owner"))
     assert doc["author_role"] == "owner" and doc["mentions"] == ["a"]
-    assert decode_post(doc) == POST
+    assert decode_post(doc) == replace(POST, author_role="owner")
 
 
 def test_a_tuple_position_comes_back_as_a_list():

@@ -152,6 +152,7 @@ def decode_post(doc: Json) -> Post:
         mentions=frozenset(doc.get("mentions", ())),
         words=doc.get("words", 0),
         author_id=doc.get("author_id", ""),
+        author_role=doc.get("author_role", ""),
     )
 
 

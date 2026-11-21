@@ -95,6 +95,11 @@ class Gateway:
                 return core
         raise NoLiveLease(f"{agent} holds no live lease on wake {wake_id!r}")
 
+    def starting_thread(self, agent: str, wake_id: str) -> str:
+        """Where a wake's send goes when the agent names no thread (design §3.3)."""
+        core = self._room_of_wake(agent, wake_id)
+        return core.volatile[agent].turn.wake.starting_thread
+
     def read(self, agent: str, wake_id: str) -> tuple[Wake, list[Post]]:
         return self._room_of_wake(agent, wake_id).read(agent, wake_id)
 
@@ -120,9 +125,13 @@ class Gateway:
                 if core is None:
                     raise
                 return core
-        if room is None:
-            raise ValueError("an unsolicited send names its room")
-        return self._room(room)
+        if room is not None:
+            return self._room(room)
+        # ``--thread T`` alone: the thread names its room (design §3.3)
+        core = next((c for c in self.rooms.values() if c.platform.thread_posts(reply.thread)), None)
+        if core is None:
+            raise KeyError(f"no room has a thread {reply.thread!r}")
+        return core
 
     async def done(self, agent: str, wake_id: str, answered: tuple[str, ...] = (),
                    failed: str | None = None) -> bool:

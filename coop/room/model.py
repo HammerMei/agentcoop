@@ -137,6 +137,9 @@ class Post:
     controls: Controls | None = None
     words: int = 0
     author_id: str = ""
+    # The author's label of design §2 (``agent`` / ``owner`` / ``guest``), set by the
+    # gateway when it delivers the post over the doorbell; empty on the platform side.
+    author_role: str = ""
 
     def addresses(self, username: str) -> bool:
         return username in self.mentions or ALL in self.mentions

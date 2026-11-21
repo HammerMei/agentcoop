@@ -1,0 +1,163 @@
+"""The agent-facing commands (design §3.3), thin clients of the doorbell API:
+
+```
+coop read  (--wake W | --room R)
+coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+coop done  --wake W [--answered T1,T2] [--failed REASON]
+coop bio   --file bio.md
+```
+
+Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
+The gateway address and the token come from ``--gateway`` / ``--token`` or the
+environment (``COOP_GATEWAY``, ``COOP_TOKEN``). A failure prints one ``[ERROR]`` line
+on stderr and exits 1; a usage error exits 2.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+from ..errors import DoorbellError, InvalidReply, LostResponse, NoLiveLease, RefusedSend
+from ..room.model import ALL, MAIN_THREAD, Post, Reply, Wake
+from ..room.platform import RefusedPost
+from ..room.prompt import one_line, render_hint
+from .client import HttpDoorbell
+
+PROG = "coop"
+
+
+def parser() -> argparse.ArgumentParser:
+    top = argparse.ArgumentParser(prog=PROG, description="the agent's side of the room")
+    top.add_argument("--gateway", default=os.environ.get("COOP_GATEWAY"), help="doorbell address (COOP_GATEWAY)")
+    top.add_argument("--token", default=os.environ.get("COOP_TOKEN"), help="bearer token (COOP_TOKEN)")
+    sub = top.add_subparsers(dest="command", required=True)
+
+    read = sub.add_parser("read", help="the hint and the posts of a wake, or a room's posts after the cursor")
+    where = read.add_mutually_exclusive_group(required=True)
+    where.add_argument("--wake", metavar="W")
+    where.add_argument("--room", metavar="R")
+
+    send = sub.add_parser("send", help="one reply, as the bot")
+    mode = send.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--wake", metavar="W", help="the wake this reply answers")
+    mode.add_argument("--unsolicited", action="store_true", help="a send outside any wake")
+    place = send.add_mutually_exclusive_group()
+    place.add_argument("--room", metavar="R", help="a new top-level post in room R")
+    place.add_argument("--thread", metavar="T", help="a reply in thread T")
+    send.add_argument("--to", metavar="a,b", help="who the reply is for")
+    send.add_argument("--control", action="append", default=[], metavar="mute=a,b",
+                      help="a control word (mute, unmute); repeatable")
+    send.add_argument("text", nargs="?", help="the reply text; `-` reads it from stdin")
+
+    done = sub.add_parser("done", help="end the turn")
+    done.add_argument("--wake", metavar="W", required=True)
+    done.add_argument("--answered", metavar="T1,T2", help="threads answered without a send")
+    done.add_argument("--failed", metavar="REASON")
+
+    bio = sub.add_parser("bio", help="push the bot's bio")
+    bio.add_argument("--file", required=True, type=Path)
+    return top
+
+
+def main(argv: list[str] | None = None) -> int:
+    return asyncio.run(run(argv))
+
+
+async def run(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if not args.gateway or not args.token:
+        parser().error("--gateway and --token (or COOP_GATEWAY and COOP_TOKEN) are required")
+    async with HttpDoorbell(args.gateway, args.token) as doorbell:
+        try:
+            return await COMMANDS[args.command](doorbell, args)
+        except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse) as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            return 1
+
+
+# ── commands ────────────────────────────────────────────────────────────────
+
+
+async def cmd_read(doorbell: HttpDoorbell, args) -> int:
+    if args.wake is not None:
+        wake, posts = await doorbell.read(args.wake)
+        print(reminder(wake))
+        print(render_hint(wake.hint))
+        print()
+    else:
+        posts = await doorbell.read_room(args.room)
+    for post in posts:
+        print(post_line(post))
+    return 0
+
+
+async def cmd_send(doorbell: HttpDoorbell, args) -> int:
+    text = sys.stdin.read() if args.text == "-" else args.text
+    text = text.strip() if text else None
+    control = parse_controls(args.control) if args.control else None
+    if text is None and control is None:
+        parser().error("send: text or --control")
+    if text is not None and not args.to:
+        parser().error("send: text needs --to")
+    if args.unsolicited and args.room is None and args.thread is None:
+        parser().error("send --unsolicited: --room or --thread")
+    # --room is a top-level post there; --thread a reply; a wake's send with neither goes
+    # to the wake's starting thread, which the gateway fills in
+    thread = args.thread if args.thread is not None else (MAIN_THREAD if args.room else None)
+    reply = Reply(thread=thread, to=names(args.to) if args.to else None, text=text, control=control,
+                  wake_id=None if args.unsolicited else args.wake)
+    post = await doorbell.send(reply, room=args.room)
+    if post is not None:
+        print(post_line(post))
+    return 0
+
+
+async def cmd_done(doorbell: HttpDoorbell, args) -> int:
+    ok = await doorbell.done(args.wake, tuple(names(args.answered)) if args.answered else (), args.failed)
+    if not ok:
+        print(f"[WARNING] wake {args.wake} holds no live lease: nothing moved", file=sys.stderr)
+    return 0
+
+
+async def cmd_bio(doorbell: HttpDoorbell, args) -> int:
+    version = await doorbell.bio(args.file.read_text())
+    print(f"bio v{version}")
+    return 0
+
+
+COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio}
+
+
+# ── rendering ───────────────────────────────────────────────────────────────
+
+
+def reminder(wake: Wake) -> str:
+    return (f"you are {wake.bot} in {wake.room}, rules v{wake.rules_version}, "
+            f"reply with `send --wake {wake.wake_id}` or `done`")
+
+
+def post_line(post: Post) -> str:
+    role = f" ({post.author_role})" if post.author_role else ""
+    return f"[{post.thread}] #{post.id} {post.author}{role}: {one_line(post.text)}"
+
+
+def names(csv: str) -> list[str]:
+    return [n.strip() for n in csv.split(",") if n.strip()]
+
+
+def parse_controls(items: list[str]) -> dict:
+    control: dict = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key or not value:
+            parser().error(f"--control takes key=names, not {item!r}")
+        control[key] = ALL if value == ALL else names(value)
+    return control
+
+
+if __name__ == "__main__":
+    sys.exit(main())

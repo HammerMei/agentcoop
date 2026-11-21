@@ -151,25 +151,46 @@ async def send(request: web.Request) -> web.Response:
     doorbell: _Doorbell = request.app[DOORBELL]
     gateway, agent = doorbell.gateway, request[AGENT]
     body = await _json(request)
-    if body is None or "thread" not in body:
-        return _error(400, "send: a JSON reply with a thread")
+    if body is None:
+        return _error(400, "send: a JSON reply")
+    refused = _default_thread(gateway, agent, body)
+    if refused is None and body.get("room") is not None:
+        refused = _room_refusal(gateway, agent, body["room"])
+    if refused is not None:
+        return refused
     reply, room = decode_reply(body), body.get("room")
-    if room is not None:
-        refused = _room_refusal(gateway, agent, room)
-        if refused is not None:
-            return refused
     try:
         core = gateway.room_for(agent, reply, room)
         post = await core.send(agent, reply)
-    except NoLiveLease as exc:
-        return _error(409, f"{exc}; a late send names its room and thread")
-    except (ValueError, InvalidReply) as exc:
-        return _error(400, str(exc))
-    except RefusedSend as exc:
-        return _error(422, "refused", reasons=exc.reasons)
-    except RefusedPost as exc:
-        return _error(502, str(exc))
+    except (NoLiveLease, KeyError, InvalidReply, RefusedSend, RefusedPost) as exc:
+        return _send_refusal(exc)
     return web.json_response({"post": None if post is None else encode_post(post, core.role_label(post.author))})
+
+
+def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:
+    """A wake's send with no thread goes to the wake's starting thread; once the lease
+    is gone the gateway no longer knows it, so a late send names its thread."""
+    if body.get("thread") is not None:
+        return None
+    if not isinstance(body.get("wake_id"), str):
+        return _error(400, "send: an unsolicited send names its room or thread")
+    try:
+        body["thread"] = gateway.starting_thread(agent, body["wake_id"])
+    except NoLiveLease as exc:
+        return _error(409, f"{exc}; pass the thread with a late send")
+    return None
+
+
+def _send_refusal(exc: Exception) -> web.Response:
+    if isinstance(exc, NoLiveLease):
+        return _error(409, f"{exc}; a late send names its room and thread")
+    if isinstance(exc, KeyError):
+        return _error(404, str(exc.args[0]))
+    if isinstance(exc, InvalidReply):
+        return _error(400, str(exc))
+    if isinstance(exc, RefusedSend):
+        return _error(422, "refused", reasons=exc.reasons)
+    return _error(502, str(exc))
 
 
 async def done(request: web.Request) -> web.Response:

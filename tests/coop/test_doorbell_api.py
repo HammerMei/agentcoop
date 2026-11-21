@@ -150,9 +150,14 @@ async def test_a_refused_send_is_422_with_the_reasons(api, sb):
     assert r.status_code == 422 and "mute" in r.json()["reasons"] and sb.posts_by("a") == []
 
 
-async def test_an_unsolicited_send_names_its_room(api, sb):
-    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"thread": "main", "text": "x", "wake_id": None})
+async def test_an_unsolicited_send_names_its_room_or_a_thread_in_it(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"text": "x", "wake_id": None})
     assert r.status_code == 400 and "room" in r.json()["error"]
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"thread": "t9", "text": "x", "wake_id": None})
+    assert r.status_code == 404 and "t9" in r.json()["error"]
+    await sb.human("a question", "t9")
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"thread": "t9", "to": ["H"], "text": "x", "wake_id": None})
+    assert r.status_code == 200 and [p.thread for p in sb.posts_by("a")] == ["t9"]
     r = await api.post("/v1/agents/me/posts", headers=as_("z"),
                        json={"thread": "main", "text": "x", "wake_id": None, "room": "team"})
     assert r.status_code == 403
