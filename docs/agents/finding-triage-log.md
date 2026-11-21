@@ -1752,4 +1752,4 @@ Notes:
 - Severity vs Codex: P2 holds — silent (`turn_end normal`, no trace, no notice) and reached by an ordinary client that skips `read` on an unfinished wake, which §3.3 already treats as a defect; the loss is the exact promise of the 5.6 row.
 - Cost: ~7 min rater 2 (agent), ~8 min rater 1.
 
-**Status: closed** — fix pushed; one confirming Codex pass requested on the fix commit.
+**Status: closed** — fix pushed; the confirming Codex pass on `d8b1ee8` found nothing (👍). One round, one finding, no chain.
