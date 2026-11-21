@@ -20,3 +20,25 @@ class RefusedSend(Exception):
     def __init__(self, reasons: str) -> None:
         super().__init__(reasons)
         self.reasons = reasons
+
+
+class DoorbellError(Exception):
+    """The doorbell API answered an error the agent cannot act on by changing the
+    reply: an unknown token (401), a room whose roster does not list the agent (403),
+    a room the gateway does not watch (404), or anything unexpected."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(f"{status}: {message}")
+        self.status = status
+        self.message = message
+
+
+class LostResponse(Exception):
+    """A send the gateway did not answer in time (design §3.3): the reply may have
+    been posted. The agent reads the room and posts again only if it is not there."""
+
+    TEXT = ("the reply may have been posted: the gateway did not answer in time. "
+            "Run `coop read` and post again only if the reply is not in the room.")
+
+    def __init__(self) -> None:
+        super().__init__(self.TEXT)
