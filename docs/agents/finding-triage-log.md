@@ -46,7 +46,7 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-11-20 | #208 r1 F3 — an archived thread's pending decision or unleased wake still produces a turn and a refused post | DROP (scored, 1–10/yr × 0.02 h; spec 5.9 names the archived-thread refusal as a normal end; MM/RC archive rooms, not threads) | `platform_refused` for the same thread on two consecutive turns of one bot, or a bot stuck on an archived thread | 2027-11-20 | open |
 | 2026-11-20 | #208 r1 F4 — a `done` that runs after `expires_at` under a stalled loop is accepted | DROP (outcome acceptable: the agent finished; the fix converts a gateway stall into a failure plus a duplicate reply) | a `turn_end outcome=normal` seconds after its wake's `lease_started.expires_at` | 2027-11-20 | open |
 | 2026-11-20 | #208 r1 F5 — a replayed thread older than `control_ttl_days` seeds `last_activity` with now, so its stale controls live another TTL | DROP (scored, 0–0.3/yr; the one-line fix drops live mutes when traced; needs S3's replay window > 7 d to occur) | `control_applied` with `age` > `control_ttl_seconds` followed by `turn_held gate=mute` in that thread after a restart | 2027-11-20 | open |
-| 2026-11-20 | #208 r2 G3 — `read --wake` omits the bot's own posts inside `[cursor, hwm]`, so an unsolicited post the bot's scheduler made is in no later wake's delivery | FILE (owner decision: design §3.3 "every post after the cursor" vs spec 5.4 "does not receive its own bot's post back"; unsolicited posts are the new case; `read --room` shows them) | a `read` whose `delivered` omits a `kind=bot` post of the same bot inside `[cursor, hwm]`, or an agent that "does not remember its own report" | 2027-11-20 | open |
+| 2026-11-20 | #208 r2 G3 — `read --wake` omits the bot's own posts inside `[cursor, hwm]`, so an unsolicited post the bot's scheduler made is in no later wake's delivery | FILE (owner decision: design §3.3 "every post after the cursor" vs spec 5.4 "does not receive its own bot's post back"; unsolicited posts are the new case; `read --room` shows them) | a `read` whose `delivered` omits a `kind=bot` post of the same bot inside `[cursor, hwm]`, or an agent that "does not remember its own report" | 2027-11-20 | settled: decided (owner, 2026-11-21: an own post is context, never cause — `read` returns it, it wakes nobody and closes nothing; PR #209) |
 | 2026-11-20 | #208 r2 G5 — the classifier decision cache is never evicted | DROP eviction (scored 0–0.3/yr, net ≤ 0 in S1; needs a position on the entry and an invariant) + MAKE IT LOUD (`status()["decisions"]`) | `status()["decisions"]` above ~100k on a running gateway, or an RSS complaint | 2027-11-20 | open |
 | 2026-11-21 | #208 r3 H1 — agent bios are not in the persisted document; a process restart loses every bio until the agents re-push | FIX (owner, 2026-11-21: this increment — `dump_agents`/`load_agents` in `store.py`, bio and version, the bios dict updated in place; escalated first: rater 1 FIX — the approved plan's `store.py` item lists bio and design §3.1 persists it; rater 2 FILE → S3 — no process restart exists in S1) | `status()["agents"][*]["bio_version"] == 0` after a restart of a gateway whose agents had pushed bios, or an S3 restore path that loads rooms and not agents | 2027-11-21 | fixed 2026-11-21 |
 | 2026-11-21 | #208 r4 I1 (status half) — `load_agents` restores an entry for an agent this gateway no longer hosts, so `status()["agents"]` lists it as a local agent | FILE (→ S3: the gateway gets the configured agent set from §4 `agents:` and `load_agents` filters on it; the classifier half fixed here in `_with_bio`) | `status()["agents"]` on a restarted daemon names a bot its configuration no longer lists | 2027-11-21 | open |
@@ -1715,7 +1715,7 @@ Notes:
 - Convergence: three rounds, no chain, round 3 all cheap or scope; no further Codex pass requested (the owner's rule from #207: stop when a round is edge cases).
 - Cost: ~45 min rater 2, ~15 min rater 1.
 
-**Status: open** — fixes pushed; H1 and round 2's G3 wait on the owner; merge is the owner's call.
+**Status: closed** — H1 decided and fixed in round 4; round 2's G3 decided by the owner on 2026-11-21 (an own post is context, never cause) and implemented in PR #209; #208 merged as `1db22c5`.
 
 ## 2026-11-21 — PR #208 round 4 (Codex on `52bd273`, scoped by the owner to `store.py`'s agent document)
 
@@ -1734,3 +1734,22 @@ Notes:
 - Cost: ~3 min rater 2 (agent), ~10 min rater 1.
 
 **Status: closed** — fix pushed; the status half is on S3's list.
+
+## 2026-11-21 — PR #209 round 1 (Codex on `92af6b7`, `coop/room/core.py`)
+
+**Chain detector:** 1 finding over 1 round, no chain.
+**Arrival check:** review on `92af6b7`, 1 inline thread (P2). Security review did not run (credits).
+**Control finding:** none settled with an observed outcome (#208 r2 G3 settled by decision, not observation); agreement uncorroborated.
+**Rater 2:** blind (general-purpose agent), the finding, method, constants, design, code; no verdict given.
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **J1** `read_complete` is initialised from `delivered`, so an unfinished wake whose only new posts are the bot's own forgives a `done` without `read` and commits the cursor past them (P2) | true, reproduced (mute-expiry unfinished wake after an own unsolicited post: `turn_end normal`, cursor past it, `read --room` empty); `cheap` → FIX as proposed: `not payload`, the design's "nothing to deliver" is what `read` returns | true, reproduced with a narrower trigger: no unsolicited send needed, the bot's own reply of the previous turn lands after that wake's hwm, so every unfinished wake after a turn with a reply is this case; traced every wake source: only `unfinished` can issue empty `delivered` with non-empty `payload`. `cheap` → FIX as proposed, same layer (the lease owns "read complete"). Found the suite cannot tell the versions apart (186 pass both ways): the fix needs a pinning test | **FIX** (`not payload`, the field comment, one test: own reply in range + skipped read → `backend_failure "no read"`, cursor unmoved, the next wake reads it; the test fails on the old code) |
+
+Notes:
+- Verdicts agreed; rater 2's reproduction is the stronger one (the ordinary case, not the unsolicited one) and became the test.
+- Scope: the increment's own — main had both `read` and the shortcut on `delivered`; the PR moved one and not the other.
+- Severity vs Codex: P2 holds — silent (`turn_end normal`, no trace, no notice) and reached by an ordinary client that skips `read` on an unfinished wake, which §3.3 already treats as a defect; the loss is the exact promise of the 5.6 row.
+- Cost: ~7 min rater 2 (agent), ~8 min rater 1.
+
+**Status: closed** — fix pushed; the confirming Codex pass on `d8b1ee8` found nothing (👍). One round, one finding, no chain.
