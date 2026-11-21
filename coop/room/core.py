@@ -624,7 +624,9 @@ class RoomCore:
         return ClassifierRequest(post, addressed, shown, len(history) - len(shown), tuple(offered))
 
     def _with_bio(self, member):
-        bio = self.bios.get(member.username)
+        # A roster-only bot (hosted elsewhere, design §3.1) has no bio here, whatever the
+        # gateway's dict holds under its name (a restored document, a push by that name).
+        bio = self.bios.get(member.username) if member.username in self.hosted else None
         return replace(member, profile=bio) if bio is not None else member
 
     async def _classifier_attempt(self, request: ClassifierRequest, attempt: int) -> None:

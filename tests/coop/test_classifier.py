@@ -218,3 +218,16 @@ async def test_injected_failures_wrap_a_classifier_for_the_failure_configuration
     await sb.run(2)
     assert sb.trace.count("classifier_retry", post="p1") == 1 and len(inner.calls) == 1
     assert sb.trace.last("classifier_decision", post="p1").add == ["b"]
+
+
+async def test_a_bio_under_a_roster_only_name_is_not_shown_to_the_classifier():
+    """A roster-only bot is hosted elsewhere (design §3.1): the classifier sees it as
+    ``no profile`` even when this gateway holds a bio under its name — a restored
+    document from before the bot moved, or a push by that name."""
+    sb = Sandbox(bots=("a", "b"), hosted=["a"], agents=["a", "b"])
+    sb.gateway.bio("a", "I run the deploys")
+    sb.gateway.bio("b", "stale: b moved to another gateway")
+    await sb.human("who handles deploys?")
+    await sb.run(0)
+    offered = {m.username: m.profile for m in sb.classifier.calls[-1].agents}
+    assert offered == {"a": "I run the deploys", "b": "b profile"}  # b: the roster's profile, not the gateway's bio

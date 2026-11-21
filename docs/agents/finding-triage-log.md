@@ -49,6 +49,7 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-11-20 | #208 r2 G3 — `read --wake` omits the bot's own posts inside `[cursor, hwm]`, so an unsolicited post the bot's scheduler made is in no later wake's delivery | FILE (owner decision: design §3.3 "every post after the cursor" vs spec 5.4 "does not receive its own bot's post back"; unsolicited posts are the new case; `read --room` shows them) | a `read` whose `delivered` omits a `kind=bot` post of the same bot inside `[cursor, hwm]`, or an agent that "does not remember its own report" | 2027-11-20 | open |
 | 2026-11-20 | #208 r2 G5 — the classifier decision cache is never evicted | DROP eviction (scored 0–0.3/yr, net ≤ 0 in S1; needs a position on the entry and an invariant) + MAKE IT LOUD (`status()["decisions"]`) | `status()["decisions"]` above ~100k on a running gateway, or an RSS complaint | 2027-11-20 | open |
 | 2026-11-21 | #208 r3 H1 — agent bios are not in the persisted document; a process restart loses every bio until the agents re-push | FIX (owner, 2026-11-21: this increment — `dump_agents`/`load_agents` in `store.py`, bio and version, the bios dict updated in place; escalated first: rater 1 FIX — the approved plan's `store.py` item lists bio and design §3.1 persists it; rater 2 FILE → S3 — no process restart exists in S1) | `status()["agents"][*]["bio_version"] == 0` after a restart of a gateway whose agents had pushed bios, or an S3 restore path that loads rooms and not agents | 2027-11-21 | fixed 2026-11-21 |
+| 2026-11-21 | #208 r4 I1 (status half) — `load_agents` restores an entry for an agent this gateway no longer hosts, so `status()["agents"]` lists it as a local agent | FILE (→ S3: the gateway gets the configured agent set from §4 `agents:` and `load_agents` filters on it; the classifier half fixed here in `_with_bio`) | `status()["agents"]` on a restarted daemon names a bot its configuration no longer lists | 2027-11-21 | open |
 
 ---
 
@@ -1715,3 +1716,21 @@ Notes:
 - Cost: ~45 min rater 2, ~15 min rater 1.
 
 **Status: open** — fixes pushed; H1 and round 2's G3 wait on the owner; merge is the owner's call.
+
+## 2026-11-21 — PR #208 round 4 (Codex on `52bd273`, scoped by the owner to `store.py`'s agent document)
+
+**Chain detector:** 16 findings over 4 rounds, no chain in any round.
+**Arrival check:** review on `52bd273`, 1 inline thread (P2). Security review did not run (credits), third time.
+**Control finding:** none settled yet (H1 is fixed, not observed); agreement uncorroborated.
+**Rater 2:** blind (general-purpose agent), the finding, method, constants, design, code; no verdict given.
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **I1** `load_agents` recreates an agent the gateway no longer hosts and installs its stale bio for the classifier; status lists it as local (P2) | true; `cheap` → FIX as proposed: filter the document against `gateway.agents`, document that `load_agents` runs after `add_room` | true, but the proposed fix is wrong: design §3.1 says a bio is pushed before any room exists (§3.6), so filtering on `gateway.agents` (filled by `add_room`) silently drops a legitimate bio on a restart that loads before the rooms, and adds a call-order invariant. `cheap` on the layer that owns "is this name hosted here": one line in `RoomCore._with_bio` (bio only for `self.hosted`), which also closes `Gateway.bio()` accepting any name. Status half: visible, needs the configured agent set the gateway does not model yet → FILE to the config increment | **FIX in `_with_bio`** (rater 1 conceded on design lines 96 and 115–117: the classifier sees a roster-only name without the gateway's bio, and a bio precedes rooms) + **FILE** the status half → S3 |
+
+Notes:
+- Convergence by concession with checkable evidence (design clauses), not escalation. The disagreement was again on the `cheap` gate's *shape*: the finding's `file:line` set the layer for rater 1, and the cheapest correct fix sat one layer up. Fourth time on this PR; the pattern is the skill's own warning ("the proposed one is systematically the expensive one"), here the proposed one was the wrong one.
+- Severity vs Codex: P2 holds for the classifier half (silent: a wrong bio, no error); the status half is visible and lower.
+- Cost: ~3 min rater 2 (agent), ~10 min rater 1.
+
+**Status: closed** — fix pushed; the status half is on S3's list.
