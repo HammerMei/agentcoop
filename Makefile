@@ -16,14 +16,14 @@ test: ## Run test suite
 	uv run pytest tests/ -v --tb=short
 
 coverage: ## Run the test suite with branch coverage and print the gaps
-	uv run pytest tests/unit tests/integration -q --timeout=120 \
-		--cov=gateway --cov-branch --cov-report=term-missing:skip-covered
+	uv run pytest tests/unit tests/integration tests/coop -q --timeout=120 \
+		--cov=gateway --cov=coop --cov-branch --cov-report=term-missing:skip-covered
 
 lint: ## Run ruff check (if installed)
 	@if command -v ruff >/dev/null 2>&1; then \
-	    ruff check gateway/ tests/ tools/; \
+	    ruff check gateway/ coop/ tests/ tools/; \
 	elif uv run ruff --version >/dev/null 2>&1; then \
-	    uv run ruff check gateway/ tests/ tools/; \
+	    uv run ruff check gateway/ coop/ tests/ tools/; \
 	else \
 	    echo "ruff not installed — skipping lint"; \
 	fi
