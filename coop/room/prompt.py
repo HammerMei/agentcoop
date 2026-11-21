@@ -21,7 +21,8 @@ def render_hint(hint: Hint) -> str:
         if group.group == "closed":
             extra = f" (closed by {', '.join(group.closed_by)})"
         elif group.posts_left is not None or group.words_left is not None:
-            extra = f" ({group.posts_left} posts, {group.words_left} words left)"
+            left = [f"{n} {unit}" for n, unit in ((group.posts_left, "posts"), (group.words_left, "words")) if n is not None]
+            extra = f" ({', '.join(left)} left)"  # a disabled limit has no allowance to state
         lines.append(f"- {group.thread}: {group.group}{extra}")
     if hint.refused_last_turn:
         lines.append(f"The platform refused your last replies in: {', '.join(hint.refused_last_turn)}.")

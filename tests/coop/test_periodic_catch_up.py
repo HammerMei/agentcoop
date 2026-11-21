@@ -130,3 +130,11 @@ async def test_the_hint_asks_for_additions_or_revisions_on_a_catch_up_turn_only(
     assert "Catch-up in main: you were not addressed" in text and "otherwise reply done" in text
     assert "Catch-up" not in render_hint(Hint("addressed", "main", (ThreadGroup("main", "must-reply"),)))
 
+
+
+def test_the_hint_states_only_the_limits_that_are_enabled():
+    both = render_hint(Hint("addressed", "main", (ThreadGroup("main", "must-reply", (), 3, 400),)))
+    words_only = render_hint(Hint("addressed", "main", (ThreadGroup("main", "must-reply", (), None, 400),)))
+    neither = render_hint(Hint("addressed", "main", (ThreadGroup("main", "must-reply"),)))
+    assert "(3 posts, 400 words left)" in both and "(400 words left)" in words_only
+    assert "None" not in words_only and "left" not in neither

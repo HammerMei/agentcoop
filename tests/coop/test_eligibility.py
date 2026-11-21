@@ -177,3 +177,15 @@ async def test_guest_and_ordinary_bot_controls_change_nothing():
     await sb.run(3)
     assert sb.trace.last("turn_end", bot="a").outcome == "invalid"  # enforced: control from a non-orchestrator
     assert sb.gw.status()["threads"]["main"]["muted"] == []
+
+
+async def test_an_orchestrator_must_be_a_bot_in_the_room():
+    sb = Sandbox(humans=(("H", "owner"), ("G", "guest")), bots=("chair", "a"))
+    await sb.human("orchestrator: @G")
+    assert sb.trace.last("control_ignored").reason.startswith("orchestrator 'G'")
+    await sb.human("mute: @a", author="G")  # G gained no authority
+    assert sb.gw.status()["threads"]["main"]["muted"] == [] and sb.gw.status()["threads"]["main"]["orchestrator"] is None
+    await sb.human("orchestrator: @chiar")  # a typo is reported, not silently stored
+    assert sb.trace.last("control_ignored").reason.startswith("orchestrator 'chiar'")
+    await sb.human("orchestrator: @chair")
+    assert sb.gw.status()["threads"]["main"]["orchestrator"] == "chair"

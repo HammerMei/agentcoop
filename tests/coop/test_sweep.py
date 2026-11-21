@@ -177,3 +177,20 @@ async def test_one_room_wide_delivery_satisfies_several_qualifying_threads():
     await sb.run(1)
     assert sb.trace.count("turn_start", bot="a") == 1  # one turn delivered all three
     assert sb.trace.last("sweep", bot="a", reason="turn end").candidates == []
+
+
+async def test_a_dm_post_during_a_turn_is_delivered_by_the_next_sweep_as_addressed():
+    """A 1:1 DM addresses its bot by definition (spec section 3), on arrival and when the
+    sweep rebuilds a held turn; a control-only DM post addresses nobody."""
+    dm = Sandbox(bots=("a",), is_dm=True, script=Script().on(reply(["H"], "hi"), bot="a"))
+    await dm.human("first")
+    await dm.human("second, while a is busy")
+    await dm.run(1)
+    assert dm.trace.last("turn_held", bot="a").gate == "one_turn"
+    second = dm.turns("a")[1]
+    assert second.source == "addressed" and second.delivered == ["p2"] and second.time == 1.0
+    assert dm.bot.turns[-1].hint.group_of("main").group == "must-reply"
+    await dm.run(1)
+    await dm.human("limit: 3 posts")  # control-only: applied, wakes nobody, now or at a sweep
+    await dm.run(20)
+    assert dm.trace.count("turn_start", bot="a") == 2

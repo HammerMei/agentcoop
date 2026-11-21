@@ -316,6 +316,14 @@ class RoomCore:
     def _cursor(self, bot: str) -> Position | None:
         return self.persisted[bot].cursor
 
+    def _addresses(self, post: Post, bot: str) -> bool:
+        """Whether ``post`` addresses ``bot``: a mention, or any post in a 1:1 DM, which
+        addresses its bot by definition (spec section 3); a control-only post addresses
+        nobody. One predicate for arrival, the sweep and the hint."""
+        if post.addresses(bot):
+            return True
+        return self.platform.is_dm and not (post.controls is not None and is_control_only(post.text))
+
     def is_muted(self, bot: str, thread: str) -> bool:
         return bot in self._thread(thread).muted
 
@@ -373,8 +381,7 @@ class RoomCore:
             return  # the gateway's own post: counted (on replay) but no trigger
         if self._apply_controls(post):
             return
-        dm = self.platform.is_dm  # a 1:1 DM addresses its bot by definition (section 3)
-        addressed = tuple(b for b in copies if (dm or post.addresses(b)) and after(post.position, self._cursor(b)))
+        addressed = tuple(b for b in copies if self._addresses(post, b) and after(post.position, self._cursor(b)))
         for bot in addressed:
             await self._try_start(bot, "addressed", post.thread, trigger=post)
         if any(after(post.position, self._cursor(b)) for b in copies):
@@ -392,9 +399,14 @@ class RoomCore:
                            by=post.author, reason="not authorised")
             return False
         if controls.orchestrator is not None and role == "owner" and after(post.position, settings.orchestrator_at):
-            settings.orchestrator = None if controls.orchestrator == "none" else controls.orchestrator
-            settings.orchestrator_at = post.position
-            self._trace_control(post, "orchestrator", settings.orchestrator)
+            name = None if controls.orchestrator == "none" else controls.orchestrator
+            if name is None or name in self._bots_in_room():  # the orchestrator is a bot in the room (5.12)
+                settings.orchestrator = name
+                settings.orchestrator_at = post.position
+                self._trace_control(post, "orchestrator", settings.orchestrator)
+            else:
+                self.trace.add(self.now(), "control_ignored", gateway=self.name, thread=post.thread,
+                               by=post.author, reason=f"orchestrator {name!r} is not a bot in the room")
         if controls.mute is not None:
             self._apply_mute(post, settings, controls.mute)
         if controls.unmute is not None:
@@ -624,7 +636,7 @@ class RoomCore:
         try:
             result = await asyncio.wait_for(self.classifier.classify(request), timeout or None)
         except asyncio.TimeoutError:
-            result = ClassifierResult(error=f"timeout after {timeout}s", latency=timeout)
+            result = ClassifierResult(error=f"timeout after {timeout}s")  # the wait itself took the timeout
         except Exception as exc:  # the classifier is a foreign component: its failure is a fallback, not a crash
             result = ClassifierResult(error=f"{type(exc).__name__}: {exc}")
         if timeout and result.latency > timeout:
@@ -698,7 +710,7 @@ class RoomCore:
         ``_try_start``, which holds or starts it."""
         found: list[tuple[str, object]] = []
         for post in self._backlog(bot):
-            if post.kind != "notice" and (post.addresses(bot) or self._decision_for(bot, post)):
+            if post.kind != "notice" and (self._addresses(post, bot) or self._decision_for(bot, post)):
                 found.append(("post", post.id))
         # An unfinished thread is a candidate once it "has become open" (5.7), and a
         # thread is due for catch-up only when open and out of cooldown: a closed one
@@ -737,7 +749,7 @@ class RoomCore:
             post = next((p for p in self._backlog(bot) if p.id == key), None)
             if post is None:
                 return False
-            source: TurnSource = "addressed" if post.addresses(bot) else "picked"
+            source: TurnSource = "addressed" if self._addresses(post, bot) else "picked"
             if source == "picked" and not self._decision_for(bot, post):
                 return False
             # the trigger decides eligibility; delivery runs through the sweep's mark (5.6)
@@ -773,12 +785,12 @@ class RoomCore:
                held_by: tuple[str, ...]) -> ThreadGroup:
         closed_by = held_by if thread == starting else self._closed_by(bot, thread)
         opened_by_authority = any(
-            p.thread == thread and p.addresses(bot) and self._exempt("addressed", thread, p)
+            p.thread == thread and self._addresses(p, bot) and self._exempt("addressed", thread, p)
             for p in delivered
         )
         if closed_by and not opened_by_authority:
             return ThreadGroup(thread, "closed", closed_by)
-        addressed_here = any(p.thread == thread and p.addresses(bot) for p in delivered)
+        addressed_here = any(p.thread == thread and self._addresses(p, bot) for p in delivered)
         unfinished = thread in self.persisted[bot].unfinished
         group = "must-reply" if (thread == starting or addressed_here or unfinished) else "optional"
         posts_left, words_left = self._allowance(bot, thread)
@@ -1162,4 +1174,5 @@ class RoomCore:
             "bot_like_members_missing": [m.username for m in members.values() if m.is_bot and m.username not in self.agents],
             "hosted_not_members": [b for b in self.hosted if b not in members],
             "rules": {m: vars(c) for m, c in self.rules.items()},
+            "decisions": len(self.decisions),
         }

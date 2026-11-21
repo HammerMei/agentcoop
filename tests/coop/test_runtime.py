@@ -66,3 +66,31 @@ async def test_asyncio_clock_runs_after_the_delay_and_a_cancelled_run_never_happ
     handle.cancel()
     await asyncio.sleep(0.05)
     assert ran == ["kept"] and clock.now() >= before + 0.05
+
+
+async def test_a_live_classifier_that_misses_its_timeout_is_retried_at_the_timeout_not_twice_it():
+    """The wait itself took the timeout; the result is not delayed by it again."""
+    from coop.room.classifier import ClassifierResult
+    from coop.room.model import Decision, Params
+
+    class Slow:
+        calls = 0
+
+        async def classify(self, request):
+            Slow.calls += 1
+            await asyncio.sleep(0.5)
+            return ClassifierResult(Decision(add=("b",)))
+
+    clock, trace = AsyncioClock(), Trace()
+    room = FakePlatform("team", members(("a", "b")), clock, trace)
+    params = Params(classifier_timeout_seconds=0.1, classifier_retries=1, classifier_fallback="everyone",
+                    sweep_interval_seconds=0, catch_up_idle_seconds=0)
+    core = RoomCore("team", room, clock, trace, ["a", "b"], ["a", "b"], params, Slow())
+    room.cores.append(core)
+    core.start()
+    started = clock.now()
+    await room.post("H", "who knows?")
+    await asyncio.sleep(0.35)
+    decision = trace.last("classifier_decision")
+    assert decision is not None and decision.fallback == "everyone" and Slow.calls == 2
+    assert 0.15 <= decision.time - started <= 0.3  # two timeouts of 0.1 s, not four

@@ -46,6 +46,8 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-11-20 | #208 r1 F3 — an archived thread's pending decision or unleased wake still produces a turn and a refused post | DROP (scored, 1–10/yr × 0.02 h; spec 5.9 names the archived-thread refusal as a normal end; MM/RC archive rooms, not threads) | `platform_refused` for the same thread on two consecutive turns of one bot, or a bot stuck on an archived thread | 2027-11-20 | open |
 | 2026-11-20 | #208 r1 F4 — a `done` that runs after `expires_at` under a stalled loop is accepted | DROP (outcome acceptable: the agent finished; the fix converts a gateway stall into a failure plus a duplicate reply) | a `turn_end outcome=normal` seconds after its wake's `lease_started.expires_at` | 2027-11-20 | open |
 | 2026-11-20 | #208 r1 F5 — a replayed thread older than `control_ttl_days` seeds `last_activity` with now, so its stale controls live another TTL | DROP (scored, 0–0.3/yr; the one-line fix drops live mutes when traced; needs S3's replay window > 7 d to occur) | `control_applied` with `age` > `control_ttl_seconds` followed by `turn_held gate=mute` in that thread after a restart | 2027-11-20 | open |
+| 2026-11-20 | #208 r2 G3 — `read --wake` omits the bot's own posts inside `[cursor, hwm]`, so an unsolicited post the bot's scheduler made is in no later wake's delivery | FILE (owner decision: design §3.3 "every post after the cursor" vs spec 5.4 "does not receive its own bot's post back"; unsolicited posts are the new case; `read --room` shows them) | a `read` whose `delivered` omits a `kind=bot` post of the same bot inside `[cursor, hwm]`, or an agent that "does not remember its own report" | 2027-11-20 | open |
+| 2026-11-20 | #208 r2 G5 — the classifier decision cache is never evicted | DROP eviction (scored 0–0.3/yr, net ≤ 0 in S1; needs a position on the entry and an invariant) + MAKE IT LOUD (`status()["decisions"]`) | `status()["decisions"]` above ~100k on a running gateway, or an RSS complaint | 2027-11-20 | open |
 
 ---
 
@@ -1666,4 +1668,27 @@ Notes:
 - Method: the `cheap` gate split 3 of 5, every time with the first rater holding the cheaper-looking fix and the second rater showing it incomplete or wrong when traced. Rater 1's lesson recorded: trace the proposed one-liner through every call site before calling it cheap.
 - Cost: ~35 min rater 2, ~25 min rater 1, one round.
 
-**Status: open** — fix pushed, one confirming Codex pass requested.
+**Status: closed** — the confirming pass (round 2) found new ground only; see the next entry.
+
+## 2026-11-20 — PR #208 round 2 (Codex on `85e8807`, `coop/room/core.py`, `coop/room/prompt.py`)
+
+**Chain detector:** 11 findings over 2 rounds, no chain: round 2 is new ground, none on the round-1 fix.
+**Arrival check:** review on `85e8807`, 6 inline threads. Security review did not run (credits).
+**Control finding:** none available (round 1's was mis-posed); agreement uncorroborated.
+**Rater 2:** blind (general-purpose agent), six findings, method, constants, spec, simulator; no verdicts. It reproduced every finding by running the port and applied every candidate fix to a scratchpad overlay against the 176 tests before calling it cheap. Verdicts agreed outright on G1, G2, G4, G6 (all FIX); rater 2 refined two of rater 1's fixes with traced evidence (G1: a control-only DM post must not become an addressed candidate — an owner's `limit:` in a DM would start a spurious turn at the next sweep; G6: reuse `control_ignored` and report a typo rather than store it). Two splits: G5 (rater 1 FIX by eviction; rater 2: not cheap — a position on `CachedDecision` and a new invariant against the dedupe and replay guards — and net ≤ 0 in an increment with no long-lived core; MAKE IT LOUD now) and G3 (rater 1 DROP as designed; rater 2 FILE: design §3.3 and spec 5.4 disagree on own posts, the unsolicited post is the case the simulator never had, and the proposed fix breaks 20 of 22 parity scenarios — the rule must be written before any fix). Rater 1 conceded both on the cited lines.
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **G1** a DM post during a turn is dropped by the sweep, delivered 30 min later as catch-up (P1) | FIX, predicate | FIX, predicate with a control-only guard; rank 1 | **FIX** — `_addresses(post, bot)` at the five sites |
+| **G2** hint prints `None posts` when one limit is disabled (P2) | FIX | FIX | **FIX** — only enabled limits are rendered |
+| **G3** own posts omitted from `[cursor, hwm]` (P2) | DROP (own output is not input; `read --room` shows it) | FILE: the documents disagree; the fix as proposed breaks parity; band-edge 0.05–7 yr | **FILE → owner** (PR body) |
+| **G4** live classifier timeout counted twice (P2) | FIX, 1 line | FIX, 1 line; not parity (the port added `wait_for`) | **FIX** + real-clock test |
+| **G5** decision cache never evicted (P2) | FIX, prune by position | not cheap, net ≤ 0 in S1; LOUD | **MAKE IT LOUD** (`status()["decisions"]`); eviction to S3 |
+| **G6** a guest can be designated orchestrator and then mute (P2) | FIX | FIX, `control_ignored`; rank 2 | **FIX** — the orchestrator must be a bot in the room |
+
+Notes:
+- Adoption: 4 fixed, 1 made loud, 1 filed to the owner. Severity re-rank vs Codex: G1 first (agreed P1), G6 second, G2 last.
+- Method: rater 2 built every candidate fix in an overlay and ran the suite before judging `cheap`; two of rater 1's one-liners were incomplete when so tested. Rater 1's lesson from round 1 held: trace, then call it cheap.
+- Cost: ~20 min rater 2 (plus its overlays), ~20 min rater 1, one round.
+
+**Status: open** — fixes pushed, one confirming Codex pass requested; G3 waits on the owner.
