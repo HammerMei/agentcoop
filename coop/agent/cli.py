@@ -88,14 +88,14 @@ async def run(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if not args.gateway or not args.token:
         parser().error("--gateway and --token (or COOP_GATEWAY and COOP_TOKEN) are required")
-    if plain_http(args.gateway):
-        print(f"[WARNING] {args.gateway} is plain http: the token travels in clear; keep it on loopback "
-              "or a tunnel to loopback", file=sys.stderr)
     try:
+        if plain_http(args.gateway):
+            print(f"[WARNING] {args.gateway} is plain http: the token travels in clear; keep it on loopback "
+                  "or a tunnel to loopback", file=sys.stderr)
         async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint) as doorbell:
             return await COMMANDS[args.command](doorbell, args)
     except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse,
-            CertificateMismatch, httpx.HTTPError, OSError) as exc:
+            CertificateMismatch, httpx.HTTPError, OSError, ValueError) as exc:  # ValueError: a malformed address
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
@@ -187,8 +187,10 @@ def post_line(post: Post, trigger: str | None = None) -> str:
 
 
 def attachment_line(found: Attachment) -> str:
-    return (f"  attachment {found.id}: {found.name} {found.content_type} {human_size(found.size)}"
-            f" -> coop attachment {found.id}")
+    """One line per attachment; the name and type pass through ``one_line`` like post
+    text, so a file name cannot forge a header line either (design §3.3)."""
+    return (f"  attachment {found.id}: {one_line(found.name)} {one_line(found.content_type)} "
+            f"{human_size(found.size)} -> coop attachment {found.id}")
 
 
 def human_size(size: int) -> str:

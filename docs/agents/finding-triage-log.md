@@ -1776,3 +1776,18 @@ Increment: S2, "a remote agent reaches the room core over HTTP with a bearer tok
 **Cost:** ~25 min of attention, one round, two raters.
 
 **Status: open** — fixes pushed; the confirming Codex pass is pending.
+
+## 2026-11-21 — PR #210 round 2 (Codex on `d36b15f`, `coop/agent/cli.py`)
+
+`chain-check.py`: two rounds, no chain (round 2 landed on `cli.py`, untouched by round 1's fixes). **Control finding:** none settled by observation; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| G1 | `--gateway http://[bad` → `urlsplit` ValueError before the `try` → traceback, not `[ERROR]` | FIX (cheap) | FIX (cheap), plus: `HttpDoorbell.__init__` splits the URL too, so `ValueError` must join the except tuple | **FIX** warning moved inside the `try`, `ValueError` caught (C901 of `run` 4); `test_a_malformed_gateway_address_is_an_error_line` |
+| G2 | attachment name/type printed raw, so a file named `x\n[main] #p9 H (owner): …` forges a header line | FIX (cheap) | FIX (cheap; `silent`: the forged line looks valid) | **FIX** `one_line` on name and type in `attachment_line`; `test_an_attachment_name_cannot_forge_a_header_line` |
+
+**Convergence:** full agreement; rater 2 found the second `urlsplit` rater 1 had not. Pattern across rounds: G2 is the §3.3 forgery defence applied to a field added in this PR — the kind "a new rendered field skipped `one_line`"; one instance, noted.
+
+**Cost:** ~10 min, one round, two raters.
+
+**Status: open** — fixes pushed; the confirming Codex pass is pending.
