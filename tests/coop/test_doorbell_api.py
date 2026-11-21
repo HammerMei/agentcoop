@@ -216,3 +216,10 @@ async def test_bio_is_versioned_per_agent(api, sb):
 async def test_rules_carry_the_version_every_wake_names(api, sb):
     r = await api.get("/v1/rules", headers=as_("a"))
     assert r.json() == {"version": sb.gateway.rules_version, "text": "rules"}
+
+
+async def test_the_packaged_rules_are_served_by_default(sb):
+    async with Doorbell(sb.gateway, TOKENS, rules_text=None) as doorbell:
+        async with httpx.AsyncClient(base_url=doorbell.url) as client:
+            text = (await client.get("/v1/rules", headers=as_("a"))).json()["text"]
+    assert text.startswith("# Room rules") and "your own posts included" in text and "coop done" in text

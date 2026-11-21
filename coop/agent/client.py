@@ -9,12 +9,22 @@ and the agent checks the room before posting again.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import ssl
+from urllib.parse import urlsplit
 
 import httpx
 
-from ..errors import DoorbellError, InvalidReply, LostResponse, NoLiveLease, RefusedSend
+from ..doorbell.tls import fingerprint, same_fingerprint
+from ..errors import (
+    CertificateMismatch,
+    DoorbellError,
+    InvalidReply,
+    LostResponse,
+    NoLiveLease,
+    RefusedSend,
+)
 from ..room.model import Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..wire import decode_post, decode_wake, encode_reply
@@ -26,16 +36,46 @@ DEFAULT_WAIT = 30.0
 TIMEOUT_SLACK = 10.0
 
 
+def pinned_context(address: str, expected: str) -> ssl.SSLContext:
+    """A context that trusts only the certificate ``address`` presents, after checking
+    its fingerprint against ``expected``. Raises :class:`CertificateMismatch`."""
+    parts = urlsplit(address)
+    pem = ssl.get_server_certificate((parts.hostname or "", parts.port or 443))
+    presented = fingerprint(pem)
+    if not same_fingerprint(presented, expected):
+        raise CertificateMismatch(expected, presented)
+    context = ssl.create_default_context(cadata=pem)
+    context.check_hostname = False  # the pin is the identity; the name on a self-signed cert is not
+    return context
+
+
 class HttpDoorbell:
-    def __init__(self, address: str, token: str, verify: ssl.SSLContext | bool = True,
-                 timeout: float = 30.0) -> None:
+    """``fingerprint`` pins the gateway's self-signed certificate (design §3.2): the
+    client fetches the certificate the address presents, refuses it when its SHA-256
+    fingerprint differs, and otherwise trusts exactly that certificate. Without one,
+    an ``https`` address is verified against the system's CAs as usual."""
+
+    def __init__(self, address: str, token: str, fingerprint: str | None = None, timeout: float = 30.0) -> None:
         self.address = address.rstrip("/")
         self.timeout = timeout
-        self._client = httpx.AsyncClient(base_url=self.address, headers={"Authorization": f"Bearer {token}"},
-                                         verify=verify, timeout=timeout)
+        self._headers = {"Authorization": f"Bearer {token}"}
+        self._pin = fingerprint if urlsplit(self.address).scheme == "https" else None
+        self._client: httpx.AsyncClient | None = None
+
+    async def _http(self) -> httpx.AsyncClient:
+        """The HTTP client, built on first use: pinning fetches the gateway's certificate,
+        a blocking handshake that runs off the event loop."""
+        if self._client is None:
+            verify: ssl.SSLContext | bool = True
+            if self._pin is not None:
+                verify = await asyncio.to_thread(pinned_context, self.address, self._pin)
+            self._client = httpx.AsyncClient(base_url=self.address, headers=self._headers, verify=verify,
+                                             timeout=self.timeout)
+        return self._client
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
 
     async def __aenter__(self) -> HttpDoorbell:
         return self
@@ -46,17 +86,17 @@ class HttpDoorbell:
     # ── the doorbell ────────────────────────────────────────────────────────
 
     async def poll(self, wait: float = 0) -> Wake | None:
-        r = await self._client.get("/v1/agents/me/wake", params={"wait": wait}, timeout=wait + TIMEOUT_SLACK)
+        r = await (await self._http()).get("/v1/agents/me/wake", params={"wait": wait}, timeout=wait + TIMEOUT_SLACK)
         doc = self._answer(r)["wake"]
         return None if doc is None else decode_wake(doc)
 
     async def read(self, wake_id: str) -> tuple[Wake, list[Post]]:
-        r = await self._client.get("/v1/agents/me/posts", params={"wake": wake_id})
+        r = await (await self._http()).get("/v1/agents/me/posts", params={"wake": wake_id})
         doc = self._answer(r)
         return decode_wake(doc["wake"]), [decode_post(p) for p in doc["posts"]]
 
     async def read_room(self, room: str) -> list[Post]:
-        r = await self._client.get("/v1/agents/me/posts", params={"room": room})
+        r = await (await self._http()).get("/v1/agents/me/posts", params={"room": room})
         return [decode_post(p) for p in self._answer(r)["posts"]]
 
     async def send(self, reply: Reply, room: str | None = None) -> Post | None:
@@ -64,7 +104,7 @@ class HttpDoorbell:
         if room is not None:
             body["room"] = room
         try:
-            r = await self._client.post("/v1/agents/me/posts", json=body)
+            r = await (await self._http()).post("/v1/agents/me/posts", json=body)
         except httpx.TimeoutException:
             raise LostResponse() from None
         if r.status_code == 422:
@@ -75,24 +115,24 @@ class HttpDoorbell:
         return None if doc is None else decode_post(doc)
 
     async def done(self, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool:
-        r = await self._client.post("/v1/agents/me/done",
+        r = await (await self._http()).post("/v1/agents/me/done",
                                     json={"wake_id": wake_id, "answered": list(answered), "failed": failed})
         return bool(self._answer(r)["done"])
 
     async def bio(self, text: str) -> int:
-        r = await self._client.post("/v1/agents/me/bio", json={"text": text})
+        r = await (await self._http()).post("/v1/agents/me/bio", json={"text": text})
         return int(self._answer(r)["version"])
 
     async def attachment(self, handle: str) -> tuple[str, bytes]:
         """The file's name and bytes, by the handle a read printed."""
-        r = await self._client.get(f"/v1/agents/me/attachments/{handle}")
+        r = await (await self._http()).get(f"/v1/agents/me/attachments/{handle}")
         if r.status_code != 200:
             self._answer(r)
         found = _FILENAME.search(r.headers.get("Content-Disposition", ""))
         return (found.group(1) if found else handle), r.content
 
     async def rules(self) -> tuple[int, str]:
-        r = await self._client.get("/v1/rules")
+        r = await (await self._http()).get("/v1/rules")
         doc = self._answer(r)
         return int(doc["version"]), str(doc["text"])
 

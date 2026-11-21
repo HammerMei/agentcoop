@@ -21,8 +21,16 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from ..errors import DoorbellError, InvalidReply, LostResponse, NoLiveLease, RefusedSend
+from ..errors import (
+    CertificateMismatch,
+    DoorbellError,
+    InvalidReply,
+    LostResponse,
+    NoLiveLease,
+    RefusedSend,
+)
 from ..room.model import ALL, MAIN_THREAD, Attachment, Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..room.prompt import one_line, render_hint
@@ -35,6 +43,8 @@ def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog=PROG, description="the agent's side of the room")
     top.add_argument("--gateway", default=os.environ.get("COOP_GATEWAY"), help="doorbell address (COOP_GATEWAY)")
     top.add_argument("--token", default=os.environ.get("COOP_TOKEN"), help="bearer token (COOP_TOKEN)")
+    top.add_argument("--fingerprint", default=os.environ.get("COOP_FINGERPRINT"),
+                     help="the gateway certificate's SHA-256 fingerprint to pin (COOP_FINGERPRINT)")
     sub = top.add_subparsers(dest="command", required=True)
 
     read = sub.add_parser("read", help="the hint and the posts of a wake, or a room's posts after the cursor")
@@ -76,12 +86,22 @@ async def run(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if not args.gateway or not args.token:
         parser().error("--gateway and --token (or COOP_GATEWAY and COOP_TOKEN) are required")
-    async with HttpDoorbell(args.gateway, args.token) as doorbell:
-        try:
+    if plain_http_off_loopback(args.gateway):
+        print(f"[WARNING] {args.gateway} is plain http off loopback: the token travels in clear", file=sys.stderr)
+    try:
+        async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint) as doorbell:
             return await COMMANDS[args.command](doorbell, args)
-        except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse) as exc:
-            print(f"[ERROR] {exc}", file=sys.stderr)
-            return 1
+    except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse,
+            CertificateMismatch, OSError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+
+
+def plain_http_off_loopback(address: str) -> bool:
+    """Design §3.2: plain ``http://`` is for loopback (and a tunnel to it); anywhere
+    else the utility warns."""
+    parts = urlsplit(address)
+    return parts.scheme == "http" and parts.hostname not in ("127.0.0.1", "::1", "localhost")
 
 
 # ── commands ────────────────────────────────────────────────────────────────

@@ -33,6 +33,15 @@ class DoorbellError(Exception):
         self.message = message
 
 
+class CertificateMismatch(Exception):
+    """The gateway presented a certificate whose fingerprint is not the pinned one."""
+
+    def __init__(self, expected: str, presented: str) -> None:
+        super().__init__(f"the gateway's certificate fingerprint {presented} is not the pinned {expected}")
+        self.expected = expected
+        self.presented = presented
+
+
 class LostResponse(Exception):
     """A send the gateway did not answer in time (design §3.3): the reply may have
     been posted. The agent reads the room and posts again only if it is not there."""

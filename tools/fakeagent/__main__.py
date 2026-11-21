@@ -5,6 +5,10 @@
 The run is deterministic and needs no model. Its transcript and rule table are the
 simulator's (``python -m tools.roomsim``), for design §6.2's replay parity; the
 ``--json`` document holds the posts, the trace and every gateway's status.
+
+Against a running gateway instead: ``python -m tools.fakeagent --gateway URL --token T
+[--fingerprint F] [--bot NAME] [--wait S]`` serves the bot over the doorbell API until
+interrupted, answering every wake with ``done`` in each must-reply thread.
 """
 
 from __future__ import annotations
@@ -15,6 +19,10 @@ import json
 import sys
 from pathlib import Path
 
+from coop.agent.client import HttpDoorbell
+from coop.room.clock import AsyncioClock
+
+from .agent import FakeAgent, done_everywhere
 from .scenario import Scenario, load, run
 
 _MARKERS = {
@@ -88,15 +96,38 @@ def as_json(scenario: Scenario) -> dict:
     }
 
 
+async def serve(gateway: str, token: str, fingerprint: str | None, bot: str, wait: float) -> None:
+    """The fake agent on a real doorbell: the same loop the HTTP tests run."""
+    agent = FakeAgent(AsyncioClock(), done_everywhere, duration=0.0)
+    async with HttpDoorbell(gateway, token, fingerprint=fingerprint) as doorbell:
+        agent.attach(bot, doorbell)
+        await agent.serve(bot, wait)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fakeagent", description=__doc__.split("\n")[0])
-    parser.add_argument("scenario")
+    parser.add_argument("scenario", nargs="?")
+    parser.add_argument("--gateway", help="serve against this doorbell address instead of running a scenario")
+    parser.add_argument("--token", help="the agent's bearer token (with --gateway)")
+    parser.add_argument("--fingerprint", help="the gateway certificate's SHA-256 fingerprint (with --gateway)")
+    parser.add_argument("--bot", default="a", help="the bot the token names (with --gateway)")
+    parser.add_argument("--wait", type=float, default=30.0, help="long-poll seconds (with --gateway)")
     parser.add_argument("--enforce", choices=["on", "off"], default=None)
     parser.add_argument("--json", help="write posts, trace and status to this JSON file")
     parser.add_argument("--show-rules", action="store_true", help="include rule events in the transcript")
     parser.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
                         help="override a scenario param, e.g. catch_up_idle_seconds=60 (repeatable)")
     args = parser.parse_args(argv)
+    if args.gateway:
+        if not args.token:
+            parser.error("--gateway needs --token")
+        try:
+            asyncio.run(serve(args.gateway, args.token, args.fingerprint, args.bot, args.wait))
+        except KeyboardInterrupt:
+            pass
+        return 0
+    if args.scenario is None:
+        parser.error("a scenario file, or --gateway")
     enforce = None if args.enforce is None else args.enforce == "on"
     overrides = dict(p.split("=", 1) for p in args.param)
     scenario = asyncio.run(run(load(args.scenario, enforce, params=overrides)))

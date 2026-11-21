@@ -14,7 +14,9 @@ The simulated environment (clock, room, scripted classifier) is the fake agent's
 
 from __future__ import annotations
 
+import ssl
 from collections.abc import Callable
+from pathlib import Path
 
 from aiohttp.test_utils import TestServer
 
@@ -28,7 +30,7 @@ from coop.room.trace import Trace
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
 
-__all__ = ["FAST", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
+__all__ = ["FAST", "FIXTURES", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
            "ScriptedClassifier", "InjectedFailures", "SimClock", "FakePlatform", "members"]
 
 # Fast, eager defaults so a test runs in a few simulated seconds. Real values are open
@@ -161,6 +163,9 @@ def item(thread=None, to=None, text=None, control=None, done=False) -> dict:
     return found
 
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
 # ── the doorbell over HTTP ──────────────────────────────────────────────────
 
 
@@ -168,12 +173,14 @@ class Doorbell:
     """One gateway behind the doorbell API on a real port, for the raw-HTTP tests and the
     fake agent's HTTP client. ``tokens`` maps a bearer token to its agent."""
 
-    def __init__(self, gateway: Gateway, tokens: dict[str, str], rules_text: str = "rules") -> None:
+    def __init__(self, gateway: Gateway, tokens: dict[str, str], rules_text: str | None = "rules",
+                 tls: ssl.SSLContext | None = None) -> None:
         self.tokens = tokens
-        self.server = TestServer(build_app(gateway, tokens, rules_text))
+        self.tls = tls
+        self.server = TestServer(build_app(gateway, tokens, rules_text), scheme="https" if tls else "http")
 
     async def __aenter__(self) -> Doorbell:
-        await self.server.start_server()
+        await self.server.start_server(ssl=self.tls)
         return self
 
     async def __aexit__(self, *exc) -> None:

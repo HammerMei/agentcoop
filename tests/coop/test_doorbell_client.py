@@ -91,7 +91,7 @@ async def test_a_send_the_gateway_does_not_answer_is_lost_not_retried(http_sandb
         calls.append(1)
         raise httpx.ReadTimeout("slow")
 
-    monkeypatch.setattr(a._client, "post", hang)
+    monkeypatch.setattr(await a._http(), "post", hang)
     with pytest.raises(LostResponse, match="may have been posted"):
         await a.send(Reply(thread="main", text="x", wake_id=None), room="team")
     assert len(calls) == 1
