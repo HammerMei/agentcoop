@@ -16,7 +16,6 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from ..doorbell.tls import fingerprint, same_fingerprint
 from ..errors import (
     CertificateMismatch,
     DoorbellError,
@@ -25,6 +24,7 @@ from ..errors import (
     NoLiveLease,
     RefusedSend,
 )
+from ..fingerprint import fingerprint, same_fingerprint
 from ..room.model import Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..wire import decode_post, decode_wake, encode_reply
@@ -105,7 +105,9 @@ class HttpDoorbell:
             body["room"] = room
         try:
             r = await (await self._http()).post("/v1/agents/me/posts", json=body)
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, httpx.ReadError, httpx.RemoteProtocolError):
+            # the request may have reached the gateway; a connection that never opened
+            # (ConnectError) did not, and propagates as the ordinary failure it is
             raise LostResponse() from None
         if r.status_code == 422:
             raise RefusedSend(r.json().get("reasons", r.json().get("error", "")))

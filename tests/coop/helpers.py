@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import ssl
 from collections.abc import Callable
-from pathlib import Path
 
 from aiohttp.test_utils import TestServer
 
@@ -30,7 +29,7 @@ from coop.room.trace import Trace
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
 
-__all__ = ["FAST", "FIXTURES", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
+__all__ = ["FAST", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
            "ScriptedClassifier", "InjectedFailures", "SimClock", "FakePlatform", "members"]
 
 # Fast, eager defaults so a test runs in a few simulated seconds. Real values are open
@@ -114,6 +113,16 @@ class Sandbox:
         gateway.start()
         return core
 
+    def add_room(self, name: str, hosted: list[str], humans=(("H", "owner"),)) -> FakePlatform:
+        """A second room on the first gateway, hosting ``hosted`` there."""
+        room = FakePlatform(name, members(tuple(hosted), humans), self.clock, self.trace)
+        core = RoomCore(name, room, self.clock, self.trace, hosted, list(hosted), self.params, self.classifier,
+                        name=self.gateway.name)
+        self.gateway.add_room(core)
+        room.cores.append(core)
+        core.start()
+        return room
+
     async def human(self, text: str, thread: str = MAIN_THREAD, author: str = "H",
                     attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
         return await self.room.post(author, text, thread, attachments=attachments)
@@ -163,10 +172,17 @@ def item(thread=None, to=None, text=None, control=None, done=False) -> dict:
     return found
 
 
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
 # ── the doorbell over HTTP ──────────────────────────────────────────────────
+
+
+class _KeepHandlers(TestServer):
+    """aiohttp's test server cancels a handler when its client disconnects; a production
+    runner does not by default (``handler_cancellation=False``). This server keeps
+    the default, so the long-poll's behaviour with a client gone is the daemon's."""
+
+    async def _make_runner(self, **kwargs):
+        kwargs["handler_cancellation"] = False
+        return await super()._make_runner(**kwargs)
 
 
 class Doorbell:
@@ -174,10 +190,11 @@ class Doorbell:
     fake agent's HTTP client. ``tokens`` maps a bearer token to its agent."""
 
     def __init__(self, gateway: Gateway, tokens: dict[str, str], rules_text: str | None = "rules",
-                 tls: ssl.SSLContext | None = None) -> None:
+                 tls: ssl.SSLContext | None = None, cancel_handlers: bool = True) -> None:
         self.tokens = tokens
         self.tls = tls
-        self.server = TestServer(build_app(gateway, tokens, rules_text), scheme="https" if tls else "http")
+        server = TestServer if cancel_handlers else _KeepHandlers
+        self.server = server(build_app(gateway, tokens, rules_text), scheme="https" if tls else "http")
 
     async def __aenter__(self) -> Doorbell:
         await self.server.start_server(ssl=self.tls)

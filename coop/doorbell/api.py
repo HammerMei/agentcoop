@@ -30,7 +30,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from ..errors import InvalidReply, NoLiveLease, RefusedSend
+from ..errors import InvalidReply, NoLiveLease, RefusedSend, RoomUnresolved
 from ..room.gateway import Gateway
 from ..room.model import Post, Wake
 from ..room.platform import RefusedPost
@@ -130,8 +130,17 @@ async def wake(request: web.Request) -> web.Response:
             await asyncio.wait_for(signal.wait(), wait)
         except TimeoutError:
             pass
+        if _client_gone(request):
+            # the agent left while we waited: picking the wake up now would start a
+            # lease nobody holds; it stays pending for the agent's next poll
+            return web.json_response({"wake": None})
         found = doorbell.gateway.poll(agent)
     return web.json_response({"wake": None if found is None else encode_wake(found)})
+
+
+def _client_gone(request: web.Request) -> bool:
+    transport = request.transport
+    return transport is None or transport.is_closing()
 
 
 async def read(request: web.Request) -> web.Response:
@@ -158,6 +167,9 @@ async def send(request: web.Request) -> web.Response:
     body = await _json(request)
     if body is None:
         return _error(400, "send: a JSON reply")
+    problem = _typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str)
+    if problem is not None:
+        return _error(400, f"send: {problem}")
     refused = _default_thread(gateway, agent, body)
     if refused is None and body.get("room") is not None:
         refused = _room_refusal(gateway, agent, body["room"])
@@ -167,7 +179,7 @@ async def send(request: web.Request) -> web.Response:
     try:
         core = gateway.room_for(agent, reply, room)
         post = await core.send(agent, reply)
-    except (NoLiveLease, KeyError, InvalidReply, RefusedSend, RefusedPost) as exc:
+    except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
     return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(core.room, post))})
 
@@ -189,8 +201,8 @@ def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | 
 def _send_refusal(exc: Exception) -> web.Response:
     if isinstance(exc, NoLiveLease):
         return _error(409, f"{exc}; a late send names its room and thread")
-    if isinstance(exc, KeyError):
-        return _error(404, str(exc.args[0]))
+    if isinstance(exc, RoomUnresolved):
+        return _error(404, str(exc))
     if isinstance(exc, InvalidReply):
         return _error(400, str(exc))
     if isinstance(exc, RefusedSend):
@@ -203,6 +215,9 @@ async def done(request: web.Request) -> web.Response:
     body = await _json(request)
     if body is None or not isinstance(body.get("wake_id"), str):
         return _error(400, "done: a JSON body with wake_id")
+    problem = _typed(body, answered=list, failed=str)
+    if problem is not None:
+        return _error(400, f"done: {problem}")
     answered = tuple(body.get("answered") or ())
     failed = body.get("failed")
     ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
@@ -245,6 +260,18 @@ async def _json(request: web.Request) -> dict | None:
     except ValueError:
         return None
     return body if isinstance(body, dict) else None
+
+
+def _typed(body: dict, **types: type) -> str | None:
+    """The first field whose value is present, not ``None`` and not of its type (a list
+    must hold strings); ``None`` when every field is well typed."""
+    for name, kind in types.items():
+        value = body.get(name)
+        if value is None:
+            continue
+        if not isinstance(value, kind) or (kind is list and not all(isinstance(v, str) for v in value)):
+            return f"{name} must be {'a list of strings' if kind is list else 'a ' + kind.__name__}"
+    return None
 
 
 def _room_refusal(gateway: Gateway, agent: str, room: str) -> web.Response | None:

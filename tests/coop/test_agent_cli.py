@@ -37,7 +37,7 @@ async def test_read_prints_the_reminder_the_hint_and_the_posts(sb, coop, capsys)
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"you are a in team, rules v1, reply with `send --wake {w}` or `done`"
     assert out[1] == "Turn source: addressed. Starting thread: t1."
-    assert out[-2:] == ["[t1] #p1 b (agent): a bot speaks", "[t1] #p2 H (owner): @a hello"]
+    assert out[-2:] == ["[t1] #p1 b (agent): a bot speaks", "[t1] #p2 H (owner, trigger): @a hello"]
 
 
 async def test_read_by_room_prints_the_posts_after_the_cursor(sb, coop, capsys):
@@ -90,7 +90,7 @@ async def test_usage_errors_exit_2(coop, argv):
 async def test_a_refused_send_is_an_error_line(sb, coop, capsys):
     await sb.human("mute: @a")
     assert await coop("send", "--unsolicited", "--room", "team", "--to", "H", "still here") == 1
-    err = capsys.readouterr().err
+    err = capsys.readouterr().err.splitlines()[-1]
     assert err.startswith("[ERROR]") and "mute" in err and sb.posts_by("a") == []
 
 
@@ -106,7 +106,7 @@ async def test_a_late_send_on_an_expired_wake_needs_the_thread(sb, coop, capsys)
 
 async def test_done_on_a_stale_wake_warns(coop, capsys):
     assert await coop("done", "--wake", "w-nope") == 0
-    assert capsys.readouterr().err.startswith("[WARNING]")
+    assert capsys.readouterr().err.splitlines()[-1].startswith("[WARNING] wake w-nope holds no live lease")
 
 
 async def test_bio_pushes_the_file(sb, coop, capsys, tmp_path):
@@ -133,4 +133,10 @@ async def test_read_lists_attachments_and_attachment_downloads_one(sb, coop, cap
 
 async def test_a_wrong_token_is_an_error_line(sb, coop, capsys):
     assert await coop("read", "--room", "team", agent="nope") == 1
-    assert "401" in capsys.readouterr().err
+    assert "401" in capsys.readouterr().err.splitlines()[-1]
+
+
+async def test_plain_http_is_warned_about_once(coop, capsys):
+    await coop("read", "--room", "team")
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and err[0].startswith("[WARNING]") and "plain http" in err[0]

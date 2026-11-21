@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
-from ..errors import NoLiveLease
+from ..errors import NoLiveLease, RoomUnresolved
 from .clock import Clock
 from .core import RoomCore
 from .model import Attachment, Post, Reply, Wake
@@ -88,7 +88,7 @@ class Gateway:
         try:
             return self.rooms[room]
         except KeyError:
-            raise KeyError(f"no room {room!r}") from None
+            raise RoomUnresolved(f"no room {room!r}") from None
 
     def _room_of_wake(self, agent: str, wake_id: str) -> RoomCore:
         """The room whose live lease for ``agent`` is ``wake_id``."""
@@ -156,11 +156,15 @@ class Gateway:
                 return core
         if room is not None:
             return self._room(room)
-        # ``--thread T`` alone: the thread names its room (design §3.3)
-        core = next((c for c in self.rooms.values() if c.platform.thread_posts(reply.thread)), None)
-        if core is None:
-            raise KeyError(f"no room has a thread {reply.thread!r}")
-        return core
+        # ``--thread T`` alone: the thread names its room, among the rooms this gateway
+        # serves the agent in (design §3.3)
+        found = [c for c in self.rooms.values() if agent in c.hosted and c.platform.thread_posts(reply.thread)]
+        if not found:
+            raise RoomUnresolved(f"no room of {agent}'s has a thread {reply.thread!r}")
+        if len(found) > 1:
+            raise RoomUnresolved(f"thread {reply.thread!r} is in several of {agent}'s rooms "
+                                 f"({', '.join(c.room for c in found)}): name the room")
+        return found[0]
 
     async def done(self, agent: str, wake_id: str, answered: tuple[str, ...] = (),
                    failed: str | None = None) -> bool:

@@ -5,6 +5,11 @@ exceptions; over HTTP, as the status and reason the API answers with."""
 from __future__ import annotations
 
 
+class RoomUnresolved(Exception):
+    """A send or read named no room the gateway could settle on: a room it does not
+    watch, a thread in none of the agent's rooms, or a thread in several of them."""
+
+
 class NoLiveLease(Exception):
     """The wake id names no wake this bot holds a live lease on."""
 

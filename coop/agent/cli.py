@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
+
 from ..errors import (
     CertificateMismatch,
     DoorbellError,
@@ -86,37 +88,39 @@ async def run(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if not args.gateway or not args.token:
         parser().error("--gateway and --token (or COOP_GATEWAY and COOP_TOKEN) are required")
-    if plain_http_off_loopback(args.gateway):
-        print(f"[WARNING] {args.gateway} is plain http off loopback: the token travels in clear", file=sys.stderr)
+    if plain_http(args.gateway):
+        print(f"[WARNING] {args.gateway} is plain http: the token travels in clear; keep it on loopback "
+              "or a tunnel to loopback", file=sys.stderr)
     try:
         async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint) as doorbell:
             return await COMMANDS[args.command](doorbell, args)
     except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse,
-            CertificateMismatch, OSError) as exc:
+            CertificateMismatch, httpx.HTTPError, OSError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
 
-def plain_http_off_loopback(address: str) -> bool:
-    """Design §3.2: plain ``http://`` is for loopback (and a tunnel to it); anywhere
-    else the utility warns."""
-    parts = urlsplit(address)
-    return parts.scheme == "http" and parts.hostname not in ("127.0.0.1", "::1", "localhost")
+def plain_http(address: str) -> bool:
+    """Design §3.2: a plain ``http://`` address is accepted for loopback, a tunnel to
+    loopback and test deployments, and the utility warns when it connects to one."""
+    return urlsplit(address).scheme == "http"
 
 
 # ── commands ────────────────────────────────────────────────────────────────
 
 
 async def cmd_read(doorbell: HttpDoorbell, args) -> int:
+    trigger = None
     if args.wake is not None:
         wake, posts = await doorbell.read(args.wake)
+        trigger = wake.trigger.post_id if wake.trigger is not None else None
         print(reminder(wake))
         print(render_hint(wake.hint))
         print()
     else:
         posts = await doorbell.read_room(args.room)
     for post in posts:
-        print(post_line(post))
+        print(post_line(post, trigger))
         for found in post.attachments:
             print(attachment_line(found))
     return 0
@@ -175,8 +179,10 @@ def reminder(wake: Wake) -> str:
             f"reply with `send --wake {wake.wake_id}` or `done`")
 
 
-def post_line(post: Post) -> str:
-    role = f" ({post.author_role})" if post.author_role else ""
+def post_line(post: Post, trigger: str | None = None) -> str:
+    """``[thread] #id author (role): text``; the post that caused the wake is marked."""
+    labels = [label for label in (post.author_role, "trigger" if post.id == trigger else "") if label]
+    role = f" ({', '.join(labels)})" if labels else ""
     return f"[{post.thread}] #{post.id} {post.author}{role}: {one_line(post.text)}"
 
 

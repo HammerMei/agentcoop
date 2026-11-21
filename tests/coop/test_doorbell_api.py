@@ -4,6 +4,7 @@ client class: a gateway the fake agent can drive must answer these on its own.""
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -78,6 +79,21 @@ async def test_two_agents_long_polling_at_once_each_get_their_own_wake(api, sb):
     await sb.human("@a @b hello")
     wakes = await asyncio.wait_for(asyncio.gather(*polls), 2)
     assert [w["bot"] for w in wakes] == ["a", "b"]
+
+
+async def test_a_wake_issued_while_the_long_poller_was_gone_waits_for_the_next_poll(sb):
+    async with Doorbell(sb.gateway, TOKENS, cancel_handlers=False) as doorbell:
+        async with httpx.AsyncClient(base_url=doorbell.url, timeout=10) as api:
+            gone = asyncio.ensure_future(api.get("/v1/agents/me/wake", params={"wait": 5}, headers=as_("a")))
+            await asyncio.sleep(0.05)
+            gone.cancel()
+            await asyncio.gather(gone, return_exceptions=True)
+            await asyncio.sleep(0.05)
+            await sb.human("@a hello")
+            await asyncio.sleep(0.05)
+            # the abandoned handler did not pick the wake up: no lease was started
+            assert sb.trace.last("lease_started", bot="a") is None
+            assert (await wake_for(api, "a", wait=1))["bot"] == "a"
 
 
 async def test_a_wake_issued_before_the_poll_is_picked_up_at_once(api, sb):
@@ -161,6 +177,52 @@ async def test_an_unsolicited_send_names_its_room_or_a_thread_in_it(api, sb):
     r = await api.post("/v1/agents/me/posts", headers=as_("z"),
                        json={"thread": "main", "text": "x", "wake_id": None, "room": "team"})
     assert r.status_code == 403
+
+
+async def test_a_thread_alone_is_resolved_among_the_agents_rooms(api, sb):
+    ops = sb.add_room("ops", ["a"])  # a is in team and ops; b in team alone
+    await ops.post("H", "ops question", "t-ops")
+    await ops.post("H", "ops news")
+    await sb.human("team news")
+
+    def send(agent, body):
+        return api.post("/v1/agents/me/posts", headers=as_(agent), json={"wake_id": None, **body})
+
+    r = await send("a", {"thread": "t-ops", "to": ["H"], "text": "on it"})
+    assert r.status_code == 200 and [p.thread for p in ops.posts if p.author == "a"] == ["t-ops"]
+    r = await send("b", {"thread": "t-ops", "to": ["H"], "text": "me too"})
+    assert r.status_code == 404 and "no room of b's" in r.json()["error"]
+    r = await send("a", {"thread": "main", "to": ["H"], "text": "where?"})
+    assert r.status_code == 404 and "several" in r.json()["error"] and "name the room" in r.json()["error"]
+    r = await send("b", {"thread": "main", "to": ["H"], "text": "here"})
+    assert r.status_code == 200 and [p.text for p in sb.posts_by("b")] == ["@H here"]
+
+
+async def test_in_measure_mode_a_would_be_refusal_posts_and_counts(sb):
+    sb = Sandbox(clock=AsyncioClock(), attach_agent=False, params=replace(FAST, enforce=False))
+    async with Doorbell(sb.gateway, TOKENS) as doorbell:
+        async with httpx.AsyncClient(base_url=doorbell.url) as api:
+            await sb.human("mute: @a")
+            r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                               json={"thread": "main", "to": ["H"], "text": "still here", "wake_id": None, "room": "team"})
+    assert r.status_code == 200 and [p.text for p in sb.posts_by("a")] == ["@H still here"]
+    assert sb.gw.rules["mute"].violated == 1
+
+
+@pytest.mark.parametrize("body", [
+    {"thread": "main", "to": "H", "text": "x", "wake_id": None, "room": "team"},
+    {"thread": "main", "to": ["H", 3], "text": "x", "wake_id": None, "room": "team"},
+    {"thread": 1, "to": ["H"], "text": "x", "wake_id": None, "room": "team"},
+    {"thread": "main", "to": ["H"], "text": "x", "wake_id": None, "room": "team", "control": "mute"},
+])
+async def test_a_mistyped_send_body_is_400(api, body):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json=body)
+    assert r.status_code == 400 and "must be" in r.json()["error"]
+
+
+async def test_a_mistyped_done_body_is_400(api):
+    r = await api.post("/v1/agents/me/done", headers=as_("a"), json={"wake_id": "w", "answered": "t1"})
+    assert r.status_code == 400 and "list of strings" in r.json()["error"]
 
 
 async def test_a_late_send_on_a_wake_the_gateway_never_minted_is_409(api):
