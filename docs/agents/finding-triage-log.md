@@ -1775,7 +1775,7 @@ Increment: S2, "a remote agent reaches the room core over HTTP with a bearer tok
 
 **Cost:** ~25 min of attention, one round, two raters.
 
-**Status: open** — fixes pushed; the confirming Codex pass is pending.
+**Status: closed** — fixes pushed; the next round found new ground only (see below).
 
 ## 2026-11-21 — PR #210 round 2 (Codex on `d36b15f`, `coop/agent/cli.py`)
 
@@ -1790,4 +1790,19 @@ Increment: S2, "a remote agent reaches the room core over HTTP with a bearer tok
 
 **Cost:** ~10 min, one round, two raters.
 
-**Status: open** — fixes pushed; the confirming Codex pass is pending.
+**Status: closed** — fixes pushed; the next round found new ground only (see below).
+
+## 2026-11-21 — PR #210 round 3 (Codex on `84933b8`, `coop/doorbell/api.py`, `coop/room/gateway.py`)
+
+`chain-check.py`: three rounds, no chain (H1's line is from the original attachments commit, H2's from the S1 port). **Control finding:** none settled by observation; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| H1 | a file name with CR/LF reaches `Content-Disposition`; aiohttp refuses the header at serialization, so `read` lists the attachment and the download fails | FIX (cheap) | FIX (cheap; verified empirically: `ValueError: Forbidden control character detected in headers`) | **FIX** control characters and quotes stripped from the header value (2 lines, C901 3); `test_a_forged_attachment_name_still_downloads` |
+| H2 | `send --wake <A's wake> --room B` posts in A: the lease decides and `room` is ignored after the API authorised B | FIX (cheap) | FIX (cheap; `silent`); flagged that the PR body's "noted for S3" was a deferral without a decay date | **FIX** `room_for` refuses a room other than the live wake's (3 lines, C901 9); `test_a_wakes_send_naming_another_room_is_refused_not_misrouted`. Rater 2's point taken: a deferral in a PR body is policy, not a gate, and the fix was cheap all along |
+
+**Convergence:** full agreement. **Round composition:** r1 8 findings (2 of a kind: an authenticated bad request answered 500; 6 edge), r2 2 edge, r3 2 edge; no chain in any round. By the project's convergence rule (a round that is all edge cases is fixed and closed) no further Codex pass is requested on this PR.
+
+**Cost:** ~10 min, one round, two raters.
+
+**Status: closed** — fixes pushed; the PR is handed to the owner for merge.

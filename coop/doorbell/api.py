@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from ..wire import decode_reply, encode_post, encode_wake
 
 DEFAULT_WAIT = 30.0
 MAX_WAIT = 120.0
+_HEADER_UNSAFE = re.compile(r'[\x00-\x1f\x7f"]')
 DOORBELL = web.AppKey("doorbell", "_Doorbell")
 AGENT = web.RequestKey("agent", str)
 
@@ -246,7 +248,7 @@ async def attachment(request: web.Request) -> web.Response:
         return _error(404, f"no attachment {handle!r}: fetch by the handle a read printed")
     except PermissionError as exc:
         return _error(403, str(exc))
-    name = found.name.replace('"', "")
+    name = _HEADER_UNSAFE.sub("", found.name)  # a control character or a quote would break the header
     return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

@@ -144,7 +144,11 @@ class Gateway:
         ``room`` (the send is then unsolicited, design §3.5)."""
         if reply.wake_id is not None:
             try:
-                return self._room_of_wake(agent, reply.wake_id)
+                core = self._room_of_wake(agent, reply.wake_id)
+                if room is not None and room != core.room:
+                    # ``--room`` on a wake's send is the root of the wake's room (design §3.3)
+                    raise RoomUnresolved(f"wake {reply.wake_id!r} is in room {core.room!r}, not {room!r}")
+                return core
             except NoLiveLease:
                 # the lease is gone (expired, or the gateway restarted); the wake id still
                 # names its room, so the late reply lands there unsolicited (design §3.4)
