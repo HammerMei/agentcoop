@@ -812,6 +812,8 @@ class RoomCore:
                     trigger=self._trigger(trigger), rules_version=self.rules_version)
         run = TurnRun(wake, through, tuple(delivered), read_complete=not delivered)
         self.volatile[bot].turn = run
+        if bot not in self.platform.members():  # configured here, not in the room: loud, until the roster owns it
+            logger.warning("%s: %s is hosted but not a member of the room; wake %s issued", self.room, bot, wake.wake_id)
         self.trace.add(self.now(), "turn_start", gateway=self.name, bot=bot, source=source,
                        thread=thread, exempt=self._exempt(source, thread, trigger),
                        delivered=[p.id for p in delivered], wake=wake.wake_id)
@@ -1158,5 +1160,6 @@ class RoomCore:
             "bots": {b: self._bot_status(b) for b in self.hosted},
             "agents": list(self.agents),
             "bot_like_members_missing": [m.username for m in members.values() if m.is_bot and m.username not in self.agents],
+            "hosted_not_members": [b for b in self.hosted if b not in members],
             "rules": {m: vars(c) for m, c in self.rules.items()},
         }

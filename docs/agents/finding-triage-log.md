@@ -41,6 +41,11 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-10-07 | #195 r1 F1 — RC replay re-runs the human reset for an unmentioned post; an in-flight agent delivery keeps a free turn | DROP | `Agent chain counters reset … had turns` logged directly after `replaying missed messages` for a room whose human post was unmentioned, or any chain observed past `max_turns+1` | 2027-10-07 | open |
 | 2026-11-14 | #205 r1 F7 — `session/resume` without `mcpServers` is rejected by a conforming agent | DROP (`cannot-occur`: ACP v1 schema `ResumeSessionRequest.required = [sessionId, cwd]`) | an ACP agent answering `invalid_params` naming `mcpServers` on a `session/resume` that omits it | 2027-11-14 | open |
 | 2026-11-14 | #205 r4 J3 — a project `.opencode/` config defining `coop-<path_key>` outranks the gateway's watcher entry | DROP (ADR-0001: the working directory is the agent's own; the ruleset is unaffected) | a `coop-<path_key>` entry found in a project config that neither the operator nor the agent wrote | 2027-11-14 | open |
+| 2026-11-20 | #208 r1 F1 — a hosted bot removed from the room keeps getting wakes and reads through the core | FILE (→ S3: derive or validate `hosted` against the roster) + MAKE IT LOUD (`status.hosted_not_members`, a warning per wake) | a `turn_start` or the warning for a bot absent from `platform.members()` in the design §6 step-3 lab run | 2027-11-20 | open |
+| 2026-11-20 | #208 r1 F2 — `restart()` leaves an in-flight classifier result to repopulate the cache and pick a bot | DROP (`cannot-occur`: no production caller of `restart`; a process restart ends the task; a late pick is for an undelivered post) | a non-test caller of `RoomCore.restart` (`grep -n "\.restart(" coop/`), or two `classifier_decision` events for one post id after a restart | 2027-11-20 | open |
+| 2026-11-20 | #208 r1 F3 — an archived thread's pending decision or unleased wake still produces a turn and a refused post | DROP (scored, 1–10/yr × 0.02 h; spec 5.9 names the archived-thread refusal as a normal end; MM/RC archive rooms, not threads) | `platform_refused` for the same thread on two consecutive turns of one bot, or a bot stuck on an archived thread | 2027-11-20 | open |
+| 2026-11-20 | #208 r1 F4 — a `done` that runs after `expires_at` under a stalled loop is accepted | DROP (outcome acceptable: the agent finished; the fix converts a gateway stall into a failure plus a duplicate reply) | a `turn_end outcome=normal` seconds after its wake's `lease_started.expires_at` | 2027-11-20 | open |
+| 2026-11-20 | #208 r1 F5 — a replayed thread older than `control_ttl_days` seeds `last_activity` with now, so its stale controls live another TTL | DROP (scored, 0–0.3/yr; the one-line fix drops live mutes when traced; needs S3's replay window > 7 d to occur) | `control_applied` with `age` > `control_ttl_seconds` followed by `turn_held gate=mute` in that thread after a restart | 2027-11-20 | open |
 
 ---
 
@@ -1638,3 +1643,27 @@ Notes:
 - Cost: this round about 70 minutes including the owner's review.
 
 **Status: closed** — N-467 settled by the owner (2026-11-20): the `(timestamp, post id)` representation is written into the 5.6 row, the lab verifies it. All 50 threads resolved. No further review requested.
+
+## 2026-11-20 — PR #208 round 1 (Codex on `2659d46`, `coop/room/core.py`)
+
+**Increment:** the room core from `tools/roomsim` runs per room against an abstract platform and clock, with wakes, leases, `send` and `done` in place of the envelope (stage S1).
+**Chain detector:** 5 findings over 1 round, no chain.
+**Arrival check:** review `2659d46`, 5 inline threads, all on `core.py`. Security review did not run (credits).
+**Internal review first:** a code-reviewer agent read the port against the simulator before Codex; its six true findings (platform-refused reply counted against the agent, backend-failure sends uncounted, `hwm=None` crash ending the periodic sweep, pause not covering a pending wake, `enforce` default, off-hint send checked against rate) were fixed before the PR opened and are in its body, not here.
+**Control finding:** #181 r9 F1 was sent as F6 — and it was a bad control: it is `settled: implemented`, so at HEAD the defect no longer exists, and rater 2 correctly DROPped it as unreachable (`config_base_dir()` is a constant since #186). A control must be posed at the commit where it was open, or be a verdict whose reversal was observed. **Agreement in this round is uncorroborated.**
+**Rater 2:** blind (general-purpose agent), six findings, method, constants, the design, the simulator source; no verdicts. Verdicts agreed on 2 of 5 real findings outright (F2, F4); the three splits were all on the `cheap` gate, as the skill predicts, and all three converged on rater 2's evidence: F1 is `silent` and rater 1 had not priced MAKE IT LOUD (skill Step 1); F3's two-line guard is not correct alone (`_due_threads` re-selects the archived thread every sweep) and spec 5.9 names the archived-thread refusal as a normal turn end; F5's one-line seed from `post.time` drops a live mute when traced (a mute at −8 d with a post at −5 d: the second `_thread()` call resets on wall-clock TTL).
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **F1** removed bot still woken and reads (P1) | FILE → S3 (membership is the roster's layer; inexpressible in S1's platform) | true and wider (sweeps, `read_room`); `silent`; LOUD 2 lines; hold is S3's | **MAKE IT LOUD** (`status.hosted_not_members`, warning per wake) + **FILE → S3**; re-ranked P2 (misconfiguration spec 5.14 says to report loudly; not a cross-agent leak under ADR 0001) |
+| **F2** restart leaves classifier work in flight (P2) | DROP (process boundary; a late pick is for an undelivered post) | DROP (`cannot-occur`: no production caller) | **DROP** |
+| **F3** archived thread's pending work (P2) | FIX, cheap guard | DROP (net ≤ 0; spec 5.9's designed path; platforms archive rooms) | **DROP** — rater 1 conceded on the spec clause and the traced sweep loop |
+| **F4** `done` after `expires_at` (P2) | DROP (outcome acceptable) | DROP, flagged as a `cheap`-gate split | **DROP** |
+| **F5** replayed thread's `last_activity` (P2) | FIX, 2 lines | DROP (the 2 lines are wrong when traced; correct fix 10–15 lines + roomsim mirror; 0–0.3/yr) | **DROP** — rater 1 conceded on the trace; S3 note: a replay window under `control_ttl_days` makes it `cannot-occur` |
+
+Notes:
+- Adoption: 1 made loud, 1 filed, 4 dropped. Severity re-rank vs Codex: F1 P1 → P2; the rest below P2.
+- Method: the `cheap` gate split 3 of 5, every time with the first rater holding the cheaper-looking fix and the second rater showing it incomplete or wrong when traced. Rater 1's lesson recorded: trace the proposed one-liner through every call site before calling it cheap.
+- Cost: ~35 min rater 2, ~25 min rater 1, one round.
+
+**Status: open** — fix pushed, one confirming Codex pass requested.

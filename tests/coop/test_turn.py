@@ -335,3 +335,15 @@ async def test_unsolicited_sends_are_counted_apart_and_read_room_shows_the_backl
     assert sb.gw.status()["bots"]["a"]["unsolicited_sends"] == 1
     assert [p.id for p in await doorbell.read_room("team")] == ["p1", "p2"]  # its own post included, cursor unmoved
     assert sb.gw.status()["bots"]["a"]["cursor"] is None
+
+
+async def test_a_hosted_bot_that_left_the_room_is_still_woken_but_loudly(caplog):
+    """Membership is the roster's concern (a later increment); until then the core says
+    so in status and in the log rather than deciding by itself (spec 5.14)."""
+    sb = Sandbox(bots=("a", "b"))
+    del sb.room._members["a"]
+    assert sb.gw.status()["hosted_not_members"] == ["a"]
+    with caplog.at_level("WARNING", logger="coop.room.core"):
+        await sb.human("@all anyone?")
+    assert sb.trace.count("turn_start", bot="a") == 1
+    assert any("a is hosted but not a member" in r.message for r in caplog.records)
