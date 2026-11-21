@@ -36,11 +36,11 @@ DEFAULT_WAIT = 30.0
 TIMEOUT_SLACK = 10.0
 
 
-def pinned_context(address: str, expected: str) -> ssl.SSLContext:
+def pinned_context(address: str, expected: str, timeout: float = DEFAULT_WAIT) -> ssl.SSLContext:
     """A context that trusts only the certificate ``address`` presents, after checking
     its fingerprint against ``expected``. Raises :class:`CertificateMismatch`."""
     parts = urlsplit(address)
-    pem = ssl.get_server_certificate((parts.hostname or "", parts.port or 443))
+    pem = ssl.get_server_certificate((parts.hostname or "", parts.port or 443), timeout=timeout)
     presented = fingerprint(pem)
     if not same_fingerprint(presented, expected):
         raise CertificateMismatch(expected, presented)
@@ -68,7 +68,7 @@ class HttpDoorbell:
         if self._client is None:
             verify: ssl.SSLContext | bool = True
             if self._pin is not None:
-                verify = await asyncio.to_thread(pinned_context, self.address, self._pin)
+                verify = await asyncio.to_thread(pinned_context, self.address, self._pin, self.timeout)
             self._client = httpx.AsyncClient(base_url=self.address, headers=self._headers, verify=verify,
                                              timeout=self.timeout)
         return self._client
@@ -112,7 +112,8 @@ class HttpDoorbell:
         if r.status_code == 422:
             raise RefusedSend(r.json().get("reasons", r.json().get("error", "")))
         if r.status_code == 502:
-            raise RefusedPost(reply.thread)
+            # the gateway filled in a wake's thread the reply left out (design §3.3)
+            raise RefusedPost(r.json().get("thread") or reply.thread)
         doc = self._answer(r)["post"]
         return None if doc is None else decode_post(doc)
 

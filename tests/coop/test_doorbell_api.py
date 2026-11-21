@@ -225,6 +225,31 @@ async def test_a_mistyped_done_body_is_400(api):
     assert r.status_code == 400 and "list of strings" in r.json()["error"]
 
 
+async def test_a_late_send_on_another_rooms_wake_is_refused_not_500(api, sb):
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+    await api.post("/v1/agents/me/done", headers=as_("a"), json={"wake_id": wake["wake_id"], "failed": "gave up"})
+    # the wake id is guessable; a token the room does not list cannot ride it in
+    r = await api.post("/v1/agents/me/posts", headers=as_("z"),
+                       json={"thread": "t1", "to": ["H"], "text": "x", "wake_id": wake["wake_id"]})
+    assert r.status_code == 409 and sb.posts_by("z") == []
+
+
+@pytest.mark.parametrize("control", [{"mute": [[]]}, {"mute": "b"}, {"mute": [1]}])
+async def test_a_mistyped_control_value_is_400(api, control):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": "main", "wake_id": None, "room": "team", "control": control})
+    assert r.status_code == 400 and "control mute" in r.json()["error"]
+
+
+async def test_a_platform_refusal_names_the_thread_the_gateway_filled_in(api, sb):
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+    sb.room.refusing.add("t1")
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"to": ["H"], "text": "x", "wake_id": wake["wake_id"]})
+    assert r.status_code == 502 and r.json()["thread"] == "t1"
+
+
 async def test_a_late_send_on_a_wake_the_gateway_never_minted_is_409(api):
     r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"thread": "main", "text": "x", "wake_id": "w-nope"})
     assert r.status_code == 409 and "names its room" in r.json()["error"]

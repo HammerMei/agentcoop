@@ -49,6 +49,22 @@ def test_the_fingerprint_matches_openssls_and_compares_loosely(cert):
     assert not same_fingerprint(found, "00" + found[2:])
 
 
+async def test_the_certificate_preflight_is_bounded_by_the_timeout(monkeypatch):
+    import ssl
+
+    seen = {}
+
+    def fake_get(addr, timeout=None):
+        seen["timeout"] = timeout
+        raise OSError("stalled")
+
+    monkeypatch.setattr(ssl, "get_server_certificate", fake_get)
+    async with HttpDoorbell("https://10.0.0.5:7474", "t", fingerprint="00", timeout=7) as client:
+        with pytest.raises(OSError):
+            await client.bio("x")
+    assert seen["timeout"] == 7
+
+
 async def test_a_pinned_client_talks_to_the_gateway_over_tls(tls_doorbell):
     assert tls_doorbell.url.startswith("https://")
     async with HttpDoorbell(tls_doorbell.url, "tok-a", fingerprint=fingerprint_of_file(tls_doorbell.cert)) as client:

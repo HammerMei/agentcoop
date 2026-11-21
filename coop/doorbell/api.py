@@ -167,7 +167,7 @@ async def send(request: web.Request) -> web.Response:
     body = await _json(request)
     if body is None:
         return _error(400, "send: a JSON reply")
-    problem = _typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str)
+    problem = _typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str) or _control_typed(body)
     if problem is not None:
         return _error(400, f"send: {problem}")
     refused = _default_thread(gateway, agent, body)
@@ -207,7 +207,7 @@ def _send_refusal(exc: Exception) -> web.Response:
         return _error(400, str(exc))
     if isinstance(exc, RefusedSend):
         return _error(422, "refused", reasons=exc.reasons)
-    return _error(502, str(exc))
+    return _error(502, str(exc), thread=getattr(exc, "thread", None))
 
 
 async def done(request: web.Request) -> web.Response:
@@ -271,6 +271,14 @@ def _typed(body: dict, **types: type) -> str | None:
             continue
         if not isinstance(value, kind) or (kind is list and not all(isinstance(v, str) for v in value)):
             return f"{name} must be {'a list of strings' if kind is list else 'a ' + kind.__name__}"
+    return None
+
+
+def _control_typed(body: dict) -> str | None:
+    """A control's value is ``all`` or a list of names (section 5.3)."""
+    for key, value in (body.get("control") or {}).items():
+        if value != "all" and not (isinstance(value, list) and all(isinstance(n, str) for n in value)):
+            return f"control {key} must be \"all\" or a list of strings"
     return None
 
 

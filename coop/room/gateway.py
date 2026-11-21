@@ -150,7 +150,7 @@ class Gateway:
                 # names its room, so the late reply lands there unsolicited (design §3.4)
                 if room is not None:
                     return self._room(room)
-                core = next((c for c in self.rooms.values() if c.minted(reply.wake_id)), None)
+                core = next((c for c in self.rooms.values() if agent in c.hosted and c.minted(reply.wake_id)), None)
                 if core is None:
                     raise
                 return core

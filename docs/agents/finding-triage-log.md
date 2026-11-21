@@ -1753,3 +1753,26 @@ Notes:
 - Cost: ~7 min rater 2 (agent), ~8 min rater 1.
 
 **Status: closed** — fix pushed; the confirming Codex pass on `d8b1ee8` found nothing (👍). One round, one finding, no chain.
+
+## 2026-11-21 — PR #210 round 1 (Codex on `2d82801`, `coop/room/gateway.py`, `coop/doorbell/api.py`, `coop/agent/client.py`)
+
+Increment: S2, "a remote agent reaches the room core over HTTP with a bearer token … and `coop read / send / done / bio / attachment` are thin clients of that API". `chain-check.py`: one round, no chain.
+
+**Control finding:** none settled with an observed outcome; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| F1 | attachment handles bound to the room, not to the agent a read printed them to | FIX (cheap: record recipients per handle) | FILE under plan S3 #5 | **FILE** — rater 1 conceded on `core.py:892` (`read_room` already hands a hosted agent every post after its cursor, handles included): a per-agent record changes nothing an agent can reach today; it is S3's delivered-vs-fetched counters that need it. hits/yr 0.03–0.3 (rater 2), hours/hit ≈ 0. Reversal: counters show fetched > delivered; revisit 2027-11-21 |
+| F2 | stale wake id + thread reaches a room whose roster does not list the agent → `persisted[agent]` KeyError → 500 | FIX | FIX | **FIX** `room_for` scans `minted` only over rooms hosting the agent (1 line, C901 8); test `test_a_late_send_on_another_rooms_wake_is_refused_not_500` |
+| F3 | attachment fetch buffers the whole file, no size limit | FILE (S3: the limit is at the connector fetch, §3.3) | FILE, add to S3 | **FILE** — plan S3 #5 now names the size limit and streaming; unreachable until a connector implements `fetch_attachment` (only `sim.py` does). Reversal: a connector fetch lands uncapped; revisit 2027-11-21 |
+| F4 | `control: {"mute": [[]]}` → TypeError in `_check_name_list` → 500 | FIX (API body typing) | FIX, 2 lines | **FIX** `_control_typed` beside `_typed` (C901 of `send` 7); three mistyped cases tested |
+| F5 | certificate preflight has no timeout | FIX | FIX, 1 line | **FIX** `ssl.get_server_certificate(..., timeout=self.timeout)`; test pins the timeout reaches it |
+| F6 | measure-mode violations not returned to the client | FILE (owner-deferred to S3) | FILE (deferred) | **FILE** — PR body "Not in this PR" #2, plan S3 #2; the counters are loud operator-side |
+| F7 | `httpx.WriteError` not mapped to `LostResponse` | FIX (cheap, 1 token) | DROP: cannot-occur | **DROP** — rater 1 conceded on `httpcore/_async/http11.py:89`: a `WriteError` while sending is suppressed and the connection is read; what surfaces is `ReadError`, already mapped (HTTP/1.1 only, `client.py:72`). Reversal: an `[ERROR]` line from `coop send` naming `WriteError`; revisit 2027-11-21 |
+| F8 | platform refusal on a wake send without `--thread` reports thread `None` | FIX | FIX, 2 lines | **FIX** the 502 carries `thread`; the client prefers it; CLI test asserts the line |
+
+**Convergence:** two disagreements (F1, F7), both conceded by rater 1 on a cited line, neither on a number. Both were on the `cheap` gate, as every disagreement so far: a cheap fix for a false (F7) or empty (F1) consequence is still not a fix. **Pattern:** F2 and F4 are one kind — a malformed or hostile authenticated request answered 500 instead of a refusal; two in one round is noted, not yet a sweep (the raw API tests now cover body typing, control typing, roster on every room path).
+
+**Cost:** ~25 min of attention, one round, two raters.
+
+**Status: open** — fixes pushed; the confirming Codex pass is pending.

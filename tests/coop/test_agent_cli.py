@@ -104,6 +104,14 @@ async def test_a_late_send_on_an_expired_wake_needs_the_thread(sb, coop, capsys)
     assert [p.text for p in sb.posts_by("a")] == ["@H late"]
 
 
+async def test_a_platform_refusal_names_the_thread(sb, coop, capsys):
+    await sb.human("@a hello", "t1")
+    w = await wake_id(sb)
+    sb.room.refusing.add("t1")
+    assert await coop("send", "--wake", w, "--to", "H", "x") == 1
+    assert capsys.readouterr().err.splitlines()[-1] == "[ERROR] platform refused a post in thread 't1'"
+
+
 async def test_done_on_a_stale_wake_warns(coop, capsys):
     assert await coop("done", "--wake", "w-nope") == 0
     assert capsys.readouterr().err.splitlines()[-1].startswith("[WARNING] wake w-nope holds no live lease")
