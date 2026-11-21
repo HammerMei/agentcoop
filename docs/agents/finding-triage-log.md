@@ -1734,3 +1734,22 @@ Notes:
 - Cost: ~3 min rater 2 (agent), ~10 min rater 1.
 
 **Status: closed** — fix pushed; the status half is on S3's list.
+
+## 2026-11-21 — PR #209 round 1 (Codex on `92af6b7`, `coop/room/core.py`)
+
+**Chain detector:** 1 finding over 1 round, no chain.
+**Arrival check:** review on `92af6b7`, 1 inline thread (P2). Security review did not run (credits).
+**Control finding:** none settled with an observed outcome (#208 r2 G3 settled by decision, not observation); agreement uncorroborated.
+**Rater 2:** blind (general-purpose agent), the finding, method, constants, design, code; no verdict given.
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **J1** `read_complete` is initialised from `delivered`, so an unfinished wake whose only new posts are the bot's own forgives a `done` without `read` and commits the cursor past them (P2) | true, reproduced (mute-expiry unfinished wake after an own unsolicited post: `turn_end normal`, cursor past it, `read --room` empty); `cheap` → FIX as proposed: `not payload`, the design's "nothing to deliver" is what `read` returns | true, reproduced with a narrower trigger: no unsolicited send needed, the bot's own reply of the previous turn lands after that wake's hwm, so every unfinished wake after a turn with a reply is this case; traced every wake source: only `unfinished` can issue empty `delivered` with non-empty `payload`. `cheap` → FIX as proposed, same layer (the lease owns "read complete"). Found the suite cannot tell the versions apart (186 pass both ways): the fix needs a pinning test | **FIX** (`not payload`, the field comment, one test: own reply in range + skipped read → `backend_failure "no read"`, cursor unmoved, the next wake reads it; the test fails on the old code) |
+
+Notes:
+- Verdicts agreed; rater 2's reproduction is the stronger one (the ordinary case, not the unsolicited one) and became the test.
+- Scope: the increment's own — main had both `read` and the shortcut on `delivered`; the PR moved one and not the other.
+- Severity vs Codex: P2 holds — silent (`turn_end normal`, no trace, no notice) and reached by an ordinary client that skips `read` on an unfinished wake, which §3.3 already treats as a defect; the loss is the exact promise of the 5.6 row.
+- Cost: ~7 min rater 2 (agent), ~8 min rater 1.
+
+**Status: closed** — fix pushed; one confirming Codex pass requested on the fix commit.

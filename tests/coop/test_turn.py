@@ -290,6 +290,27 @@ async def test_a_muted_thread_outside_the_hint_is_counted_under_mute_not_only_hi
     assert off.gw.status()["rules"]["mute"]["violated"] == 1 and off.gw.status()["rules"]["hinted_thread"]["violated"] == 1
 
 
+async def test_a_wake_whose_only_new_posts_are_the_bots_own_still_requires_a_read():
+    """Nothing from others since the cursor, but the bot's own reply of the last turn is in
+    the range: a client that does not read before ``done`` has skipped it (the 5.6 row)."""
+    sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24, catch_up_idle_seconds=0),
+                 script=Script().on(reply(["H"], "x"), bot="a"))
+    sb.bot.skip_read = lambda wake: wake.wake_id == "w-team-2"  # the first unfinished wake
+    await sb.human("mute: @a")
+    await sb.human("news in main")
+    await sb.human("@a hello", "t2")
+    await sb.run(2)  # p4: a's reply in t2; main is unfinished behind the mute
+    assert sb.gw.status()["bots"]["a"]["cursor"] == 3 and [p.id for p in sb.posts_by("a")] == ["p4"]
+    await sb.run(3700)  # the mute expires: the unfinished wake has nothing of others, and p4
+    skipped = sb.trace.last("turn_start", bot="a", source="unfinished", wake="w-team-2")
+    assert skipped.delivered == []
+    end = [e for e in sb.trace.of("turn_end") if e.bot == "a"][1]
+    assert end.outcome == "backend_failure" and end.error == "no read"
+    assert not sb.trace.of("cursor_saved", bot="a", position=4)  # p4 was not committed past unread
+    later = sb.trace.last("read", bot="a")
+    assert later is not None and later.wake != "w-team-2" and later.own[0] == "p4"  # the next wake reads it
+
+
 async def test_an_unfinished_thread_in_an_empty_room_wakes_without_crashing_the_periodic_sweep():
     sb = Sandbox()
     sb.gw.persisted["a"].unfinished.add("t9")  # restored state; the platform's history is empty

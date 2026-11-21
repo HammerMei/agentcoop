@@ -117,8 +117,8 @@ class TurnRun:
     leased: bool = False
     expires_at: float | None = None
     expiry: Handle | None = None
-    # The agent fetched [cursor, hwm] through ``read``; a wake with nothing to deliver
-    # records an empty complete read (design §3.3).
+    # The agent fetched [cursor, hwm] through ``read``; a wake with nothing to read, its
+    # own posts counted, records an empty complete read (design §3.3).
     read_complete: bool = False
     # Threads a ``send --wake`` landed in: what covers a must-reply thread at ``done``.
     ledger: set[str] = field(default_factory=set)
@@ -833,7 +833,7 @@ class RoomCore:
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
                     trigger=self._trigger(trigger), rules_version=self.rules_version)
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
-        run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not delivered)
+        run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not payload)
         self.volatile[bot].turn = run
         if bot not in self.platform.members():  # configured here, not in the room: loud, until the roster owns it
             logger.warning("%s: %s is hosted but not a member of the room; wake %s issued", self.room, bot, wake.wake_id)
