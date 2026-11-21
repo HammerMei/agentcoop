@@ -9,6 +9,7 @@ and the agent checks the room before posting again.
 
 from __future__ import annotations
 
+import re
 import ssl
 
 import httpx
@@ -20,6 +21,7 @@ from ..wire import decode_post, decode_wake, encode_reply
 
 # The long-poll wait a client asks for when none is given, plus the slack the HTTP
 # timeout allows over it.
+_FILENAME = re.compile(r'filename="([^"]*)"')
 DEFAULT_WAIT = 30.0
 TIMEOUT_SLACK = 10.0
 
@@ -80,6 +82,14 @@ class HttpDoorbell:
     async def bio(self, text: str) -> int:
         r = await self._client.post("/v1/agents/me/bio", json={"text": text})
         return int(self._answer(r)["version"])
+
+    async def attachment(self, handle: str) -> tuple[str, bytes]:
+        """The file's name and bytes, by the handle a read printed."""
+        r = await self._client.get(f"/v1/agents/me/attachments/{handle}")
+        if r.status_code != 200:
+            self._answer(r)
+        found = _FILENAME.search(r.headers.get("Content-Disposition", ""))
+        return (found.group(1) if found else handle), r.content
 
     async def rules(self) -> tuple[int, str]:
         r = await self._client.get("/v1/rules")

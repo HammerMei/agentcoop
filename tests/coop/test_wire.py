@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from coop.room.model import Hint, Post, Reply, ThreadGroup, Trigger, Wake
+from coop.room.model import Attachment, Hint, Post, Reply, ThreadGroup, Trigger, Wake
 from coop.wire import decode_post, decode_reply, decode_wake, encode_post, encode_reply, encode_wake
 
 HINT = Hint(
@@ -27,7 +27,8 @@ TRIGGER = Trigger(post_id="p7", author="H", author_id="u_H", author_role="owner"
 WAKE = Wake(wake_id="w-team-3", room="team", bot="a", source="addressed", starting_thread="t1",
             hwm=7, hint=HINT, trigger=TRIGGER, rules_version=2, lease_expires_at=99.0)
 POST = Post(id="p7", position=7, time=12.5, thread="t1", author="H", text="@a hello", kind="human",
-            mentions=frozenset({"a"}), words=2, author_id="u_H")
+            mentions=frozenset({"a"}), words=2, author_id="u_H", author_role="owner",
+            attachments=(Attachment("a1", "report.pdf", "application/pdf", 3_250_000),))
 
 
 def through_json(doc: dict) -> dict:
@@ -47,9 +48,9 @@ def test_a_wake_survives_json(wake):
 def test_a_post_survives_json_except_the_gateways_own_fields():
     # ``controls`` is the gateway's parse of the text, never sent; the agent sees the
     # control line in ``text`` like everyone in the room.
-    doc = through_json(encode_post(POST, author_role="owner"))
-    assert doc["author_role"] == "owner" and doc["mentions"] == ["a"]
-    assert decode_post(doc) == replace(POST, author_role="owner")
+    doc = through_json(encode_post(POST))
+    assert doc["author_role"] == "owner" and doc["mentions"] == ["a"] and doc["attachments"][0]["id"] == "a1"
+    assert decode_post(doc) == POST
 
 
 def test_a_tuple_position_comes_back_as_a_list():

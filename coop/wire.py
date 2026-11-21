@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .room.model import Hint, Post, Reply, ThreadGroup, Trigger, Wake
+from .room.model import Attachment, Hint, Post, Reply, ThreadGroup, Trigger, Wake
 
 Json = dict[str, Any]
 
@@ -120,11 +120,11 @@ def decode_trigger(doc: Json) -> Trigger:
 # ── posts ───────────────────────────────────────────────────────────────────
 
 
-def encode_post(post: Post, author_role: str = "") -> Json:
-    """A post as ``read`` delivers it: the fields an agent reads, plus the author's
-    role label (design §2: ``agent`` / ``owner`` / ``guest``), which the gateway
-    computes from the room's roster. ``controls`` stays on the gateway's side: the
-    agent sees the control line in ``text`` like everyone in the room."""
+def encode_post(post: Post) -> Json:
+    """A post as ``read`` delivers it: the fields an agent reads, the author's role
+    label and the attachments by handle (both filled by ``Gateway.deliverable``).
+    ``controls`` stays on the gateway's side: the agent sees the control line in
+    ``text`` like everyone in the room."""
     return {
         "id": post.id,
         "position": post.position,
@@ -132,11 +132,12 @@ def encode_post(post: Post, author_role: str = "") -> Json:
         "thread": post.thread,
         "author": post.author,
         "author_id": post.author_id,
-        "author_role": author_role,
+        "author_role": post.author_role,
         "text": post.text,
         "kind": post.kind,
         "mentions": sorted(post.mentions),
         "words": post.words,
+        "attachments": [encode_attachment(a) for a in post.attachments],
     }
 
 
@@ -153,7 +154,18 @@ def decode_post(doc: Json) -> Post:
         words=doc.get("words", 0),
         author_id=doc.get("author_id", ""),
         author_role=doc.get("author_role", ""),
+        attachments=tuple(decode_attachment(a) for a in doc.get("attachments", ())),
     )
+
+
+def encode_attachment(attachment: Attachment) -> Json:
+    return {"id": attachment.id, "name": attachment.name, "content_type": attachment.content_type,
+            "size": attachment.size}
+
+
+def decode_attachment(doc: Json) -> Attachment:
+    return Attachment(id=doc["id"], name=doc["name"], content_type=doc.get("content_type", ""),
+                      size=doc.get("size", 0))
 
 
 # ── replies ─────────────────────────────────────────────────────────────────

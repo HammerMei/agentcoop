@@ -168,6 +168,23 @@ async def test_a_late_send_on_a_wake_the_gateway_never_minted_is_409(api):
     assert r.status_code == 409 and "names its room" in r.json()["error"]
 
 
+# ── attachments ─────────────────────────────────────────────────────────────
+
+
+async def test_an_attachment_is_fetched_by_the_handle_read_printed(api, sb):
+    await sb.human("@a see the report", "t1", attachments=(("report.pdf", "application/pdf", b"%PDF-1.7 ..."),))
+    wake = await wake_for(api, "a")
+    r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
+    [found] = r.json()["posts"][0]["attachments"]
+    assert found == {"id": "a1", "name": "report.pdf", "content_type": "application/pdf", "size": 12}
+    assert sb.room.posts[0].attachments[0].id == "f1"  # the platform id never travels
+    f = await api.get("/v1/agents/me/attachments/a1", headers=as_("a"))
+    assert (f.status_code, f.content, f.headers["Content-Type"]) == (200, b"%PDF-1.7 ...", "application/pdf")
+    assert f.headers["Content-Disposition"] == 'attachment; filename="report.pdf"'
+    assert (await api.get("/v1/agents/me/attachments/f1", headers=as_("a"))).status_code == 404
+    assert (await api.get("/v1/agents/me/attachments/a1", headers=as_("z"))).status_code == 403
+
+
 # ── done, bio, rules ────────────────────────────────────────────────────────
 
 

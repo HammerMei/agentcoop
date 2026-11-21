@@ -5,6 +5,7 @@ coop read  (--wake W | --room R)
 coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
+coop attachment ID [--out PATH]
 ```
 
 Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
@@ -22,7 +23,7 @@ import sys
 from pathlib import Path
 
 from ..errors import DoorbellError, InvalidReply, LostResponse, NoLiveLease, RefusedSend
-from ..room.model import ALL, MAIN_THREAD, Post, Reply, Wake
+from ..room.model import ALL, MAIN_THREAD, Attachment, Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..room.prompt import one_line, render_hint
 from .client import HttpDoorbell
@@ -60,6 +61,10 @@ def parser() -> argparse.ArgumentParser:
 
     bio = sub.add_parser("bio", help="push the bot's bio")
     bio.add_argument("--file", required=True, type=Path)
+
+    attachment = sub.add_parser("attachment", help="download one attachment by the handle read printed")
+    attachment.add_argument("id")
+    attachment.add_argument("--out", type=Path, help="where to write it (default: its name, here)")
     return top
 
 
@@ -92,6 +97,8 @@ async def cmd_read(doorbell: HttpDoorbell, args) -> int:
         posts = await doorbell.read_room(args.room)
     for post in posts:
         print(post_line(post))
+        for found in post.attachments:
+            print(attachment_line(found))
     return 0
 
 
@@ -129,7 +136,15 @@ async def cmd_bio(doorbell: HttpDoorbell, args) -> int:
     return 0
 
 
-COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio}
+async def cmd_attachment(doorbell: HttpDoorbell, args) -> int:
+    name, data = await doorbell.attachment(args.id)
+    out = args.out if args.out is not None else Path(Path(name).name or args.id)
+    out.write_bytes(data)
+    print(out)
+    return 0
+
+
+COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio, "attachment": cmd_attachment}
 
 
 # ── rendering ───────────────────────────────────────────────────────────────
@@ -143,6 +158,19 @@ def reminder(wake: Wake) -> str:
 def post_line(post: Post) -> str:
     role = f" ({post.author_role})" if post.author_role else ""
     return f"[{post.thread}] #{post.id} {post.author}{role}: {one_line(post.text)}"
+
+
+def attachment_line(found: Attachment) -> str:
+    return (f"  attachment {found.id}: {found.name} {found.content_type} {human_size(found.size)}"
+            f" -> coop attachment {found.id}")
+
+
+def human_size(size: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
 
 
 def names(csv: str) -> list[str]:

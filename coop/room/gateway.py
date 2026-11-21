@@ -12,12 +12,12 @@ long-poll registers one too.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..errors import NoLiveLease
 from .clock import Clock
 from .core import RoomCore
-from .model import Post, Reply, Wake
+from .model import Attachment, Post, Reply, Wake
 from .trace import Trace
 
 Listener = Callable[[Wake], Awaitable[None]]
@@ -42,6 +42,10 @@ class Gateway:
         self.agents: dict[str, AgentState] = {}
         # Bios by agent, shared with every room's core (the classifier reads them).
         self.bios: dict[str, str] = {}
+        # Attachment handles (design §3.3): one per (room, platform file id), minted when a
+        # read first delivers the post; a fetch names the handle, never the platform id.
+        self._handles: dict[str, tuple[str, Attachment]] = {}
+        self._handle_of: dict[tuple[str, str], str] = {}
 
     def add_room(self, core: RoomCore) -> RoomCore:
         core.on_wake = self._wake_issued
@@ -94,6 +98,31 @@ class Gateway:
             if run is not None and run.leased and run.wake.wake_id == wake_id:
                 return core
         raise NoLiveLease(f"{agent} holds no live lease on wake {wake_id!r}")
+
+    # ── attachments ─────────────────────────────────────────────────────────
+
+    def deliverable(self, room: str, post: Post) -> Post:
+        """The post as the doorbell delivers it: its author labelled, its attachments
+        named by handle."""
+        core = self._room(room)
+        attachments = tuple(replace(a, id=self._handle(room, a)) for a in post.attachments)
+        return replace(post, author_role=core.role_label(post.author), attachments=attachments)
+
+    def _handle(self, room: str, attachment: Attachment) -> str:
+        key = (room, attachment.id)
+        handle = self._handle_of.get(key)
+        if handle is None:
+            handle = self._handle_of[key] = f"a{len(self._handle_of) + 1}"
+            self._handles[handle] = (room, attachment)
+        return handle
+
+    async def fetch_attachment(self, agent: str, handle: str) -> tuple[Attachment, bytes]:
+        """``KeyError`` for a handle no read minted, ``PermissionError`` when the room's
+        roster does not list the agent."""
+        room, attachment = self._handles[handle]
+        if not self.hosts(agent, room):
+            raise PermissionError(f"{agent} is not in the roster of room {room!r}")
+        return attachment, await self._room(room).platform.fetch_attachment(attachment.id)
 
     def starting_thread(self, agent: str, wake_id: str) -> str:
         """Where a wake's send goes when the agent names no thread (design §3.3)."""

@@ -116,6 +116,21 @@ async def test_bio_pushes_the_file(sb, coop, capsys, tmp_path):
     assert capsys.readouterr().out.strip() == "bio v1" and sb.gw.bios["a"] == "I do graphs"
 
 
+async def test_read_lists_attachments_and_attachment_downloads_one(sb, coop, capsys, tmp_path, monkeypatch):
+    await sb.human("@a see the report", "t1", attachments=(("report.pdf", "application/pdf", b"x" * 3300),))
+    w = await wake_id(sb)
+    assert await coop("read", "--wake", w) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "  attachment a1: report.pdf application/pdf 3.2 KB -> coop attachment a1")
+    monkeypatch.chdir(tmp_path)
+    assert await coop("attachment", "a1") == 0
+    assert capsys.readouterr().out.strip() == "report.pdf" and (tmp_path / "report.pdf").read_bytes() == b"x" * 3300
+    assert await coop("attachment", "a1", "--out", str(tmp_path / "r.pdf")) == 0
+    assert (tmp_path / "r.pdf").stat().st_size == 3300
+    assert await coop("attachment", "f1") == 1
+    assert "handle" in capsys.readouterr().err
+
+
 async def test_a_wrong_token_is_an_error_line(sb, coop, capsys):
     assert await coop("read", "--room", "team", agent="nope") == 1
     assert "401" in capsys.readouterr().err

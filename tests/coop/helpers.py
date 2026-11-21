@@ -112,11 +112,13 @@ class Sandbox:
         gateway.start()
         return core
 
-    async def human(self, text: str, thread: str = MAIN_THREAD, author: str = "H") -> Post:
-        return await self.room.post(author, text, thread)
+    async def human(self, text: str, thread: str = MAIN_THREAD, author: str = "H",
+                    attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        return await self.room.post(author, text, thread, attachments=attachments)
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
-        return await self.room.post(author, text, thread, kind)
+    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+                   attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        return await self.room.post(author, text, thread, kind, attachments)
 
     async def archive(self, thread: str) -> None:
         await self.room.archive(thread)

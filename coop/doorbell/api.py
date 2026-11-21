@@ -11,6 +11,7 @@ POST /v1/agents/me/posts                {"post": <post> | null}; body is a reply
 POST /v1/agents/me/done                 {"done": true | false}; body {wake_id, answered, failed}
 POST /v1/agents/me/bio                  {"version": N}; body {text}
 GET  /v1/rules                          {"version": N, "text": "..."}
+GET  /v1/agents/me/attachments/{id}     the file, by the handle a read printed
 ```
 
 Errors answer ``{"error": "..."}``: 401 for a missing or unknown token, 403 for a room
@@ -81,6 +82,7 @@ def build_app(gateway: Gateway, tokens: dict[str, str], rules_text: str = "") ->
     app.router.add_post("/v1/agents/me/done", done)
     app.router.add_post("/v1/agents/me/bio", bio)
     app.router.add_get("/v1/rules", rules)
+    app.router.add_get("/v1/agents/me/attachments/{handle}", attachment)
     return app
 
 
@@ -99,8 +101,8 @@ def _error(status: int, message: str, **more) -> web.Response:
     return web.json_response({"error": message, **more}, status=status)
 
 
-def _posts(core, posts: list[Post]) -> list[dict]:
-    return [encode_post(p, core.role_label(p.author)) for p in posts]
+def _posts(gateway: Gateway, room: str, posts: list[Post]) -> list[dict]:
+    return [encode_post(gateway.deliverable(room, p)) for p in posts]
 
 
 # ── handlers ────────────────────────────────────────────────────────────────
@@ -138,13 +140,11 @@ async def read(request: web.Request) -> web.Response:
             found, posts = gateway.read(agent, wake_id)
         except NoLiveLease as exc:
             return _error(409, str(exc))
-        core = gateway.rooms[found.room]
-        return web.json_response({"wake": encode_wake(found), "posts": _posts(core, posts)})
+        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, found.room, posts)})
     refused = _room_refusal(gateway, agent, room)
     if refused is not None:
         return refused
-    core = gateway.rooms[room]
-    return web.json_response({"posts": _posts(core, gateway.read_room(agent, room))})
+    return web.json_response({"posts": _posts(gateway, room, gateway.read_room(agent, room))})
 
 
 async def send(request: web.Request) -> web.Response:
@@ -164,7 +164,7 @@ async def send(request: web.Request) -> web.Response:
         post = await core.send(agent, reply)
     except (NoLiveLease, KeyError, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
-    return web.json_response({"post": None if post is None else encode_post(post, core.role_label(post.author))})
+    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(core.room, post))})
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:
@@ -215,6 +215,20 @@ async def bio(request: web.Request) -> web.Response:
 async def rules(request: web.Request) -> web.Response:
     doorbell: _Doorbell = request.app[DOORBELL]
     return web.json_response({"version": doorbell.gateway.rules_version, "text": doorbell.rules_text})
+
+
+async def attachment(request: web.Request) -> web.Response:
+    doorbell: _Doorbell = request.app[DOORBELL]
+    handle = request.match_info["handle"]
+    try:
+        found, data = await doorbell.gateway.fetch_attachment(request[AGENT], handle)
+    except KeyError:
+        return _error(404, f"no attachment {handle!r}: fetch by the handle a read printed")
+    except PermissionError as exc:
+        return _error(403, str(exc))
+    name = found.name.replace('"', "")
+    return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
