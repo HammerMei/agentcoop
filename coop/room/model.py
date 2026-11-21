@@ -120,6 +120,18 @@ class Controls:
 
 
 @dataclass(frozen=True)
+class Attachment:
+    """One file on a post. ``id`` is the platform's file id where the platform made the
+    post, and the gateway's handle once the post is delivered over the doorbell: an
+    agent fetches by the handle a ``read`` printed, never by a platform id (design §3.3)."""
+
+    id: str
+    name: str
+    content_type: str = ""
+    size: int = 0
+
+
+@dataclass(frozen=True)
 class Post:
     """One platform message in server order. ``mentions`` are the mentions the platform
     recorded; :data:`ALL` stands for the room-wide mention. ``author`` is the username
@@ -137,6 +149,10 @@ class Post:
     controls: Controls | None = None
     words: int = 0
     author_id: str = ""
+    # The author's label of design §2 (``agent`` / ``owner`` / ``guest``), set by the
+    # gateway when it delivers the post over the doorbell; empty on the platform side.
+    author_role: str = ""
+    attachments: tuple[Attachment, ...] = ()
 
     def addresses(self, username: str) -> bool:
         return username in self.mentions or ALL in self.mentions

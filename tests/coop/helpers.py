@@ -14,9 +14,14 @@ The simulated environment (clock, room, scripted classifier) is the fake agent's
 
 from __future__ import annotations
 
+import ssl
 from collections.abc import Callable
 
+from aiohttp.test_utils import TestServer
+
 from coop.client import InProcessDoorbell
+from coop.doorbell.api import build_app
+from coop.room.clock import Clock
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
 from coop.room.model import MAIN_THREAD, Member, Params, Post, PostKind
@@ -24,7 +29,7 @@ from coop.room.trace import Trace
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
 
-__all__ = ["FAST", "Sandbox", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
+__all__ = ["FAST", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
            "ScriptedClassifier", "InjectedFailures", "SimClock", "FakePlatform", "members"]
 
 # Fast, eager defaults so a test runs in a few simulated seconds. Real values are open
@@ -75,8 +80,13 @@ class Sandbox:
         is_dm: bool = False,
         start_time: float = 0.0,
         duration: float = 1.0,
+        clock: Clock | None = None,
+        attach_agent: bool = True,
     ) -> None:
-        self.clock = SimClock(start_time)
+        # ``clock`` is the simulated one unless a test runs on the event loop (the doorbell
+        # tests); ``attach_agent=False`` leaves every wake for an HTTP client to poll.
+        self.clock = clock if clock is not None else SimClock(start_time)
+        self.attach_agent = attach_agent
         self.trace = Trace()
         self.room = FakePlatform("team", members(bots, humans, extra_members), self.clock, self.trace, is_dm=is_dm)
         self.params = params
@@ -95,7 +105,7 @@ class Sandbox:
         )
         gateway.add_room(core)
         agent = agent or self.bot
-        for bot in hosted:
+        for bot in hosted if self.attach_agent else ():
             agent.attach(bot, InProcessDoorbell(gateway, bot))
             gateway.subscribe(bot, agent.on_wake)
         self.room.cores.append(core)
@@ -103,11 +113,23 @@ class Sandbox:
         gateway.start()
         return core
 
-    async def human(self, text: str, thread: str = MAIN_THREAD, author: str = "H") -> Post:
-        return await self.room.post(author, text, thread)
+    def add_room(self, name: str, hosted: list[str], humans=(("H", "owner"),)) -> FakePlatform:
+        """A second room on the first gateway, hosting ``hosted`` there."""
+        room = FakePlatform(name, members(tuple(hosted), humans), self.clock, self.trace)
+        core = RoomCore(name, room, self.clock, self.trace, hosted, list(hosted), self.params, self.classifier,
+                        name=self.gateway.name)
+        self.gateway.add_room(core)
+        room.cores.append(core)
+        core.start()
+        return room
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
-        return await self.room.post(author, text, thread, kind)
+    async def human(self, text: str, thread: str = MAIN_THREAD, author: str = "H",
+                    attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        return await self.room.post(author, text, thread, attachments=attachments)
+
+    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+                   attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        return await self.room.post(author, text, thread, kind, attachments)
 
     async def archive(self, thread: str) -> None:
         await self.room.archive(thread)
@@ -148,3 +170,43 @@ def item(thread=None, to=None, text=None, control=None, done=False) -> dict:
     if done:
         found["done"] = True
     return found
+
+
+# ── the doorbell over HTTP ──────────────────────────────────────────────────
+
+
+class _KeepHandlers(TestServer):
+    """aiohttp's test server cancels a handler when its client disconnects; a production
+    runner does not by default (``handler_cancellation=False``). This server keeps
+    the default, so the long-poll's behaviour with a client gone is the daemon's."""
+
+    async def _make_runner(self, **kwargs):
+        kwargs["handler_cancellation"] = False
+        return await super()._make_runner(**kwargs)
+
+
+class Doorbell:
+    """One gateway behind the doorbell API on a real port, for the raw-HTTP tests and the
+    fake agent's HTTP client. ``tokens`` maps a bearer token to its agent."""
+
+    def __init__(self, gateway: Gateway, tokens: dict[str, str], rules_text: str | None = "rules",
+                 tls: ssl.SSLContext | None = None, cancel_handlers: bool = True) -> None:
+        self.tokens = tokens
+        self.tls = tls
+        server = TestServer if cancel_handlers else _KeepHandlers
+        self.server = server(build_app(gateway, tokens, rules_text), scheme="https" if tls else "http")
+
+    async def __aenter__(self) -> Doorbell:
+        await self.server.start_server(ssl=self.tls)
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.server.close()
+
+    @property
+    def url(self) -> str:
+        return str(self.server.make_url("")).rstrip("/")
+
+    def headers(self, agent: str) -> dict[str, str]:
+        token = next(t for t, a in self.tokens.items() if a == agent)
+        return {"Authorization": f"Bearer {token}"}

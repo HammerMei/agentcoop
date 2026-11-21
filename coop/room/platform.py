@@ -43,6 +43,12 @@ class Platform(Protocol):
         """The position of the newest post, or ``None`` in an empty room."""
         ...
 
+    async def fetch_attachment(self, file_id: str) -> bytes:
+        """The bytes of one attachment by its platform file id, fetched now with the
+        bot's account (design §3.3: nothing is downloaded on receipt). Raises
+        ``KeyError`` for an id the platform does not know."""
+        ...
+
     async def post(self, author: str, text: str, thread: str, kind: PostKind | None = None) -> Post:
         """Post as ``author`` (a bot the gateway holds the account for). Raises
         :class:`RefusedPost` when the platform refuses it. The post reaches the core

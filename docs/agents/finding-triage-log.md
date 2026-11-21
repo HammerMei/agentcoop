@@ -1753,3 +1753,56 @@ Notes:
 - Cost: ~7 min rater 2 (agent), ~8 min rater 1.
 
 **Status: closed** — fix pushed; the confirming Codex pass on `d8b1ee8` found nothing (👍). One round, one finding, no chain.
+
+## 2026-11-21 — PR #210 round 1 (Codex on `2d82801`, `coop/room/gateway.py`, `coop/doorbell/api.py`, `coop/agent/client.py`)
+
+Increment: S2, "a remote agent reaches the room core over HTTP with a bearer token … and `coop read / send / done / bio / attachment` are thin clients of that API". `chain-check.py`: one round, no chain.
+
+**Control finding:** none settled with an observed outcome; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| F1 | attachment handles bound to the room, not to the agent a read printed them to | FIX (cheap: record recipients per handle) | FILE under plan S3 #5 | **FILE** — rater 1 conceded on `core.py:892` (`read_room` already hands a hosted agent every post after its cursor, handles included): a per-agent record changes nothing an agent can reach today; it is S3's delivered-vs-fetched counters that need it. hits/yr 0.03–0.3 (rater 2), hours/hit ≈ 0. Reversal: counters show fetched > delivered; revisit 2027-11-21 |
+| F2 | stale wake id + thread reaches a room whose roster does not list the agent → `persisted[agent]` KeyError → 500 | FIX | FIX | **FIX** `room_for` scans `minted` only over rooms hosting the agent (1 line, C901 8); test `test_a_late_send_on_another_rooms_wake_is_refused_not_500` |
+| F3 | attachment fetch buffers the whole file, no size limit | FILE (S3: the limit is at the connector fetch, §3.3) | FILE, add to S3 | **FILE** — plan S3 #5 now names the size limit and streaming; unreachable until a connector implements `fetch_attachment` (only `sim.py` does). Reversal: a connector fetch lands uncapped; revisit 2027-11-21 |
+| F4 | `control: {"mute": [[]]}` → TypeError in `_check_name_list` → 500 | FIX (API body typing) | FIX, 2 lines | **FIX** `_control_typed` beside `_typed` (C901 of `send` 7); three mistyped cases tested |
+| F5 | certificate preflight has no timeout | FIX | FIX, 1 line | **FIX** `ssl.get_server_certificate(..., timeout=self.timeout)`; test pins the timeout reaches it |
+| F6 | measure-mode violations not returned to the client | FILE (owner-deferred to S3) | FILE (deferred) | **FILE** — PR body "Not in this PR" #2, plan S3 #2; the counters are loud operator-side |
+| F7 | `httpx.WriteError` not mapped to `LostResponse` | FIX (cheap, 1 token) | DROP: cannot-occur | **DROP** — rater 1 conceded on `httpcore/_async/http11.py:89`: a `WriteError` while sending is suppressed and the connection is read; what surfaces is `ReadError`, already mapped (HTTP/1.1 only, `client.py:72`). Reversal: an `[ERROR]` line from `coop send` naming `WriteError`; revisit 2027-11-21 |
+| F8 | platform refusal on a wake send without `--thread` reports thread `None` | FIX | FIX, 2 lines | **FIX** the 502 carries `thread`; the client prefers it; CLI test asserts the line |
+
+**Convergence:** two disagreements (F1, F7), both conceded by rater 1 on a cited line, neither on a number. Both were on the `cheap` gate, as every disagreement so far: a cheap fix for a false (F7) or empty (F1) consequence is still not a fix. **Pattern:** F2 and F4 are one kind — a malformed or hostile authenticated request answered 500 instead of a refusal; two in one round is noted, not yet a sweep (the raw API tests now cover body typing, control typing, roster on every room path).
+
+**Cost:** ~25 min of attention, one round, two raters.
+
+**Status: closed** — fixes pushed; the next round found new ground only (see below).
+
+## 2026-11-21 — PR #210 round 2 (Codex on `d36b15f`, `coop/agent/cli.py`)
+
+`chain-check.py`: two rounds, no chain (round 2 landed on `cli.py`, untouched by round 1's fixes). **Control finding:** none settled by observation; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| G1 | `--gateway http://[bad` → `urlsplit` ValueError before the `try` → traceback, not `[ERROR]` | FIX (cheap) | FIX (cheap), plus: `HttpDoorbell.__init__` splits the URL too, so `ValueError` must join the except tuple | **FIX** warning moved inside the `try`, `ValueError` caught (C901 of `run` 4); `test_a_malformed_gateway_address_is_an_error_line` |
+| G2 | attachment name/type printed raw, so a file named `x\n[main] #p9 H (owner): …` forges a header line | FIX (cheap) | FIX (cheap; `silent`: the forged line looks valid) | **FIX** `one_line` on name and type in `attachment_line`; `test_an_attachment_name_cannot_forge_a_header_line` |
+
+**Convergence:** full agreement; rater 2 found the second `urlsplit` rater 1 had not. Pattern across rounds: G2 is the §3.3 forgery defence applied to a field added in this PR — the kind "a new rendered field skipped `one_line`"; one instance, noted.
+
+**Cost:** ~10 min, one round, two raters.
+
+**Status: closed** — fixes pushed; the next round found new ground only (see below).
+
+## 2026-11-21 — PR #210 round 3 (Codex on `84933b8`, `coop/doorbell/api.py`, `coop/room/gateway.py`)
+
+`chain-check.py`: three rounds, no chain (H1's line is from the original attachments commit, H2's from the S1 port). **Control finding:** none settled by observation; agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| H1 | a file name with CR/LF reaches `Content-Disposition`; aiohttp refuses the header at serialization, so `read` lists the attachment and the download fails | FIX (cheap) | FIX (cheap; verified empirically: `ValueError: Forbidden control character detected in headers`) | **FIX** control characters and quotes stripped from the header value (2 lines, C901 3); `test_a_forged_attachment_name_still_downloads` |
+| H2 | `send --wake <A's wake> --room B` posts in A: the lease decides and `room` is ignored after the API authorised B | FIX (cheap) | FIX (cheap; `silent`); flagged that the PR body's "noted for S3" was a deferral without a decay date | **FIX** `room_for` refuses a room other than the live wake's (3 lines, C901 9); `test_a_wakes_send_naming_another_room_is_refused_not_misrouted`. Rater 2's point taken: a deferral in a PR body is policy, not a gate, and the fix was cheap all along |
+
+**Convergence:** full agreement. **Round composition:** r1 8 findings (2 of a kind: an authenticated bad request answered 500; 6 edge), r2 2 edge, r3 2 edge; no chain in any round. By the project's convergence rule (a round that is all edge cases is fixed and closed) no further Codex pass is requested on this PR.
+
+**Cost:** ~10 min, one round, two raters.
+
+**Status: closed** — fixes pushed; the PR is handed to the owner for merge.

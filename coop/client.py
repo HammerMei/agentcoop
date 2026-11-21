@@ -5,8 +5,8 @@ bio`` commands, the utility for CLI agents — talks to the gateway only through
 errors a call can raise are in :mod:`coop.errors`.
 
 :class:`InProcessDoorbell` calls a :class:`~coop.room.gateway.Gateway` directly (the
-mechanism tests and the scenario runner). The HTTP client arrives with the doorbell
-API.
+mechanism tests and the scenario runner). The HTTP client is
+:class:`coop.agent.client.HttpDoorbell`.
 """
 
 from __future__ import annotations
@@ -18,7 +18,10 @@ from .room.model import Post, Reply, Wake
 
 
 class Doorbell(Protocol):
-    async def poll(self) -> Wake | None: ...
+    async def poll(self, wait: float = 0) -> Wake | None:
+        """The next pending wake, waiting up to ``wait`` seconds for one over HTTP; in
+        process the wake is announced, so the wait is unused."""
+        ...
 
     async def read(self, wake_id: str) -> tuple[Wake, list[Post]]:
         """The wake's hint and the posts after the cursor through its mark (``coop
@@ -47,7 +50,7 @@ class InProcessDoorbell:
         self.gateway = gateway
         self.agent = agent
 
-    async def poll(self) -> Wake | None:
+    async def poll(self, wait: float = 0) -> Wake | None:
         return self.gateway.poll(self.agent)
 
     async def read(self, wake_id: str) -> tuple[Wake, list[Post]]:

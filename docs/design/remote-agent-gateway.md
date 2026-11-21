@@ -499,8 +499,11 @@ New top-level package, old `gateway/` frozen until cutover.
 coop/                 the new daemon: connectors moved in, roomsim core ported, doorbell API, CLI
   connectors/         copied from gateway/connectors (mattermost, rocketchat) until §7 step 6, so the frozen daemon keeps importing its own; script and voice are not copied
   room/               gateway.py, model.py, classifier.py, controls.py, envelope.py, prompt.py from tools/roomsim
-  doorbell/           the HTTP API and leases
-  cli/                read, send, done, bio, and the utility (coop agent run)
+  doorbell/           the HTTP API (api.py) and its TLS (tls.py)
+  agent/              the agent's side, importing no gateway code: the HTTP client (client.py) and the
+                      commands read, send, done, bio, attachment (cli.py); later the utility (coop agent run)
+  wire.py             the JSON form of wakes, posts and replies, the one module both sides import
+  rules.md            the room-rules document /v1/rules serves
 tests/coop/           tests/roomsim moved and extended with the fake agent over the API
 gateway/              frozen; deleted when the last room has migrated
 ```

@@ -16,7 +16,7 @@ from typing import Any
 from coop.room.classifier import Classifier, ClassifierRequest, ClassifierResult
 from coop.room.controls import is_control_line, parse_controls
 from coop.room.core import RoomCore
-from coop.room.model import ALL, MAIN_THREAD, Decision, Member, Post, PostKind
+from coop.room.model import ALL, MAIN_THREAD, Attachment, Decision, Member, Post, PostKind
 from coop.room.platform import RefusedPost
 from coop.room.trace import Trace
 from coop.room.words import count_words
@@ -91,6 +91,8 @@ class FakePlatform:
         self.refusing: set[str] = set()
         self.cores: list[RoomCore] = []
         self._seq = 0
+        # Attachment bytes by platform file id (``f<n>``).
+        self.files: dict[str, bytes] = {}
 
     # membership
     def members(self) -> dict[str, Member]:
@@ -122,13 +124,20 @@ class FakePlatform:
                 found.add(name)
         return frozenset(found)
 
-    def append(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
+    def append(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+               attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
         """Append a post in server order without delivering it. Raises ``RefusedPost``
-        when the platform refuses it (an archived thread, or a thread marked refusing)."""
+        when the platform refuses it (an archived thread, or a thread marked refusing).
+        ``attachments`` are ``(name, content type, bytes)`` files stored by file id."""
         if thread in self.archived or thread in self.refusing:
             self.refusing.discard(thread)
             raise RefusedPost(thread)
         self._seq += 1
+        files = []
+        for name, content_type, data in attachments:
+            file_id = f"f{len(self.files) + 1}"
+            self.files[file_id] = data
+            files.append(Attachment(file_id, name, content_type, len(data)))
         post = Post(
             id=f"p{self._seq}",
             position=self._seq,
@@ -141,6 +150,7 @@ class FakePlatform:
             controls=parse_controls(text) if kind != "notice" else None,
             words=count_words(text),
             author_id=f"u_{author}",
+            attachments=tuple(files),
         )
         self.posts.append(post)
         self.trace.add(self.clock.now(), "post", id=post.id, thread=thread, author=author,
@@ -151,10 +161,14 @@ class FakePlatform:
         for core in self.cores:
             await core.on_post(post)
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None) -> Post:
-        post = self.append(author, text, thread, kind)
+    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+                   attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        post = self.append(author, text, thread, kind, attachments)
         await self.deliver(post)
         return post
+
+    async def fetch_attachment(self, file_id: str) -> bytes:
+        return self.files[file_id]
 
     def _kind_of(self, author: str) -> PostKind:
         role = self.role_of(author)

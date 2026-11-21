@@ -133,6 +133,15 @@ class FakeAgent:
     def attach(self, bot: str, doorbell: Doorbell) -> None:
         self.doorbells[bot] = doorbell
 
+    async def serve(self, bot: str, wait: float = 30.0) -> None:
+        """Over HTTP there is no listener: long-poll the bot's doorbell until cancelled,
+        taking each wake as it comes."""
+        doorbell = self.doorbells[bot]
+        while True:
+            wake = await doorbell.poll(wait)
+            if wake is not None:
+                await self.take(doorbell, wake)
+
     async def on_wake(self, wake: Wake) -> None:
         """A wake was announced for one of this agent's bots: poll it like any client."""
         doorbell = self.doorbells[wake.bot]
