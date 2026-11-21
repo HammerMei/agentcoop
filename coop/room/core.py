@@ -105,11 +105,15 @@ class BotPersisted:
 @dataclass
 class TurnRun:
     """One outstanding wake: issued, then leased from the agent's poll until ``done``
-    or expiry. ``delivered`` is ``[cursor, hwm]`` fixed at issue."""
+    or expiry. Both lists are ``[cursor, hwm]`` fixed at issue: ``delivered`` is the
+    posts of others, what the hint and the trace are built from; ``payload`` adds the
+    bot's own, and is what ``read`` returns (design 5.6 row: an own post is context,
+    never cause)."""
 
     wake: Wake
     hwm: Position | None
     delivered: tuple[Post, ...]
+    payload: tuple[Post, ...]
     leased: bool = False
     expires_at: float | None = None
     expiry: Handle | None = None
@@ -688,6 +692,8 @@ class RoomCore:
     # ── CATCH_UP: the sweeper ───────────────────────────────────────────────
 
     def _backlog(self, bot: str, through: Position | None = None) -> list[Post]:
+        """The undelivered posts of others: every decision (trigger, candidate, due
+        thread, hint) is made from these; the bot's own posts are read, never acted on."""
         return [p for p in self.platform.posts_after(self._cursor(bot), through) if p.author != bot]
 
     async def sweep(self, bot: str, reason: str) -> None:
@@ -826,7 +832,8 @@ class RoomCore:
         self._wake_seq += 1
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
                     trigger=self._trigger(trigger), rules_version=self.rules_version)
-        run = TurnRun(wake, through, tuple(delivered), read_complete=not delivered)
+        payload = tuple(self.platform.posts_after(self._cursor(bot), through))
+        run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not delivered)
         self.volatile[bot].turn = run
         if bot not in self.platform.members():  # configured here, not in the room: loud, until the roster owns it
             logger.warning("%s: %s is hosted but not a member of the room; wake %s issued", self.room, bot, wake.wake_id)
@@ -868,13 +875,14 @@ class RoomCore:
         return run
 
     def read(self, bot: str, wake_id: str) -> tuple[Wake, list[Post]]:
-        """The wake's hint and the posts after the cursor through its mark; records on
-        the lease that the agent fetched them (design §3.3)."""
+        """The wake's hint and the posts after the cursor through its mark, the bot's
+        own included; records on the lease that the agent fetched them (design §3.3)."""
         run = self._live(bot, wake_id)
         run.read_complete = True
         self.trace.add(self.now(), "read", gateway=self.name, bot=bot, wake=wake_id,
-                       delivered=[p.id for p in run.delivered])
-        return run.wake, list(run.delivered)
+                       delivered=[p.id for p in run.delivered],
+                       own=[p.id for p in run.payload if p.author == bot])
+        return run.wake, list(run.payload)
 
     def read_room(self, bot: str) -> list[Post]:
         """A read outside a wake: the posts after the cursor through the latest, how an

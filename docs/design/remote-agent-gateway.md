@@ -127,7 +127,7 @@ Mechanics, each mapped from the multi-agent design:
 | 5.3 | rate limit, cooldown | Wake-side holds unchanged, and the intent stated in §5.3 holds here: the limit slows a bot down so humans can keep up, and it never drops a post or ends a conversation. Counts come from the posts the gateway observes on the platform and from the posts it sends on a bot's behalf (§3.2), as the simulator's `_count_own_post` does. An unsolicited `send` is a turn the agent starts. It inherits the scheduled-job row of §5.3's exemptions, since the agent's own scheduler is what replaced the gateway's: exempt from rate and cooldown, and its post counts toward the window, so a burst of reports holds the other bots as the limit intends. The retry cap and backoff that bounded a gateway job now sit in the agent's own scheduler, outside the gateway. Mute and closed threads are not exempt. |
 | 5.4 | authority, settings | Unchanged. Controls are visible platform posts, parsed by the gateway. |
 | 5.5 | one turn per bot | Becomes the lease: at most one outstanding wake per bot per room until `done` or lease expiry. Expiry is treated as a backend failure (5.10). A paused bot (`coop pause`, persisted as today) is held for every thread like a muted one: no wake of any source, the cursor stays, the backlog waits for `resume`. |
-| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. On a platform the cursor and the mark are a `(timestamp, post id)` pair, ordered by timestamp with the post id as the tie-break, since Mattermost and Rocket.Chat post ids are opaque and their history pages by time. The gateway stores the pair, and `read` has assembled `[cursor, hwm]` when the page containing the mark has been fetched. The simulator's integer seq stands in for the pair. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. A `done` that reports failure leaves the cursor alone. |
+| 5.6 | cursor | Gateway-owned. The wake carries a high-water mark, held in the lease. `done` names the wake and the gateway saves the lease's mark as the cursor. On a platform the cursor and the mark are a `(timestamp, post id)` pair, ordered by timestamp with the post id as the tie-break, since Mattermost and Rocket.Chat post ids are opaque and their history pages by time. The gateway stores the pair, and `read` has assembled `[cursor, hwm]` when the page containing the mark has been fetched. The simulator's integer seq stands in for the pair. The agent reads the platform through `coop read`, which bounds the fetch by the cursor and the mark. The read returns every post in `[cursor, hwm]`, the bot's own included, so every agent reads the room as the others do and a post the agent's own script made is in its next wake. An own post is context, never cause: it wakes nobody, it is no catch-up candidate, and it makes no thread must-reply or unfinished. The gateway decides from the posts of others, as the simulator does. A `done` that reports failure leaves the cursor alone. |
 | 5.7 | catch-up | Unchanged. `idle_since` is the last normal `done`. The periodic catch-up runs for every agent, including one with a heartbeat of its own: the two have different urgency, the catch-up being the room's safety net and the heartbeat the agent's own routine, so they are kept separate. `catch_up_idle_seconds: 0` disables it for a room, as the specification allows, for an operator who wants the agent's heartbeat to carry that duty. `heartbeat: agent` as a configuration value is defined with the transports that carry one. |
 | 5.8 | hint | Delivered in the wake payload. `coop read` prints it ahead of the posts. |
 | 5.9 | envelope | Replaced by CLI calls. `coop send` is one reply item (thread, to, text, control). `coop done` closes the turn and names the threads answered. The canonical-post rendering (mentions match `to`, controls as visible lines) moves into `send`. Every `send` states whether it belongs to a wake (`--wake W`) or not (`--unsolicited`), and the gateway records a wake's sends on that wake's ledger. Every `send`, either kind, passes the same room rules, checked when its turn starts (§3.5). The specification's rule that a reply lands only in a delivered or hinted thread becomes an instruction in the rules document and a counter, not a refusal: no mechanism depends on it (the cursor is per room, coverage is checked at `done`, mute and closed threads are checked per post), and a reply elsewhere is noise the rate limit bounds. A must-reply thread with neither a `send --wake W` on the ledger nor `--answered` at `done` is counted as `must_reply` broken in measure mode and, in enforce mode, is the simulator's failed turn: the cursor stays, the failure notice posts, the posts are delivered again. `<end-of-agent-chain>` in a reply body is an error: the agent calls `done` instead. |
@@ -257,7 +257,8 @@ API directly, following the skill document.
 
 ```
 coop read  [--room R] [--wake W]   with --wake: prints the hint, then every post after the
-                                   cursor through the wake's hwm, one per line:
+                                   cursor through the wake's hwm, the agent's own included,
+                                   one per line:
                                    [thread] #id author (role): text
                                    with --room alone: the posts after the cursor through the
                                    latest, which is how an agent checks whether its own reply landed
@@ -556,6 +557,16 @@ field carries the gateway's event kind on a `SYSTEM:` post.
 
 - Codex per-run instructions: the carrier is `[unverified]` (§3.4). A per-run flag
   was not found.
+- Self-wake through the room. An unsolicited post never wakes its author: the
+  arrival path skips the author, the sweep decides from the posts of others, and
+  spec §5.2 refuses a reply that names its sender. A script that posts a result
+  and wants the agent to analyse it can run the analysis itself. A wake through
+  the gateway would buy one thing: serialisation with the room's other wakes (one
+  turn per bot, the lease, the ledger). If a live room shows that need, the
+  capability is an unsolicited post that mentions its own author, taken as a wake
+  request: a `self` wake source with no must-reply, an exception to spec §5.2 for
+  unsolicited sends, and no persisted state, since the post is the marker. Not
+  provided in this increment.
 - Catch-up cadence per thread. This increment keeps `catch_up_idle_seconds` per
   room, as the specification defines it. A per-thread override through an
   owner's control word (`catch-up: N seconds`, beside `limit:`) is a later

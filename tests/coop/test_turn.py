@@ -360,3 +360,58 @@ async def test_the_trigger_role_follows_the_configured_roster_not_the_platform()
     await sb.post("b", "@a and this")
     await sb.run(0)
     assert sb.bot.turns[-1].wake.trigger.author_role == "agent"
+
+# ── own posts are context, never cause (design 5.6 row) ─────────────────────
+
+
+async def test_read_returns_the_bots_own_posts_in_the_range_once_and_the_gateway_decides_from_the_others():
+    sb = Sandbox(bots=("a", "b"), script=Script().on(reply(["H"], "x"), bot="a"))
+    doorbell = InProcessDoorbell(sb.gateway, "a")
+    await sb.human("@a one")  # p1
+    await sb.run(2)  # a answered with p2, done
+    await doorbell.send(Reply("t1", to=["H"], text="scheduled report"), room="team")  # p3, unsolicited
+    await sb.run(100)  # sweeps and the catch-up window pass
+    assert len(sb.turns("a")) == 1  # its own report woke nobody, and was no catch-up candidate
+    await sb.human("@a two")  # p4
+    await sb.run(0)
+    wake = sb.trace.last("turn_start", bot="a")
+    assert wake.delivered == ["p4"]  # the decision list: the posts of others
+    _, posts = sb.gateway.read("a", wake.wake)
+    assert [p.id for p in posts] == ["p2", "p3", "p4"]  # its last reply, its report, the trigger
+    assert sb.trace.last("read", bot="a").own == ["p2", "p3"]
+    await sb.run(2)  # a answered with p5, done: the cursor is past p4
+    await sb.human("@a three")  # p6
+    await sb.run(0)
+    _, posts = sb.gateway.read("a", sb.trace.last("turn_start", bot="a").wake)
+    assert [p.id for p in posts] == ["p5", "p6"]  # own posts are delivered once, like any other
+
+
+async def test_in_a_dm_the_bots_own_unsolicited_post_does_not_wake_it():
+    """Every post in a DM addresses its bot; its own must not, or it would answer itself
+    until the rate limit stopped it."""
+    sb = Sandbox(bots=("a",), is_dm=True, script=Script().on(reply(["H"], "x"), bot="a"))
+    await sb.human("hi")  # p1
+    await sb.run(2)  # p2
+    await InProcessDoorbell(sb.gateway, "a").send(Reply("main", to=["H"], text="report"), room="team")  # p3
+    await sb.run(200)
+    assert len(sb.turns("a")) == 1 and [p.id for p in sb.posts_by("a")] == ["p2", "p3"]
+    await sb.human("again")  # p4
+    await sb.run(0)
+    _, posts = sb.gateway.read("a", sb.trace.last("turn_start", bot="a").wake)
+    assert [p.id for p in posts] == ["p2", "p3", "p4"]
+
+
+async def test_an_own_post_alone_in_a_rate_closed_thread_makes_it_neither_unfinished_nor_must_reply():
+    sb = Sandbox(bots=("a", "b"), script=Script().on(reply(["H"], "x"), bot="a"))
+    await sb.human("limit: 1 posts\ntopic for later", "t1")  # p1
+    await sb.human("@a hi")  # p2: a's turn delivers t1's post; its cursor moves past it
+    await sb.run(5)  # p3
+    await InProcessDoorbell(sb.gateway, "a").send(Reply("t1", to=["H"], text="report"), room="team")  # p4 fills t1's window
+    await sb.human("@a hello")  # p5, while t1 is closed to a by rate
+    await sb.run(0)
+    run = sb.gw.volatile["a"].turn
+    assert [g.thread for g in run.wake.hint.threads] == ["main"]  # t1 is not in the hint: only a's own post is new there
+    assert [p.id for p in run.payload] == ["p3", "p4", "p5"]
+    await sb.run(400)  # the window passes
+    assert not [e for e in sb.trace.of("unfinished_added") if e.bot == "a"]
+    assert all(e.thread == "main" for e in sb.turns("a"))  # never woken to answer its own report
