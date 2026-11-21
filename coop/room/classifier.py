@@ -94,7 +94,7 @@ def _names(raw, key: str, reasons: dict[str, str]) -> list[str]:
         if isinstance(entry, str):
             name = entry
         elif isinstance(entry, dict) and isinstance(entry.get("username"), str):
-            name = entry["username"]
+            name = entry["username"].lstrip("@")
             if isinstance(entry.get("reason"), str):
                 reasons[name] = entry["reason"]
         else:

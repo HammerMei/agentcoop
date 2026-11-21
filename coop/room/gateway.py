@@ -109,9 +109,12 @@ class Gateway:
             try:
                 core = self._room_of_wake(agent, reply.wake_id)
             except NoLiveLease:
-                if room is None:
+                # the lease is gone (expired, or the gateway restarted); the wake id still
+                # names its room, so the late reply lands there unsolicited (design §3.4)
+                core = self._room(room) if room is not None else next(
+                    (c for c in self.rooms.values() if c.minted(reply.wake_id)), None)
+                if core is None:
                     raise
-                core = self._room(room)
         elif room is None:
             raise ValueError("an unsolicited send names its room")
         else:

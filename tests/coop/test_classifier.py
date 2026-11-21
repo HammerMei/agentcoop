@@ -203,7 +203,7 @@ def _request(text="who can look at the flaky deploy?", addressed=(), history=(),
 def test_parse_decision_keeps_only_offered_names_in_the_right_list():
     request = _request(addressed=("b",))
     decision = parse_decision(
-        '```json\n{"add": ["@a", "b", "zed", "H"], "remove": [{"username": "b", "reason": "H is thinking aloud"}, "a"]}\n```',
+        '```json\n{"add": ["@a", "b", "zed", "H"], "remove": [{"username": "@b", "reason": "H is thinking aloud"}, "a"]}\n```',
         request,
     )
     assert decision.add == ("a",)  # b is addressed already, zed and H are not offered bots

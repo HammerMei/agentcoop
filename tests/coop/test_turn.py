@@ -10,7 +10,7 @@ import pytest
 
 from coop.client import InProcessDoorbell
 from coop.errors import InvalidReply, NoLiveLease, RefusedSend
-from coop.room.model import Reply
+from coop.room.model import Member, Reply
 from tests.coop.helpers import FAST, Sandbox, Script, item, replies, reply
 from tools.fakeagent.agent import Behaviour
 
@@ -197,8 +197,10 @@ async def test_a_send_naming_a_dead_wake_lands_unsolicited():
     await sb.human("@a hello")
     await sb.run(1)
     wake = sb.bot.turns[-1].wake
-    post = await InProcessDoorbell(sb.gateway, "a").send(Reply("main", to=["H"], text="late", wake_id=wake.wake_id), room="team")
-    assert post is not None and sb.trace.last("send", bot="a").wake is None
+    post = await InProcessDoorbell(sb.gateway, "a").send(Reply("main", to=["H"], text="late", wake_id=wake.wake_id))
+    assert post is not None and sb.trace.last("send", bot="a").wake is None  # the id alone named the room
+    with pytest.raises(NoLiveLease):
+        await InProcessDoorbell(sb.gateway, "a").send(Reply("main", to=["H"], text="x", wake_id="w-nowhere-1"))
 
 
 # ── pause ───────────────────────────────────────────────────────────────────
@@ -347,3 +349,14 @@ async def test_a_hosted_bot_that_left_the_room_is_still_woken_but_loudly(caplog)
         await sb.human("@all anyone?")
     assert sb.trace.count("turn_start", bot="a") == 1
     assert any("a is hosted but not a member" in r.message for r in caplog.records)
+
+
+async def test_the_trigger_role_follows_the_configured_roster_not_the_platform():
+    sb = Sandbox(bots=("a", "b"), extra_members=(Member("zed", "bot"),))
+    await sb.post("zed", "@a do this")
+    await sb.run(0)
+    assert sb.bot.turns[-1].wake.trigger.author_role == "guest"  # a bot the configuration does not list
+    await sb.run(1)
+    await sb.post("b", "@a and this")
+    await sb.run(0)
+    assert sb.bot.turns[-1].wake.trigger.author_role == "agent"

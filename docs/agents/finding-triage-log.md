@@ -48,6 +48,7 @@ tables below — every `**DROP`/`**FILE` there has a row here; a hand backfill o
 | 2026-11-20 | #208 r1 F5 — a replayed thread older than `control_ttl_days` seeds `last_activity` with now, so its stale controls live another TTL | DROP (scored, 0–0.3/yr; the one-line fix drops live mutes when traced; needs S3's replay window > 7 d to occur) | `control_applied` with `age` > `control_ttl_seconds` followed by `turn_held gate=mute` in that thread after a restart | 2027-11-20 | open |
 | 2026-11-20 | #208 r2 G3 — `read --wake` omits the bot's own posts inside `[cursor, hwm]`, so an unsolicited post the bot's scheduler made is in no later wake's delivery | FILE (owner decision: design §3.3 "every post after the cursor" vs spec 5.4 "does not receive its own bot's post back"; unsolicited posts are the new case; `read --room` shows them) | a `read` whose `delivered` omits a `kind=bot` post of the same bot inside `[cursor, hwm]`, or an agent that "does not remember its own report" | 2027-11-20 | open |
 | 2026-11-20 | #208 r2 G5 — the classifier decision cache is never evicted | DROP eviction (scored 0–0.3/yr, net ≤ 0 in S1; needs a position on the entry and an invariant) + MAKE IT LOUD (`status()["decisions"]`) | `status()["decisions"]` above ~100k on a running gateway, or an RSS complaint | 2027-11-20 | open |
+| 2026-11-21 | #208 r3 H1 — agent bios are not in the persisted document; a process restart loses every bio until the agents re-push | FILE (escalated to the owner: rater 1 FIX — the approved plan's `store.py` item lists bio and design §3.1 persists it; rater 2 FILE → S3 — no process restart exists in S1) | `status()["agents"][*]["bio_version"] == 0` after a restart of a gateway whose agents had pushed bios, or an S3 restore path that loads rooms and not agents | 2027-11-21 | open |
 
 ---
 
@@ -1691,4 +1692,26 @@ Notes:
 - Method: rater 2 built every candidate fix in an overlay and ran the suite before judging `cheap`; two of rater 1's one-liners were incomplete when so tested. Rater 1's lesson from round 1 held: trace, then call it cheap.
 - Cost: ~20 min rater 2 (plus its overlays), ~20 min rater 1, one round.
 
-**Status: open** — fixes pushed, one confirming Codex pass requested; G3 waits on the owner.
+**Status: closed** — the confirming pass (round 3) found new ground only; G3 still waits on the owner (see the next entry).
+
+## 2026-11-21 — PR #208 round 3 (Codex on `5074eb8`, `coop/room/{gateway,core,classifier}.py`)
+
+**Chain detector:** 15 findings over 3 rounds, no chain in any round.
+**Arrival check:** review on `5074eb8`, 4 inline threads (3 × P2, 1 × P3). Security review did not run (credits).
+**Control finding:** none; agreement uncorroborated.
+**Rater 2:** blind (general-purpose agent), four findings, method, constants, design, code; no verdicts. Every finding reproduced by running the port; every cheap fix built in an overlay and run against the suite. Agreed on H2, H3, H4 (FIX). **Split on H1**: rater 1 FIX (the persisted document is this increment's — the approved plan lists bio under `store.py`, design §3.1 persists bios); rater 2 FILE → S3 (no process restart exists in S1, the store is called only by tests, the verdict turns on scope). Rater 2 lacked the plan, so under the Step 4 table this is an **escalation**, not a concession: H1 stays FILE and goes to the owner in the PR body. On H2 rater 2's shape (the wake id already encodes its room; keep the check in the core as `minted()`) replaced rater 1's (the core remembers each bot's last wake id, which `restart()` forgets and an exempt mention overwrites — traced).
+
+| | rater 1 | rater 2 | outcome |
+|---|---|---|---|
+| **H1** bios not persisted (P2) | FIX, `dump_agents`/`load_agents` in `store.py` | FILE → S3 (scope); payback FIX-band once S3 exists | **FILE, escalated to the owner** |
+| **H2** a late send without `room` raises instead of landing unsolicited (P2) | FIX, core remembers the last wake id | FIX, the id names its room; `RoomCore.minted()` | **FIX** — `Gateway.send` falls back to the room that minted the id |
+| **H3** trigger role from the platform, not the roster (P2) | FIX, 1 line | FIX, 1 line; rank 1 (a trust label handed to the agent) | **FIX** — `agent` iff the author is in `self.agents` |
+| **H4** `@name` loses its reason (P3) | FIX, 1 line | FIX, 1 line | **FIX** |
+
+Notes:
+- Adoption: 3 fixed, 1 escalated. Severity re-rank vs Codex: H3 first (silent, reachable now); H2 last of the P2s (loud, no caller reaches it yet).
+- Rater 2's side notes for S2/S3, carried to the plan: `_wake_seq` restarts per process so a stale id can equal a live one; after expiry the gateway no longer knows a wake's starting thread, so the CLI must carry `--thread` on a late send or the gateway keep ended wakes.
+- Convergence: three rounds, no chain, round 3 all cheap or scope; no further Codex pass requested (the owner's rule from #207: stop when a round is edge cases).
+- Cost: ~45 min rater 2, ~15 min rater 1.
+
+**Status: open** — fixes pushed; H1 and round 2's G3 wait on the owner; merge is the owner's call.

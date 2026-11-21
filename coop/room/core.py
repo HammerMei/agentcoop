@@ -808,7 +808,9 @@ class RoomCore:
         if post is None:
             return None
         role = self.platform.role_of(post.author)
-        label = {"owner": "owner", "bot": "agent"}.get(role or "", "guest")  # the three labels of design §2
+        # The three labels of design §2: `agent` is a bot in the room's roster, an author the
+        # configuration does not list is a `guest`, whatever the platform calls it.
+        label = "agent" if post.author in self.agents else ("owner" if role == "owner" else "guest")
         return Trigger(post_id=post.id, author=post.author, author_id=post.author_id,
                        author_role=label, thread_root=post.thread)
 
@@ -833,6 +835,12 @@ class RoomCore:
             await self.on_wake(wake)
 
     # ── the agent's side of a turn: poll, read, send, done ──────────────────
+
+    def minted(self, wake_id: str) -> bool:
+        """Whether this room issued ``wake_id`` (``w-<room>-<n>``), live or not: a late send
+        on an expired wake still names its room (design §3.4)."""
+        prefix = f"w-{self.room}-"
+        return wake_id.startswith(prefix) and wake_id[len(prefix):].isdigit()
 
     def poll(self, bot: str) -> Wake | None:
         """Hand the bot its pending wake, if any, and start its lease. One outstanding
