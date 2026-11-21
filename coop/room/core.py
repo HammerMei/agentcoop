@@ -815,12 +815,17 @@ class RoomCore:
     def _trigger(self, post: Post | None) -> Trigger | None:
         if post is None:
             return None
-        role = self.platform.role_of(post.author)
-        # The three labels of design §2: `agent` is a bot in the room's roster, an author the
-        # configuration does not list is a `guest`, whatever the platform calls it.
-        label = "agent" if post.author in self.agents else ("owner" if role == "owner" else "guest")
         return Trigger(post_id=post.id, author=post.author, author_id=post.author_id,
-                       author_role=label, thread_root=post.thread)
+                       author_role=self.role_label(post.author), thread_root=post.thread)
+
+    def role_label(self, author: str) -> str:
+        """The three labels of design §2, on a wake's trigger and on every post ``read``
+        delivers: ``agent`` is a bot in the room's roster, ``owner`` is what the platform
+        calls an owner, and an author the configuration does not list is a ``guest``,
+        whatever the platform calls it."""
+        if author in self.agents:
+            return "agent"
+        return "owner" if self.platform.role_of(author) == "owner" else "guest"
 
     async def _start_turn(self, bot: str, source: TurnSource, thread: str, trigger: Post | None,
                           hwm: Position | None, held_by: tuple[str, ...]) -> None:

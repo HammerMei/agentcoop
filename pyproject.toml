@@ -29,6 +29,7 @@ dependencies = [
     "tree-sitter-bash>=0.23.0",
     "croniter>=2.0.0",
     "textual>=8.2.0",
+    "aiohttp>=3.14.5",
 ]
 
 [project.urls]

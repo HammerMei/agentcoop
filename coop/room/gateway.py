@@ -102,24 +102,27 @@ class Gateway:
         return self._room(room).read_room(agent)
 
     async def send(self, agent: str, reply: Reply, room: str | None = None) -> Post | None:
-        """A wake's send goes to the wake's room; an unsolicited send names its room.
-        A wake id with no live lease falls back to ``room`` (the send is then
-        unsolicited, design §3.5)."""
+        return await self.room_for(agent, reply, room).send(agent, reply)
+
+    def room_for(self, agent: str, reply: Reply, room: str | None = None) -> RoomCore:
+        """The room a send lands in. A wake's send goes to the wake's room; an
+        unsolicited send names its room. A wake id with no live lease falls back to
+        ``room`` (the send is then unsolicited, design §3.5)."""
         if reply.wake_id is not None:
             try:
-                core = self._room_of_wake(agent, reply.wake_id)
+                return self._room_of_wake(agent, reply.wake_id)
             except NoLiveLease:
                 # the lease is gone (expired, or the gateway restarted); the wake id still
                 # names its room, so the late reply lands there unsolicited (design §3.4)
-                core = self._room(room) if room is not None else next(
-                    (c for c in self.rooms.values() if c.minted(reply.wake_id)), None)
+                if room is not None:
+                    return self._room(room)
+                core = next((c for c in self.rooms.values() if c.minted(reply.wake_id)), None)
                 if core is None:
                     raise
-        elif room is None:
+                return core
+        if room is None:
             raise ValueError("an unsolicited send names its room")
-        else:
-            core = self._room(room)
-        return await core.send(agent, reply)
+        return self._room(room)
 
     async def done(self, agent: str, wake_id: str, answered: tuple[str, ...] = (),
                    failed: str | None = None) -> bool:
@@ -131,6 +134,25 @@ class Gateway:
             self.trace.add(self.clock.now(), "done_stale", gateway=self.name, bot=agent, wake=wake_id)
             return False
         return await core.done(agent, wake_id, answered, failed)
+
+    def hosts(self, agent: str, room: str) -> bool:
+        """Whether this gateway serves ``agent`` in ``room``: the roster check the
+        doorbell makes before a read or an unsolicited send names a room (design §3.2,
+        "the API answers a token only for rooms whose roster lists the agent")."""
+        core = self.rooms.get(room)
+        return core is not None and agent in core.hosted
+
+    def holds_lease(self, agent: str) -> bool:
+        return any(s.turn is not None and s.turn.leased
+                   for core in self.rooms.values() if (s := core.volatile.get(agent)) is not None)
+
+    def online(self, agent: str, wait: float) -> bool:
+        """Liveness from wake polls alone (design §3.2): an agent is offline when its last
+        poll is older than two long-poll waits and it holds no live lease."""
+        state = self.agents.get(agent)
+        if state is None or state.last_seen is None:
+            return False
+        return self.clock.now() - state.last_seen <= 2 * wait or self.holds_lease(agent)
 
     def bio(self, agent: str, text: str) -> int:
         """Store the agent's bio; returns its new version (design §3.6 step 3)."""

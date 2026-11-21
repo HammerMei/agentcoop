@@ -16,7 +16,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from aiohttp.test_utils import TestServer
+
 from coop.client import InProcessDoorbell
+from coop.doorbell.api import build_app
+from coop.room.clock import Clock
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
 from coop.room.model import MAIN_THREAD, Member, Params, Post, PostKind
@@ -24,7 +28,7 @@ from coop.room.trace import Trace
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
 
-__all__ = ["FAST", "Sandbox", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
+__all__ = ["FAST", "Sandbox", "Doorbell", "Script", "Turn", "done_everywhere", "reply", "replies", "item",
            "ScriptedClassifier", "InjectedFailures", "SimClock", "FakePlatform", "members"]
 
 # Fast, eager defaults so a test runs in a few simulated seconds. Real values are open
@@ -75,8 +79,13 @@ class Sandbox:
         is_dm: bool = False,
         start_time: float = 0.0,
         duration: float = 1.0,
+        clock: Clock | None = None,
+        attach_agent: bool = True,
     ) -> None:
-        self.clock = SimClock(start_time)
+        # ``clock`` is the simulated one unless a test runs on the event loop (the doorbell
+        # tests); ``attach_agent=False`` leaves every wake for an HTTP client to poll.
+        self.clock = clock if clock is not None else SimClock(start_time)
+        self.attach_agent = attach_agent
         self.trace = Trace()
         self.room = FakePlatform("team", members(bots, humans, extra_members), self.clock, self.trace, is_dm=is_dm)
         self.params = params
@@ -95,7 +104,7 @@ class Sandbox:
         )
         gateway.add_room(core)
         agent = agent or self.bot
-        for bot in hosted:
+        for bot in hosted if self.attach_agent else ():
             agent.attach(bot, InProcessDoorbell(gateway, bot))
             gateway.subscribe(bot, agent.on_wake)
         self.room.cores.append(core)
@@ -148,3 +157,30 @@ def item(thread=None, to=None, text=None, control=None, done=False) -> dict:
     if done:
         found["done"] = True
     return found
+
+
+# ── the doorbell over HTTP ──────────────────────────────────────────────────
+
+
+class Doorbell:
+    """One gateway behind the doorbell API on a real port, for the raw-HTTP tests and the
+    fake agent's HTTP client. ``tokens`` maps a bearer token to its agent."""
+
+    def __init__(self, gateway: Gateway, tokens: dict[str, str], rules_text: str = "rules") -> None:
+        self.tokens = tokens
+        self.server = TestServer(build_app(gateway, tokens, rules_text))
+
+    async def __aenter__(self) -> Doorbell:
+        await self.server.start_server()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.server.close()
+
+    @property
+    def url(self) -> str:
+        return str(self.server.make_url("")).rstrip("/")
+
+    def headers(self, agent: str) -> dict[str, str]:
+        token = next(t for t, a in self.tokens.items() if a == agent)
+        return {"Authorization": f"Bearer {token}"}
