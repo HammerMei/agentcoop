@@ -87,11 +87,22 @@ class ThreadSettings:
     last_activity: float = 0.0
     unknown_mutes: list[str] = field(default_factory=list)
 
+    @property
+    def is_default(self) -> bool:
+        """No control has ever applied here: nothing but ``last_activity``, which a
+        fresh entry gets again on its next lookup."""
+        return (self.orchestrator is None and not self.muted and not self.unmuted_at and self.limit_posts is None
+                and self.limit_words is None and not self.unknown_mutes)
+
 
 @dataclass
 class ThreadVolatile:
     recent: list[tuple[float, str, int]] = field(default_factory=list)  # (time, author, words)
     held_by_rate: set[str] = field(default_factory=set)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.recent and not self.held_by_rate
 
 
 @dataclass
@@ -1065,7 +1076,17 @@ class RoomCore:
             if self.volatile.get(bot) is not None and self.volatile[bot].turn is run and run.leased:
                 await self._backend_failure(run, "lease expired")
 
+    def prune_threads(self) -> None:
+        """Drop the per-thread entries that hold nothing: on a platform every top-level
+        post is a thread, and a lookup creates an entry, so the two dicts would otherwise
+        grow with the room. A dropped entry comes back on demand, the same."""
+        for thread in [t for t, s in self.settings.items() if s.is_default]:
+            del self.settings[thread]
+        for thread in [t for t, s in self.thread_state.items() if s.is_empty]:
+            del self.thread_state[thread]
+
     def _commit(self, run: TurnRun, covered: set[str]) -> None:
+        self.prune_threads()
         bot = run.wake.bot
         state = self.persisted[bot]
         if run.hwm is not None and after(run.hwm, state.cursor):
@@ -1200,7 +1221,7 @@ class RoomCore:
         return {
             "gateway": self.name,
             "room": self.room,
-            "threads": {t: self._thread_status(t) for t in list(self.settings)},
+            "threads": {t: self._thread_status(t) for t in list(dict.fromkeys([*self.settings, *self.thread_state]))},
             "bots": {b: self._bot_status(b) for b in self.hosted},
             "agents": list(self.agents),
             "bot_like_members_missing": [m.username for m in members.values() if m.is_bot and m.username not in self.agents],

@@ -8,6 +8,7 @@ import json
 import pytest
 
 from coop.room.core import RoomCore
+from coop.room.model import Reply
 from coop.room.store import dump_agents, dump_room, load_agents, load_room
 from tests.coop.helpers import Sandbox, Script, reply
 
@@ -91,3 +92,25 @@ async def test_the_agents_document_restores_bios_and_versions_into_the_dict_the_
     assert fresh.gateway.bio("a", "now the backups too") == 3  # the version continues, it does not restart
     with pytest.raises(ValueError, match="format"):
         load_agents(fresh.gateway, {"format": 0, "agents": {}})
+
+
+async def test_threads_no_control_touched_are_neither_saved_nor_kept():
+    sb = Sandbox(bots=("a", "b"))
+    for i in range(5):
+        await sb.gateway.send("a", Reply(thread=None, to=["H"], text=f"topic {i}", wake_id=None), room="team")
+    await sb.human("mute: @b", "t1")
+    assert len(sb.gw.settings) >= 6 and len(sb.gw.thread_state) >= 5
+    assert set(dump_room(sb.gw)["threads"]) == {"t1"}
+    sb.gw.prune_threads()
+    assert set(sb.gw.settings) == {"t1"}
+    assert "t1" not in sb.gw.thread_state or not sb.gw.thread_state["t1"].is_empty
+    assert sb.gw.is_muted("b", "t1") and not sb.gw.is_muted("a", "p1")  # a dropped entry answers the same
+
+
+async def test_a_turns_commit_prunes_the_threads_it_no_longer_needs():
+    sb = Sandbox(bots=("a", "b"))
+    await sb.gateway.send("a", Reply(thread=None, to=["H"], text="topic", wake_id=None), room="team")
+    await sb.human("@a hello", "t1")
+    await sb.run(3)
+    assert sb.trace.last("turn_end", bot="a").outcome == "normal"
+    assert all(not s.is_default for s in sb.gw.settings.values())

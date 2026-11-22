@@ -52,6 +52,7 @@ def dump_room(core: RoomCore) -> dict:
                 "unknown_mutes": list(s.unknown_mutes),
             }
             for thread, s in core.settings.items()
+            if not s.is_default  # a thread no control ever touched is not worth a line
         },
     }
 
