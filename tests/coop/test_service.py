@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from coop.config import ConfigError, parse
-from coop.connectors.base import MemberInfo
+from coop.connectors.base import MemberInfo, RoomInfo
 from coop.room.model import Reply
 from coop.room.platform import PlatformError
 from coop.service import Service
@@ -486,3 +486,28 @@ async def test_every_configuration_section_is_applied_refused_or_said_on_reload(
         return
     notes = await svc.reload(config(tmp_path, text))
     assert check(svc, fc, notes), notes
+
+
+async def test_a_room_reopened_in_the_same_daemon_never_reuses_a_wake_id(running, tmp_path):
+    svc, fc = running
+    await fc.human("c1", "H", "@a_bot one")
+    await settle()
+    first = svc.gateway.poll("a").wake_id
+    await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:nothing"')))  # closed
+    await svc.reload(config(tmp_path))  # reopened
+    assert "fake:team" in svc.rooms
+    await fc.human("c1", "H", "@a_bot two")
+    await settle()
+    second = svc.gateway.poll("a").wake_id
+    assert second != first and int(second.rsplit("-", 1)[1]) > int(first.rsplit("-", 1)[1])
+
+
+async def test_an_archived_room_is_not_hosted(tmp_path):
+    fc = connector()
+    fc.rooms["c1"] = RoomInfo("c1", "team", archived=True)
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert svc.rooms == {}
+    finally:
+        await svc.stop()

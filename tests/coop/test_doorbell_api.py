@@ -386,3 +386,10 @@ async def test_a_platform_that_does_not_answer_is_504_and_a_turn_still_ends(api,
     handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
     r = await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
     assert r.status_code == 504 and "did not answer" in r.json()["error"]
+
+
+async def test_a_room_send_without_the_thread_key_is_a_new_top_level_post_not_500(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"room": "team", "to": ["H"], "text": "hand-written client", "wake_id": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["post"]["thread"] == r.json()["post"]["id"]

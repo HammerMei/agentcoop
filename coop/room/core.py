@@ -343,6 +343,11 @@ class RoomCore:
         if self.on_change is not None:
             self.on_change()
 
+    @property
+    def wake_seq(self) -> int:
+        """The last wake number minted: what a core opened later on this handle counts from."""
+        return self._wake_seq
+
     def set_offline(self) -> None:
         self.online = False
 

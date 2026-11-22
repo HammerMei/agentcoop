@@ -200,6 +200,9 @@ class Service:
         if rule is None or agent not in rule.agents:
             logger.info("%s: no rule hosts %r in %s", server, agent, handle)
             return
+        if info.archived:  # Mattermost lists none at connect (probed on 11.x); a room() answer might
+            logger.info("%s: archived; not hosted", handle)
+            return
         run = self._by_id.get((server, info.id))
         if run is None:
             try:
@@ -276,6 +279,9 @@ class Service:
             run.core.settings.clear()
 
     def _close_room(self, run: RoomRun) -> None:
+        # the next core on any handle counts on from here: a late done or send on a wake of
+        # the closed core never names a wake of the reopened one
+        self.wake_seed = max(self.wake_seed, run.core.wake_seq)
         self._close_worker(run)
         self.connectors[run.server].unwatch(run.info.id)
         self.gateway.remove_room(run.handle)

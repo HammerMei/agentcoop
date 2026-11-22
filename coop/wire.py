@@ -185,7 +185,7 @@ def encode_reply(reply: Reply) -> Json:
 
 def decode_reply(doc: Json) -> Reply:
     return Reply(
-        thread=doc["thread"],
+        thread=doc.get("thread"),  # absent is null: a new top-level post
         to=None if doc.get("to") is None else list(doc["to"]),
         text=doc.get("text"),
         control=doc.get("control"),
