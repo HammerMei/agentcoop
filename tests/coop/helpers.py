@@ -25,6 +25,7 @@ from coop.room.clock import Clock
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
 from coop.room.model import MAIN_THREAD, Member, Params, Post, PostKind
+from coop.room.roster import Roster
 from coop.room.trace import Trace
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
@@ -77,6 +78,7 @@ class Sandbox:
         hosted: list[str] | None = None,
         agents: list[str] | None = None,
         extra_members: tuple[Member, ...] = (),
+        roster: Roster | None = None,
         is_dm: bool = False,
         start_time: float = 0.0,
         duration: float = 1.0,
@@ -93,14 +95,16 @@ class Sandbox:
         self.classifier = classifier if classifier is not None else ScriptedClassifier()
         self.gateways: list[Gateway] = []
         self.bot = FakeAgent(self.clock, script or Script(), duration)
-        self.gw = self.add_gateway("g1", hosted or list(bots), agents or list(bots), self.bot, self.classifier, params)
+        self.gw = self.add_gateway("g1", hosted or list(bots), agents or list(bots), self.bot, self.classifier, params,
+                                   roster=roster)
         self.gateway = self.gateways[0]
 
     def add_gateway(self, name, hosted, agents=None, agent: FakeAgent | None = None, classifier=None,
-                    params=None) -> RoomCore:
+                    params=None, roster: Roster | None = None) -> RoomCore:
         gateway = Gateway(self.clock, self.trace, name=name)
+        roster = roster or Roster.from_members(self.room.members().values(), agents or list(hosted))
         core = RoomCore(
-            self.room.name, self.room, self.clock, self.trace, hosted, agents or list(hosted),
+            self.room.name, self.room, self.clock, self.trace, hosted, roster,
             params or self.params, classifier if classifier is not None else self.classifier, name=name,
         )
         gateway.add_room(core)
@@ -116,7 +120,8 @@ class Sandbox:
     def add_room(self, name: str, hosted: list[str], humans=(("H", "owner"),)) -> FakePlatform:
         """A second room on the first gateway, hosting ``hosted`` there."""
         room = FakePlatform(name, members(tuple(hosted), humans), self.clock, self.trace)
-        core = RoomCore(name, room, self.clock, self.trace, hosted, list(hosted), self.params, self.classifier,
+        roster = Roster.from_members(room.members().values(), hosted)
+        core = RoomCore(name, room, self.clock, self.trace, hosted, roster, self.params, self.classifier,
                         name=self.gateway.name)
         self.gateway.add_room(core)
         room.cores.append(core)

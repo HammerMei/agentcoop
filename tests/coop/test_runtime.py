@@ -11,6 +11,7 @@ from coop.room.clock import AsyncioClock
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
 from coop.room.model import MAIN_THREAD, Post, Reply
+from coop.room.roster import Roster
 from coop.room.trace import Trace
 from tests.coop.helpers import FAST, members
 from tools.fakeagent.sim import FakePlatform, ScriptedClassifier, SimClock
@@ -41,7 +42,8 @@ class SlowPlatform(FakePlatform):
 async def test_concurrent_sends_and_posts_from_different_tasks_do_not_interleave_inside_the_room():
     clock, trace = SimClock(), Trace()
     room = SlowPlatform("team", members(("a", "b")), clock, trace)
-    core = RoomCore("team", room, clock, trace, ["a", "b"], ["a", "b"], FAST, ScriptedClassifier())
+    core = RoomCore("team", room, clock, trace, ["a", "b"], Roster.from_members(room.members().values(), ["a", "b"]),
+                    FAST, ScriptedClassifier())
     gateway = Gateway(clock, trace)
     gateway.add_room(core)
     sends = [gateway.send(bot, Reply("main", to=["H"], text=f"{bot} {i}"), room="team")
@@ -85,7 +87,8 @@ async def test_a_live_classifier_that_misses_its_timeout_is_retried_at_the_timeo
     room = FakePlatform("team", members(("a", "b")), clock, trace)
     params = Params(classifier_timeout_seconds=0.1, classifier_retries=1, classifier_fallback="everyone",
                     sweep_interval_seconds=0, catch_up_idle_seconds=0)
-    core = RoomCore("team", room, clock, trace, ["a", "b"], ["a", "b"], params, Slow())
+    core = RoomCore("team", room, clock, trace, ["a", "b"], Roster.from_members(room.members().values(), ["a", "b"]),
+                    params, Slow())
     room.cores.append(core)
     core.start()
     started = clock.now()

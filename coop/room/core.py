@@ -59,6 +59,7 @@ from .model import (
 )
 from .platform import Platform, RefusedPost
 from .replies import Problem, ValidationContext, canonical_text, check_reply, resolve_control
+from .roster import Roster
 from .trace import Trace
 from .words import count_words
 
@@ -218,7 +219,7 @@ class RoomCore:
         clock: Clock,
         trace: Trace,
         hosted: list[str],
-        agents: list[str],
+        roster: Roster,
         params: Params,
         classifier: Classifier | None = None,
         name: str = "g1",
@@ -230,7 +231,8 @@ class RoomCore:
         self.trace = trace
         self.name = name
         self.hosted = list(hosted)
-        self.agents = list(agents)
+        self.roster = roster
+        self.agents = list(roster.bots)
         self.params = params
         self.classifier = classifier
         self.rules_version = rules_version
@@ -397,12 +399,12 @@ class RoomCore:
         if controls is None:
             return False
         settings = self._thread(post.thread)
-        role = self.platform.role_of(post.author)
-        if role != "owner" and post.author != settings.orchestrator:
+        moderator = self.roster.is_moderator(post.author)
+        if not moderator and post.author != settings.orchestrator:
             self.trace.add(self.now(), "control_ignored", gateway=self.name, thread=post.thread,
                            by=post.author, reason="not authorised")
             return False
-        if controls.orchestrator is not None and role == "owner" and after(post.position, settings.orchestrator_at):
+        if controls.orchestrator is not None and moderator and after(post.position, settings.orchestrator_at):
             name = None if controls.orchestrator == "none" else controls.orchestrator
             if name is None or name in self._bots_in_room():  # the orchestrator is a bot in the room (5.12)
                 settings.orchestrator = name
@@ -415,7 +417,7 @@ class RoomCore:
             self._apply_mute(post, settings, controls.mute)
         if controls.unmute is not None:
             self._apply_unmute(post, settings, controls.unmute)
-        if controls.limit is not None and role == "owner" and after(post.position, settings.limit_at):
+        if controls.limit is not None and moderator and after(post.position, settings.limit_at):
             settings.limit_posts = controls.limit.get("posts", settings.limit_posts)
             settings.limit_words = controls.limit.get("words", settings.limit_words)
             settings.limit_at = post.position
@@ -812,20 +814,18 @@ class RoomCore:
         return (max(posts - len(recent), 0) if posts else None,
                 max(words - sum(r[2] for r in recent), 0) if words else None)
 
-    def _trigger(self, post: Post | None) -> Trigger | None:
+    def _trigger(self, bot: str, post: Post | None) -> Trigger | None:
         if post is None:
             return None
         return Trigger(post_id=post.id, author=post.author, author_id=post.author_id,
-                       author_role=self.role_label(post.author), thread_root=post.thread)
+                       author_role=self.role_label(bot, post.author), thread_root=post.thread)
 
-    def role_label(self, author: str) -> str:
+    def role_label(self, bot: str, author: str) -> str:
         """The three labels of design §2, on a wake's trigger and on every post ``read``
-        delivers: ``agent`` is a bot in the room's roster, ``owner`` is what the platform
-        calls an owner, and an author the configuration does not list is a ``guest``,
-        whatever the platform calls it."""
-        if author in self.agents:
-            return "agent"
-        return "owner" if self.platform.role_of(author) == "owner" else "guest"
+        delivers to ``bot``: ``agent`` is a bot in the room's roster, ``owner`` is a
+        person the configuration lists as this bot's owner, and any other author is a
+        ``guest``, whatever the platform calls them."""
+        return self.roster.label(bot, author)
 
     async def _start_turn(self, bot: str, source: TurnSource, thread: str, trigger: Post | None,
                           hwm: Position | None, held_by: tuple[str, ...]) -> None:
@@ -836,7 +836,7 @@ class RoomCore:
         hint = self._build_hint(bot, source, thread, delivered, held_by)
         self._wake_seq += 1
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
-                    trigger=self._trigger(trigger), rules_version=self.rules_version)
+                    trigger=self._trigger(bot, trigger), rules_version=self.rules_version)
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
         run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not payload)
         self.volatile[bot].turn = run

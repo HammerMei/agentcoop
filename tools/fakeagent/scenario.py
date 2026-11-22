@@ -40,6 +40,7 @@ from coop.client import InProcessDoorbell
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
 from coop.room.model import Decision, Member, Params
+from coop.room.roster import Roster
 from coop.room.trace import Trace
 
 from .agent import FakeAgent, Turn, done_everywhere
@@ -145,7 +146,8 @@ def load(path: str | Path, enforce: bool | None = None, params: dict[str, str] |
     gateways, agents = [], []
     for raw in data.get("gateways") or [{"name": "g1", "hosted": bots}]:
         gateway = Gateway(clock, trace, name=raw["name"])
-        core = RoomCore(room.name, room, clock, trace, raw["hosted"], raw.get("agents", bots), params,
+        roster = Roster.from_members(room.members().values(), raw.get("agents", bots))
+        core = RoomCore(room.name, room, clock, trace, raw["hosted"], roster, params,
                         _classifier(data.get("classifier")), name=raw["name"])
         gateway.add_room(core)
         agent = FakeAgent(clock, script)

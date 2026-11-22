@@ -108,8 +108,8 @@ def _error(status: int, message: str, **more) -> web.Response:
     return web.json_response({"error": message, **more}, status=status)
 
 
-def _posts(gateway: Gateway, room: str, posts: list[Post]) -> list[dict]:
-    return [encode_post(gateway.deliverable(room, p)) for p in posts]
+def _posts(gateway: Gateway, agent: str, room: str, posts: list[Post]) -> list[dict]:
+    return [encode_post(gateway.deliverable(agent, room, p)) for p in posts]
 
 
 # ── handlers ────────────────────────────────────────────────────────────────
@@ -156,11 +156,11 @@ async def read(request: web.Request) -> web.Response:
             found, posts = gateway.read(agent, wake_id)
         except NoLiveLease as exc:
             return _error(409, str(exc))
-        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, found.room, posts)})
+        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, agent, found.room, posts)})
     refused = _room_refusal(gateway, agent, room)
     if refused is not None:
         return refused
-    return web.json_response({"posts": _posts(gateway, room, gateway.read_room(agent, room))})
+    return web.json_response({"posts": _posts(gateway, agent, room, gateway.read_room(agent, room))})
 
 
 async def send(request: web.Request) -> web.Response:
@@ -183,7 +183,7 @@ async def send(request: web.Request) -> web.Response:
         post = await core.send(agent, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
-    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(core.room, post))})
+    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post))})
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:

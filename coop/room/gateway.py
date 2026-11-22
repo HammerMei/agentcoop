@@ -101,12 +101,12 @@ class Gateway:
 
     # ── attachments ─────────────────────────────────────────────────────────
 
-    def deliverable(self, room: str, post: Post) -> Post:
-        """The post as the doorbell delivers it: its author labelled, its attachments
-        named by handle."""
+    def deliverable(self, agent: str, room: str, post: Post) -> Post:
+        """The post as the doorbell delivers it to ``agent``: its author labelled as that
+        agent sees them, its attachments named by handle."""
         core = self._room(room)
         attachments = tuple(replace(a, id=self._handle(room, a)) for a in post.attachments)
-        return replace(post, author_role=core.role_label(post.author), attachments=attachments)
+        return replace(post, author_role=core.role_label(agent, post.author), attachments=attachments)
 
     def _handle(self, room: str, attachment: Attachment) -> str:
         key = (room, attachment.id)
