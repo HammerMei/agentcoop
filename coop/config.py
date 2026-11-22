@@ -38,7 +38,8 @@ rooms:
     enforce: false
 ```
 
-Relative paths are relative to the runtime directory (``coop/paths.py``).
+Relative paths are relative to the directory the configuration file is in, which
+in a normal install is the runtime directory (``coop/paths.py``).
 """
 
 from __future__ import annotations
@@ -160,7 +161,8 @@ class Config:
 # ── loading ─────────────────────────────────────────────────────────────────
 
 
-def load(path: Path, base: Path = RUNTIME_DIR) -> Config:
+def load(path: Path, base: Path | None = None) -> Config:
+    base = path.parent if base is None else base
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     if raw is None:
