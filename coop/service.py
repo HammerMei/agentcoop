@@ -43,6 +43,7 @@ from .room.clock import AsyncioClock, Clock
 from .room.core import RoomCore
 from .room.gateway import Gateway
 from .room.model import Position
+from .room.platform import PlatformError
 from .room.store import FORMAT, dump_agents, dump_room, load_agents, load_room
 from .room.trace import Trace
 
@@ -203,18 +204,26 @@ class Service:
         if run is None:
             try:
                 run = await self._open_room(server, info, rule)
-            except ConfigError as exc:
-                self._note(f"[ERROR] {exc}")
+            except (ConfigError, PlatformError) as exc:
+                self._note(f"[ERROR] {handle}: not opened: {exc}")
                 return
         if agent in run.core.hosted:
             return
         if run.started:  # a bot joining a running room: the member list has changed
-            run.log.set_members(await self.connectors[server].members(info.id))
+            await self._refresh_members(run)
         saved = run.saved.get("bots", {}).get(agent)
         run.core.add_hosted(agent, run.log.last_position())
         if saved is not None:
             self._restore(run, {"format": run.saved["format"], "bots": {agent: saved}})
+        self._save_room(run)  # the starting cursor is on disk before any turn: an unclean stop keeps it
         logger.info("%s: hosting %r", handle, agent)
+
+    async def _refresh_members(self, run: RoomRun) -> None:
+        """The member list again; a platform that does not answer leaves the old one."""
+        try:
+            run.log.set_members(await self.connectors[run.server].members(run.info.id))
+        except PlatformError as exc:
+            self._note(f"[WARNING] {run.handle}: members not refreshed: {exc}")
 
     async def _unhost(self, run: RoomRun, agent: str) -> None:
         await run.core.remove_hosted(agent)
@@ -356,13 +365,14 @@ class Service:
                 run = self._by_id.get((server, event.room_id))
                 if run is not None:
                     await self._ensure_started(run)
-            elif hosted_here and run is not None and event.agent in run.core.hosted:
+            elif hosted_here:  # a leave: forgotten whether or not a rule hosts the room now
                 self._rooms_of[(server, event.agent)] = [
                     r for r in self._rooms_of.get((server, event.agent), []) if r.id != event.room_id]
-                await self._unhost(run, event.agent)
-                run = self._by_id.get((server, event.room_id))
+                if run is not None and event.agent in run.core.hosted:
+                    await self._unhost(run, event.agent)
+                    run = self._by_id.get((server, event.room_id))
             if run is not None:
-                run.log.set_members(await self.connectors[server].members(event.room_id))
+                await self._refresh_members(run)
 
     def _is_hosted(self, server: str, agent: str) -> bool:
         bot = self.config.servers[server].bots.get(agent)
@@ -434,8 +444,12 @@ class Service:
         classifier = self._classifier_factory(self.config, run.handle) if rule.params.classifier_enabled else None
         run.core.update(roster, rule.params, classifier)
         run.log.roster = roster
-        run.log.names = self._names(run.server)
+        names = self._names(run.server)
+        renamed = names.mapping() != run.log.names.mapping()
+        run.log.names = names
         self.connectors[run.server].watch(run.info.id, roster)
+        if renamed:  # members were normalised under the old names
+            await self._refresh_members(run)
         for agent in list(run.core.hosted):
             if agent not in rule.agents or not self._is_hosted(run.server, agent):
                 await self._unhost(run, agent)

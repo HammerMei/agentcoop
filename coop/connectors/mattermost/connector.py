@@ -140,13 +140,16 @@ class MattermostConnector:
             name = (await rest.user(others[0])).get("username", others[0]) if others else channel.get("name", "")
             return RoomInfo(channel["id"], name, is_dm=True, archived=archived)
         if kind == "G":
-            return RoomInfo(channel["id"], channel.get("display_name") or channel.get("name", ""), is_dm=True,
-                            archived=archived)
+            # a group message is a room, not a 1:1 DM: a post there addresses nobody by itself
+            return RoomInfo(channel["id"], channel.get("display_name") or channel.get("name", ""), archived=archived)
         return RoomInfo(channel["id"], channel.get("name", ""), archived=archived)
 
     async def members(self, room_id: str) -> list[MemberInfo]:
         bot = self._any_bot(room_id)
-        users = await bot.rest.users(await bot.rest.channel_member_ids(room_id))
+        try:
+            users = await bot.rest.users(await bot.rest.channel_member_ids(room_id))
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: members of {room_id}: {exc}") from exc
         found = [MemberInfo(u["username"], display_name(u), u.get("nickname", ""), bool(u.get("is_bot")))
                  for u in users if u.get("username")]
         self._members[room_id] = {m.username: m for m in found}

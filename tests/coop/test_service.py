@@ -14,6 +14,7 @@ import yaml
 from coop.config import ConfigError, parse
 from coop.connectors.base import MemberInfo
 from coop.room.model import Reply
+from coop.room.platform import PlatformError
 from coop.service import Service
 
 from .helpers import FakeConnector
@@ -398,3 +399,90 @@ async def test_a_reload_that_changes_the_listener_says_a_restart_is_needed(runni
     svc, fc = running
     notes = await svc.reload(config(tmp_path, CONFIG + "gateway:\n  listen: 127.0.0.1:9999\n"))
     assert any("gateway.listen/tls changed" in n and "restart" in n for n in notes)
+
+
+class FlakyMembers(FakeConnector):
+    """``members()`` fails for one room: the platform did not answer."""
+
+    failing: set[str] = set()
+
+    async def members(self, room_id):
+        if room_id in self.failing:
+            raise PlatformError(f"fake: members of {room_id}: down")
+        return await super().members(room_id)
+
+
+async def test_one_room_that_cannot_open_is_noted_and_the_bots_other_rooms_are_hosted(tmp_path):
+    fc = FlakyMembers(names=NAMES)
+    fc.add_room("c1", "team", PEOPLE)
+    fc.add_room("c3", "team-2", PEOPLE)
+    fc.failing = {"c1"}
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert set(svc.rooms) == {"fake:team-2"} and fc.bots.keys() == {"a", "b"}
+        assert any("fake:team: not opened" in n for n in svc.notes)
+        fc.failing = set()
+        notes = await svc.reload(svc.config)  # the next reload hosts it: the bot's rooms were kept
+        assert "fake:team" in svc.rooms and any("fake:team: 'a' hosted" in n for n in notes)
+    finally:
+        await svc.stop()
+
+
+async def test_a_newly_hosted_bots_cursor_is_on_disk_before_any_turn(tmp_path):
+    fc = connector()
+    fc.make_post("c1", "H", "before the daemon")
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
+    assert tuple(saved["bots"]["a"]["cursor"]) == fc.posts["c1"][-1].position
+    await svc.stop()
+
+
+async def test_a_leave_from_an_unhosted_room_is_forgotten_so_a_later_rule_does_not_host_it(running, tmp_path):
+    svc, fc = running
+    await fc.leave("c2", "a")  # fake:other is not hosted; a is no longer in it
+    await settle()
+    notes = await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:*"')))
+    assert "fake:other" in svc.rooms and svc.rooms["fake:other"].core.hosted == ["b"]  # b is still a member
+    assert not any("'a' hosted" in n and "other" in n for n in notes)
+
+
+async def test_a_reload_that_adds_a_roster_only_bot_renormalises_the_members(running, tmp_path):
+    svc, fc = running
+    fc.membership["c1"].append(MemberInfo("y_bot", is_bot=True))
+    added = CONFIG.replace("      x: {username: x_bot}", "      x: {username: x_bot}\n      y: {username: y_bot}")
+    added = added.replace("agents: [a, b, x]", "agents: [a, b, x, y]")
+    await svc.reload(config(tmp_path, added))
+    log = svc.rooms["fake:team"].log
+    assert "y" in log.members() and log.members()["y"].is_bot and "y_bot" not in log.members()
+    assert "y" in svc.rooms["fake:team"].core._bots_in_room()
+
+
+RELOAD_CASES = [
+    # (change to the file, what the reload does: applied | refused | warned, how to tell)
+    ("agents: [a, b, x]", "agents: [a, x]", "applied", lambda svc, fc, notes: svc.rooms["fake:team"].core.hosted == ["a"]),
+    ("token_file: b.agent", "token_file: a.agent", "refused", None),
+    ("url: http://fake", "url: http://other", "refused", None),
+    ("token_file: b.bot", "token_file: b2.bot", "warned", lambda svc, fc, notes: any("new credentials" in n for n in notes)),
+    ("rooms:", "gateway: {listen: 127.0.0.1:1}\nrooms:", "warned", lambda svc, fc, notes: any("gateway.listen/tls" in n for n in notes)),
+    ("rooms:", "classifier: {command: [echo]}\nrooms:", "applied", lambda svc, fc, notes: svc.config.classifier.command == ("echo",)),
+    ("guests: [G]", "guests: [G, K]", "applied", lambda svc, fc, notes: "K" in svc.rooms["fake:team"].core.roster.guests),
+    ('"fake:team*"', '"fake:nothing"', "applied", lambda svc, fc, notes: svc.rooms == {}),
+]
+
+
+@pytest.mark.parametrize("old, new, outcome, check", RELOAD_CASES, ids=[c[1][:24] for c in RELOAD_CASES])
+async def test_every_configuration_section_is_applied_refused_or_said_on_reload(running, tmp_path, old, new, outcome, check):
+    svc, fc = running
+    (tmp_path / "b2.bot").write_text("rotated\n")
+    text = CONFIG.replace(old, new, 1)
+    assert text != CONFIG
+    if outcome == "refused":
+        before = svc.config
+        with pytest.raises(ConfigError):
+            await svc.reload(config(tmp_path, text))
+        assert svc.config is before
+        return
+    notes = await svc.reload(config(tmp_path, text))
+    assert check(svc, fc, notes), notes

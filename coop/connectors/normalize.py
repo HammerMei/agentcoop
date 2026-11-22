@@ -28,6 +28,9 @@ class Names:
         self._username = dict(usernames)
         self._agent = {u: a for a, u in usernames.items()}
 
+    def mapping(self) -> dict[str, str]:
+        return dict(self._username)
+
     def agent_of(self, username: str) -> str:
         return self._agent.get(username, username)
 

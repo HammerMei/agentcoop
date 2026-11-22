@@ -19,7 +19,7 @@ from coop.connectors.base import Membership, Posted
 from coop.connectors.mattermost.connector import MattermostConnector
 from coop.connectors.mattermost.normalize import normalize
 from coop.connectors.normalize import Names
-from coop.room.platform import RefusedPost
+from coop.room.platform import PlatformError, RefusedPost
 from coop.room.roster import Roster
 
 SERVER = parse(yaml.safe_load("""
@@ -369,3 +369,20 @@ async def test_members_are_paged_past_two_hundred(connected):
         mm.members["c01"].append(uid)
     found = await connector.members("c01")
     assert len(found) == 255 and any(m.username == "member249" for m in found)
+
+
+async def test_a_group_message_is_a_room_not_a_one_to_one_dm(mm):
+    glin, laomei, wavebro = mm.ids["glin"], mm.ids["laomei"], mm.ids["wavebro"]
+    mm.channel("glin, laomei_bot, wavebro_bot", kind="G", members=[glin, laomei, wavebro])
+    seen = []
+
+    async def on_event(event):
+        seen.append(event)
+    connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle), websocket=FakeSocket(mm))
+    rooms = await connector.add_bot("laomei", "tok-laomei")
+    group = next(r for r in rooms if r.name == "glin, laomei_bot, wavebro_bot")
+    assert not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
+    mm.failure = httpx.ConnectError("down")
+    with pytest.raises(PlatformError):
+        await connector.members("c01")
+    await connector.stop()

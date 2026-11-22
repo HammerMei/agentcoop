@@ -184,8 +184,8 @@ def parse(raw: dict, base: Path = RUNTIME_DIR) -> Config:
     servers = {name: _server(name, entry, base) for name, entry in _mapping(raw, "servers").items()}
     agents = {name: _agent(name, entry, base) for name, entry in _mapping(raw, "agents").items()}
     rooms = tuple(_room(pattern, entry) for pattern, entry in _mapping(raw, "rooms").items())
-    config = Config(servers, agents, rooms, _listen(raw.get("gateway") or {}, base),
-                    _classifier(raw.get("classifier") or {}, base))
+    config = Config(servers, agents, rooms, _listen(_mapping(raw, "gateway"), base),
+                    _classifier(_mapping(raw, "classifier"), base))
     _cross_check(config)
     return config
 
@@ -281,6 +281,9 @@ def _listen(entry: Any, base: Path) -> Listen:
     address = entry.get("listen", Listen.address)
     if not isinstance(address, str) or ":" not in address:
         raise ConfigError(f"{where}.listen: a `host:port` address")
+    port = address.rpartition(":")[2]
+    if not port.isdigit() or int(port) > 65535:  # 0 is valid: the kernel picks (tests, a proxy in front)
+        raise ConfigError(f"{where}.listen: {port!r} is not a port (0-65535)")
     tls = entry.get("tls")
     if tls is None:
         return Listen(address, None)
@@ -335,7 +338,11 @@ def _is_mapping(value: Any, where: str) -> dict:
 
 
 def _mapping(parent: dict, key: str, where: str = "the document") -> dict:
-    value = parent.get(key) or {}
+    """The section, ``{}`` when absent or null; any other value must be a mapping, so a
+    ``rooms: []`` is refused rather than read as no rooms."""
+    value = parent.get(key)
+    if value is None:
+        value = {}
     return _is_mapping(value, f"{where}.{key}" if where != "the document" else key)
 
 

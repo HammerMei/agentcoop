@@ -149,3 +149,21 @@ def test_an_int_serves_a_float_parameter_and_a_bad_yaml_file_is_a_config_error(t
 def test_a_listed_person_with_an_agents_name_is_refused():
     with pytest.raises(ConfigError, match="is a person and the name of agent 'laomei'"):
         parsed(FULL.replace("guests: [pat]", "guests: [pat, laomei]"))
+
+
+@pytest.mark.parametrize("text, message", [
+    ("gateway: {listen: 'localhost:not-a-port'}", "not a port"),
+    ("gateway: {listen: 'localhost:70000'}", "not a port"),
+    ("rooms: []", "rooms: not a mapping"),
+    ("agents: false", "agents: not a mapping"),
+    ("servers: {x: {type: rocketchat, url: u, bots: []}}", "servers.x.bots: not a mapping"),
+    ("gateway: []", "gateway: not a mapping"),
+])
+def test_bad_ports_and_falsy_sections_are_refused(text, message):
+    with pytest.raises(ConfigError, match=message):
+        parse(yaml.safe_load(text), BASE)
+
+
+def test_port_zero_and_null_sections_are_fine():
+    config = parse(yaml.safe_load("gateway: {listen: '127.0.0.1:0'}\nrooms:\nagents: null"), BASE)
+    assert config.gateway.address == "127.0.0.1:0" and config.rooms == () and config.agents == {}

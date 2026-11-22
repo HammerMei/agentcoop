@@ -148,3 +148,13 @@ def test_config_tls_makes_a_certificate_and_records_it(tmp_path, capsys):
     assert (tmp_path / "gateway" / "key.pem").stat().st_mode & 0o777 == 0o600
     loaded = load(config, tmp_path)
     assert loaded.gateway.tls == (tmp_path / "gateway/cert.pem", tmp_path / "gateway/key.pem")
+
+
+def test_config_add_agent_leaves_no_token_behind_when_the_configuration_is_refused(tmp_path, capsys):
+    config = tmp_path / "config.yaml"
+    config.write_text("servers:\n  lab:\n    type: mattermost\n    url: https://mm\n    team: t\n    bots:\n"
+                      "      muse: {username: muse}\n")
+    argv = ["config", "--config", str(config), "add", "agent", "muse", "--server", "lab", "--username", "muse",
+            "--bot-token-file", "t"]
+    assert cli.main(argv) == 1 and "already exists" in capsys.readouterr().err
+    assert not (tmp_path / "agents").exists()

@@ -176,9 +176,6 @@ def cmd_config_add_agent(args) -> int:
         return 1
     base = args.config.parent
     token_file = base / "agents" / args.name / "token"
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(secrets.token_urlsafe(32) + "\n")
-    token_file.chmod(0o600)
     agents[args.name] = {"type": "remote", "token_file": str(token_file.relative_to(base))}
     bot: dict = {"username": args.username, "token_file": str(_relative(args.bot_token_file, base))}
     if args.owner:
@@ -193,10 +190,13 @@ def cmd_config_add_agent(args) -> int:
     servers[args.server] = server
     raw["agents"], raw["servers"] = agents, servers
     try:
-        config = _validate(raw, base)
+        config = _validate(raw, base)  # the loader never reads the token file, so this runs before it exists
     except ConfigError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(secrets.token_urlsafe(32) + "\n")
+    token_file.chmod(0o600)
     _write_yaml(args.config, raw)
     print(f"agent {args.name} added to {args.config}; run `coop reload` to host it.")
     print("Give the agent's host, once:")
