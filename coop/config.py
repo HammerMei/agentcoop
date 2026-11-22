@@ -30,6 +30,8 @@ agents:
 gateway:
   listen: 127.0.0.1:7474
   tls: {cert: gateway/cert.pem, key: gateway/key.pem}
+classifier:
+  command: [claude, -p, --output-format, text]
 rooms:
   "lab-mm:team":
     agents: [laomei, wavebro, muse]
@@ -48,6 +50,7 @@ from typing import Any
 import yaml
 
 from .paths import RUNTIME_DIR
+from .room.classifier_cli import DEFAULT_COMMAND as DEFAULT_CLASSIFIER_COMMAND
 from .room.model import Params
 from .room.roster import Roster
 from .room_pattern import InvalidRoomPattern, RoomPattern
@@ -118,11 +121,22 @@ class Listen:
 
 
 @dataclass(frozen=True)
+class ClassifierConfig:
+    """The one-shot command that answers the classifier prompt on stdin
+    (:mod:`coop.room.classifier_cli`); rooms with ``classifier_enabled: false``
+    never run it."""
+
+    command: tuple[str, ...] = DEFAULT_CLASSIFIER_COMMAND
+    working_directory: Path | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     servers: dict[str, Server]
     agents: dict[str, Agent]
     rooms: tuple[RoomRule, ...]
     gateway: Listen
+    classifier: ClassifierConfig = ClassifierConfig()
 
     def rule_for(self, handle: str) -> RoomRule | None:
         """The first ``rooms`` entry matching ``<server>:<room>``, or none."""
@@ -157,11 +171,12 @@ def load(path: Path, base: Path = RUNTIME_DIR) -> Config:
 
 
 def parse(raw: dict, base: Path = RUNTIME_DIR) -> Config:
-    _only_keys(raw, ("servers", "agents", "rooms", "gateway"), "the document")
+    _only_keys(raw, ("servers", "agents", "rooms", "gateway", "classifier"), "the document")
     servers = {name: _server(name, entry, base) for name, entry in _mapping(raw, "servers").items()}
     agents = {name: _agent(name, entry, base) for name, entry in _mapping(raw, "agents").items()}
     rooms = tuple(_room(pattern, entry) for pattern, entry in _mapping(raw, "rooms").items())
-    config = Config(servers, agents, rooms, _listen(raw.get("gateway") or {}, base))
+    config = Config(servers, agents, rooms, _listen(raw.get("gateway") or {}, base),
+                    _classifier(raw.get("classifier") or {}, base))
     _cross_check(config)
     return config
 
@@ -255,6 +270,19 @@ def _listen(entry: Any, base: Path) -> Listen:
     _only_keys(tls, ("cert", "key"), f"{where}.tls")
     return Listen(address, (_path(_string(tls, "cert", f"{where}.tls"), base),
                             _path(_string(tls, "key", f"{where}.tls"), base)))
+
+
+def _classifier(entry: Any, base: Path) -> ClassifierConfig:
+    where = "classifier"
+    entry = _is_mapping(entry, where)
+    _only_keys(entry, ("command", "working_directory"), where)
+    command = entry.get("command", list(DEFAULT_CLASSIFIER_COMMAND))
+    if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
+        raise ConfigError(f"{where}.command: a non-empty list of strings")
+    cwd = entry.get("working_directory")
+    if cwd is not None and not isinstance(cwd, str):
+        raise ConfigError(f"{where}.working_directory: not a string")
+    return ClassifierConfig(tuple(command), None if cwd is None else _path(cwd, base))
 
 
 def _cross_check(config: Config) -> None:

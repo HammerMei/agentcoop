@@ -78,9 +78,11 @@ RULES = Path(__file__).resolve().parent.parent / "rules.md"
 
 
 def build_app(gateway: Gateway, tokens: dict[str, str], rules_text: str | None = None) -> web.Application:
-    """``tokens`` maps each bearer token to the agent it names. ``rules_text`` is the
-    room-rules document (design §3.3); the package's ``rules.md`` unless given."""
-    doorbell = _Doorbell(gateway, dict(tokens), RULES.read_text() if rules_text is None else rules_text)
+    """``tokens`` maps each bearer token to the agent it names, and is held by
+    reference: the daemon edits it on a reload and the next request sees the change.
+    ``rules_text`` is the room-rules document (design §3.3); the package's
+    ``rules.md`` unless given."""
+    doorbell = _Doorbell(gateway, tokens, RULES.read_text() if rules_text is None else rules_text)
     app = web.Application(middlewares=[_authenticate])
     app[DOORBELL] = doorbell
     app.router.add_get("/v1/agents/me/wake", wake)

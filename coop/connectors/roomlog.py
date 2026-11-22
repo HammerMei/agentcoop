@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import bisect
 import logging
+from collections.abc import Awaitable, Callable
 
 from ..room.model import Member, Position, Post, PostKind, Role
 from ..room.platform import RefusedPost
@@ -40,6 +41,8 @@ class RoomLog:
         self._ids: set[str] = set()
         self.archived: set[str] = set()
         self._members: dict[str, Member] = {}
+        # Told of every post new to the log, the bot's own included: the core's ``on_post``.
+        self.on_new: Callable[[Post], Awaitable[None]] | None = None
 
     @property
     def id(self) -> str:
@@ -57,8 +60,18 @@ class RoomLog:
         self._ids.add(post.id)
         return True
 
+    async def admit(self, post: Post) -> bool:
+        """One copy of a post, delivered onward when it is new: a copy the log already
+        holds, from another connection or the echo of the bot's own post, goes no further."""
+        if not self.ingest(post):
+            return False
+        if self.on_new is not None:
+            await self.on_new(post)
+        return True
+
     def backfill(self, posts: list[Post]) -> int:
-        """History the daemon fetched; returns how many were new."""
+        """History the daemon fetched, into the log only; returns how many were new. The
+        daemon replays what the core should see through the core's own replay path."""
         return sum(self.ingest(p) for p in posts)
 
     def set_members(self, members: list[MemberInfo]) -> None:
@@ -110,5 +123,5 @@ class RoomLog:
         if thread is not None and thread in self.archived:
             raise RefusedPost(thread)
         post = await self.connector.post(author, self.id, text, thread)
-        self.ingest(post)  # ahead of its echo, which the dedup then drops
+        await self.admit(post)  # the core sees it now, as every other post; the echo is then a duplicate
         return post
