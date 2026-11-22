@@ -37,6 +37,10 @@ class Platform(Protocol):
 
     def thread_posts(self, thread: str, newest_first: bool = False) -> list[Post]: ...
 
+    def position_of(self, post_id: str) -> Position | None:
+        """The position of a post the room holds, or ``None``."""
+        ...
+
     def last_position(self) -> Position | None:
         """The position of the newest post, or ``None`` in an empty room."""
         ...

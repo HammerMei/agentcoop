@@ -95,8 +95,9 @@ class HttpDoorbell:
         doc = self._answer(r)
         return decode_wake(doc["wake"]), [decode_post(p) for p in doc["posts"]]
 
-    async def read_room(self, room: str) -> list[Post]:
-        r = await (await self._http()).get("/v1/agents/me/posts", params={"room": room})
+    async def read_room(self, room: str, after: str | None = None) -> list[Post]:
+        params = {"room": room} if after is None else {"room": room, "after": after}
+        r = await (await self._http()).get("/v1/agents/me/posts", params=params)
         return [decode_post(p) for p in self._answer(r)["posts"]]
 
     async def send(self, reply: Reply, room: str | None = None) -> Post | None:

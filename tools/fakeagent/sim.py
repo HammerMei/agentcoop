@@ -199,6 +199,9 @@ class FakePlatform:
     def by_id(self, post_id: str) -> Post:
         return next(p for p in self.posts if p.id == post_id)
 
+    def position_of(self, post_id: str):
+        return next((p.position for p in self.posts if p.id == post_id), None)
+
     async def archive(self, thread: str) -> None:
         self.archived.add(thread)
         for core in self.cores:

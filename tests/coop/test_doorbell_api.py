@@ -348,3 +348,14 @@ async def test_a_control_with_no_thread_is_400(api, sb):
     r = await api.post("/v1/agents/me/posts", headers=as_("a"),
                        json={"thread": None, "wake_id": None, "room": "team", "control": {"mute": ["b"]}})
     assert r.status_code == 400 and "names the thread" in r.json()["error"]
+
+
+async def test_a_room_read_after_a_post_id_starts_there_and_an_unknown_id_is_404(api, sb):
+    first = await sb.human("one")
+    await sb.human("two")
+    r = await api.get("/v1/agents/me/posts", params={"room": "team", "after": first.id}, headers=as_("a"))
+    assert r.status_code == 200 and [p["text"] for p in r.json()["posts"]] == ["two"]
+    r = await api.get("/v1/agents/me/posts", params={"room": "team"}, headers=as_("a"))
+    assert [p["text"] for p in r.json()["posts"]] == ["one", "two"]  # from the cursor: everything
+    r = await api.get("/v1/agents/me/posts", params={"room": "team", "after": "nope"}, headers=as_("a"))
+    assert r.status_code == 404 and "no post 'nope'" in r.json()["error"]

@@ -109,6 +109,10 @@ class RoomLog:
     def last_position(self) -> Position | None:
         return self._keys[-1] if self._keys else None
 
+    def position_of(self, post_id: str) -> Position | None:
+        post = self.by_id(post_id)
+        return None if post is None else post.position
+
     def by_id(self, post_id: str) -> Post | None:
         if post_id not in self._ids:
             return None

@@ -53,6 +53,7 @@ def parser() -> argparse.ArgumentParser:
     where = read.add_mutually_exclusive_group(required=True)
     where.add_argument("--wake", metavar="W")
     where.add_argument("--room", metavar="R")
+    read.add_argument("--after", metavar="ID", help="with --room: start after this post instead of the cursor")
 
     send = sub.add_parser("send", help="one reply, as the bot")
     mode = send.add_mutually_exclusive_group(required=True)
@@ -111,6 +112,8 @@ def plain_http(address: str) -> bool:
 
 async def cmd_read(doorbell: HttpDoorbell, args) -> int:
     trigger = None
+    if args.wake is not None and args.after is not None:
+        parser().error("read --after goes with --room")
     if args.wake is not None:
         wake, posts = await doorbell.read(args.wake)
         trigger = wake.trigger.post_id if wake.trigger is not None else None
@@ -118,7 +121,7 @@ async def cmd_read(doorbell: HttpDoorbell, args) -> int:
         print(render_hint(wake.hint))
         print()
     else:
-        posts = await doorbell.read_room(args.room)
+        posts = await doorbell.read_room(args.room, args.after)
     for post in posts:
         print(post_line(post, trigger))
         for found in post.attachments:

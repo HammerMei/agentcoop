@@ -139,8 +139,8 @@ class Gateway:
     def read(self, agent: str, wake_id: str) -> tuple[Wake, list[Post]]:
         return self._room_of_wake(agent, wake_id).read(agent, wake_id)
 
-    def read_room(self, agent: str, room: str) -> list[Post]:
-        return self._room(room).read_room(agent)
+    def read_room(self, agent: str, room: str, after: str | None = None) -> list[Post]:
+        return self._room(room).read_room(agent, after)
 
     async def send(self, agent: str, reply: Reply, room: str | None = None) -> Post | None:
         return await self.room_for(agent, reply, room).send(agent, reply)

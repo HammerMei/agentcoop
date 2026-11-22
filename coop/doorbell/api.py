@@ -162,7 +162,12 @@ async def read(request: web.Request) -> web.Response:
     refused = _room_refusal(gateway, agent, room)
     if refused is not None:
         return refused
-    return web.json_response({"posts": _posts(gateway, agent, room, gateway.read_room(agent, room))})
+    after = request.query.get("after")
+    try:
+        posts = gateway.read_room(agent, room, after)
+    except KeyError:
+        return _error(404, f"no post {after!r} in room {room!r}")
+    return web.json_response({"posts": _posts(gateway, agent, room, posts)})
 
 
 async def send(request: web.Request) -> web.Response:

@@ -969,10 +969,18 @@ class RoomCore:
                        own=[p.id for p in run.payload if p.author == bot])
         return run.wake, list(run.payload)
 
-    def read_room(self, bot: str) -> list[Post]:
-        """A read outside a wake: the posts after the cursor through the latest, how an
-        agent checks whether its own reply landed. Records nothing."""
-        return [p for p in self.platform.posts_after(self._cursor(bot))]
+    def read_room(self, bot: str, after: str | None = None) -> list[Post]:
+        """A read outside a wake: the posts after the cursor, or after the post ``after``
+        names, through the latest; how an agent checks whether its own reply landed, and
+        what an agent's own heartbeat reads. Records nothing. ``KeyError`` for a post id
+        the room does not hold."""
+        if after is None:
+            start = self._cursor(bot)
+        else:
+            start = self.platform.position_of(after)
+            if start is None:
+                raise KeyError(after)
+        return list(self.platform.posts_after(start))
 
     async def send(self, bot: str, reply: Reply) -> Post | None:
         """One reply posted on the bot's behalf (design §3.5). A wake's send is checked

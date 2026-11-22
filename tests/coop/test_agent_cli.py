@@ -165,3 +165,15 @@ async def test_plain_http_is_warned_about_once(coop, capsys):
     await coop("read", "--room", "team")
     err = capsys.readouterr().err.splitlines()
     assert len(err) == 1 and err[0].startswith("[WARNING]") and "plain http" in err[0]
+
+
+async def test_read_room_after_a_post_id(sb, coop, capsys):
+    first = await sb.human("one")
+    await sb.human("two")
+    assert await coop("read", "--room", "team", "--after", first.id) == 0
+    out = capsys.readouterr().out
+    assert "two" in out and "one" not in out
+    assert await coop("read", "--room", "team", "--after", "nope") == 1
+    assert capsys.readouterr().err.splitlines()[-1].startswith("[ERROR] 404: no post 'nope'")
+    with pytest.raises(SystemExit):
+        await coop("read", "--wake", "w-team-1", "--after", first.id)
