@@ -61,8 +61,17 @@ class MattermostREST:
         return await self._json("GET", f"/channels/{channel_id}")
 
     async def channel_member_ids(self, channel_id: str) -> list[str]:
-        members = await self._json("GET", f"/channels/{channel_id}/members", params={"per_page": 200})
-        return [m["user_id"] for m in members if isinstance(m, dict) and m.get("user_id")]
+        found: list[str] = []
+        page = 0
+        while True:
+            members = await self._json("GET", f"/channels/{channel_id}/members", params={"page": page, "per_page": 200})
+            ids = [m["user_id"] for m in members if isinstance(m, dict) and m.get("user_id")]
+            if not ids or set(ids) <= set(found):  # a short last page, or a server that ignores ``page``
+                return found + [i for i in ids if i not in found]
+            found += ids
+            if len(members) < 200:
+                return found
+            page += 1
 
     # ── posts ───────────────────────────────────────────────────────────────
 

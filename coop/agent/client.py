@@ -112,6 +112,9 @@ class HttpDoorbell:
             raise LostResponse() from None
         if r.status_code == 422:
             raise RefusedSend(r.json().get("reasons", r.json().get("error", "")))
+        if r.status_code == 504:
+            # the gateway reached the platform and got no answer: the same unknown as a timeout
+            raise LostResponse()
         if r.status_code == 502:
             # the gateway filled in a wake's thread the reply left out (design §3.3)
             raise RefusedPost(r.json().get("thread") or reply.thread)

@@ -120,3 +120,27 @@ def test_what_the_loader_refuses_and_where_it_points(text, message):
         doc["agents"] = {"a": {"type": "remote", "token_file": "t"}}
     with pytest.raises(ConfigError, match=message):
         parse(doc, BASE)
+
+
+@pytest.mark.parametrize("text, message", [
+    ("rooms: {'x:*': {agents: [a], enforce: 'false'}}", "enforce: 'false' is not bool"),
+    ("rooms: {'x:*': {agents: [a], rate_limit_posts: '6'}}", "rate_limit_posts: '6' is not int"),
+    ("rooms: {'x:*': {agents: [a], rate_limit_posts: 2.5}}", "rate_limit_posts: 2.5 is not int"),
+    ("rooms: {'x:*': {agents: [a], cooldown_seconds: true}}", "cooldown_seconds: True is not float"),
+    ("rooms: {'x:*': {agents: [a], classifier_fallback: 3}}", "classifier_fallback: 3 is not str"),
+])
+def test_room_parameters_are_type_checked(text, message):
+    doc = yaml.safe_load(text)
+    doc["agents"] = {"a": {"type": "remote", "token_file": "t"}}
+    with pytest.raises(ConfigError, match=message):
+        parse(doc, BASE)
+
+
+def test_an_int_serves_a_float_parameter_and_a_bad_yaml_file_is_a_config_error(tmp_path):
+    doc = yaml.safe_load("rooms: {'x:*': {agents: [a], cooldown_seconds: 5}}")
+    doc["agents"] = {"a": {"type": "remote", "token_file": "t"}}
+    assert parse(doc, BASE).rooms[0].params.cooldown_seconds == 5
+    path = tmp_path / "config.yaml"
+    path.write_text("servers: [unclosed")
+    with pytest.raises(ConfigError, match="not YAML"):
+        load(path)

@@ -176,6 +176,9 @@ class MattermostConnector:
                     if raw is not None and (post := await self._normalize(bot, room_id, raw)) is not None:
                         posts.append(post)
                 if posts:
+                    if before_id is None and after_id is None:
+                        # the newest page: the mark a resync starts after, until a live post moves it
+                        self._last.setdefault(room_id, posts[-1].position)
                     return posts
                 # a page of nothing but system posts: the next page, not the end of history
                 if after_id is not None and before_id is None:

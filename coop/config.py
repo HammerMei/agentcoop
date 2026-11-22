@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import yaml
 
@@ -63,6 +63,10 @@ SERVER_TYPES = ("mattermost", "rocketchat")
 REJECTED_AGENT_FIELDS = ("permissions", "owner_allowed_tools", "guest_allowed_tools", "tool_presets",
                          "command", "working_directory")
 _PARAM_FIELDS = {f.name for f in fields(Params)}
+# What each room parameter must be: the annotation, with the Literal (classifier_fallback)
+# read as str. A bool is not an int here, and "false" is not a bool.
+_PARAM_TYPES = {name: (hint if hint in (bool, int, float, str) else str)
+                for name, hint in get_type_hints(Params).items()}
 
 
 class ConfigError(ValueError):
@@ -163,8 +167,11 @@ class Config:
 
 def load(path: Path, base: Path | None = None) -> Config:
     base = path.parent if base is None else base
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path}: not YAML: {exc}") from None
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
@@ -251,8 +258,17 @@ def _room(pattern: str, entry: Any) -> RoomRule:
         raise ConfigError(f"{where}.agents: a non-empty list of agent names")
     if len(set(agents)) != len(agents):
         raise ConfigError(f"{where}.agents: names repeat")
+    values = {k: v for k, v in entry.items() if k != "agents"}
+    for key, value in values.items():
+        expected = _PARAM_TYPES[key]
+        ok = (isinstance(value, bool) if expected is bool
+              else isinstance(value, str) if expected is str
+              else isinstance(value, (int, float)) and not isinstance(value, bool)
+              and (expected is float or isinstance(value, int)))
+        if not ok:
+            raise ConfigError(f"{where}.{key}: {value!r} is not {expected.__name__}")
     try:
-        params = Params(**{k: v for k, v in entry.items() if k != "agents"})
+        params = Params(**values)
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"{where}: {exc}") from None
     return RoomRule(compiled, tuple(agents), params)

@@ -18,7 +18,9 @@ Errors answer ``{"error": "..."}``: 401 for a missing or unknown token, 403 for 
 whose roster does not list the agent, 404 for a room the gateway does not watch, 409
 for a wake id with no live lease, 400 for a reply with nothing postable, 422 for a
 send the gateway refused (``reasons`` beside ``error``), 502 for a post the platform
-refused. The token is compared in constant time and never logged.
+refused, 504 when the platform did not answer and the outcome is unknown (the client
+treats it as a lost response, design §3.3). The token is compared in constant time and
+never logged.
 """
 
 from __future__ import annotations
@@ -191,7 +193,7 @@ async def send(request: web.Request) -> web.Response:
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
     except PlatformError as exc:
-        return _error(502, f"the platform did not answer: {exc}", thread=reply.thread)
+        return _error(504, f"the platform did not answer: {exc}", thread=reply.thread)
     return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post))})
 
 
@@ -235,7 +237,7 @@ async def done(request: web.Request) -> web.Response:
     try:
         ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
     except PlatformError as exc:
-        return _error(502, f"the platform did not answer: {exc}")
+        return _error(504, f"the platform did not answer: {exc}")
     return web.json_response({"done": ok})
 
 
@@ -262,7 +264,7 @@ async def attachment(request: web.Request) -> web.Response:
     except PermissionError as exc:
         return _error(403, str(exc))
     except PlatformError as exc:
-        return _error(502, f"the platform did not answer: {exc}")
+        return _error(504, f"the platform did not answer: {exc}")
     name = _HEADER_UNSAFE.sub("", found.name)  # a control character or a quote would break the header
     return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})

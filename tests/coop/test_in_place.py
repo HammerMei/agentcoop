@@ -123,3 +123,44 @@ async def test_reset_stays_pending_until_the_agent_polls_the_wake():
     await sb.human("@a hello", "t1")
     assert sb.gw.persisted["a"].reset_pending  # issued, not yet polled: a restart would reissue it with reset
     assert sb.gateway.poll("a").reset and not sb.gw.persisted["a"].reset_pending
+
+
+async def test_a_reset_wake_serves_the_unfinished_threads_posts_again():
+    sb = Sandbox(bots=("a", "b"), attach_agent=False)
+    await sb.human("mute: @a", "t2")
+    news = await sb.human("news in t2", "t2")
+    await sb.human("@a hello")  # delivers t2 closed: unfinished after the turn
+    wake = sb.gateway.poll("a")
+    sb.gateway.read("a", wake.wake_id)
+    await sb.gateway.done("a", wake.wake_id, answered=("main",))  # main answered, t2 closed: unfinished
+    assert sb.gw.persisted["a"].unfinished == {"t2"}
+    sb.gw.reset("a")
+    await sb.human("@a again", "t3")
+    wake = sb.gateway.poll("a")
+    _, posts = sb.gateway.read("a", wake.wake_id)
+    assert wake.reset and news.id in [p.id for p in posts]  # before the cursor, served again
+    assert [p.position for p in posts] == sorted(p.position for p in posts)
+    await sb.gateway.done("a", wake.wake_id, answered=("t2",))
+    await sb.human("@a once more", "t3")
+    _, posts = sb.gateway.read("a", sb.gateway.poll("a").wake_id)
+    assert news.id not in [p.id for p in posts]  # a plain wake: from the cursor only
+
+
+async def test_a_post_arriving_below_a_cursor_or_a_wakes_mark_is_logged(caplog):
+    import logging
+
+    from coop.room.model import Post
+
+    sb = Sandbox(bots=("a", "b"), attach_agent=False)
+    await sb.human("@a one", "t1")
+    wake = sb.gateway.poll("a")
+    late = Post(id="late", position=0, time=0.0, thread="t1", author="H", text="late", kind="human")
+    with caplog.at_level(logging.WARNING, logger="coop.room.core"):
+        await sb.gw.on_post(late)
+    assert any("below the mark of a's wake" in r.message and r.message.count("late") for r in caplog.records)
+    sb.gateway.read("a", wake.wake_id)
+    await sb.gateway.done("a", wake.wake_id, answered=("t1",))  # a normal turn: the cursor moves
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="coop.room.core"):
+        await sb.gw.on_post(Post(id="later", position=0, time=0.0, thread="t1", author="H", text="x", kind="human"))
+    assert any("below a's cursor" in r.message for r in caplog.records)

@@ -466,6 +466,7 @@ class RoomCore:
         self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)
         if not copies:
             return  # the gateway's own post: counted (on replay) but no trigger
+        self._warn_if_late(post, copies)
         if self._apply_controls(post):
             return
         addressed = tuple(b for b in copies if self._addresses(post, b) and after(post.position, self._cursor(b)))
@@ -896,6 +897,20 @@ class RoomCore:
         return (max(posts - len(recent), 0) if posts else None,
                 max(words - sum(r[2] for r in recent), 0) if words else None)
 
+    def _warn_if_late(self, post: Post, copies: list[str]) -> None:
+        """A post that arrives below a bot's cursor, or below the mark of a wake already
+        issued, is never in a read: the cursor passes it. The paths that produce one (a
+        resync interleaving with live frames, the bot's own post admitted ahead of a
+        human's in flight) are rare and unbounded in the code, so they are made visible
+        here and fixed in the core when the rate says so."""
+        for bot in copies:
+            run = self.volatile[bot].turn
+            if not after(post.position, self._cursor(bot)):
+                logger.warning("%s: post %s arrived below %s's cursor; it will not be in a read", self.room, post.id, bot)
+            elif run is not None and run.hwm is not None and not after(post.position, run.hwm):
+                logger.warning("%s: post %s arrived below the mark of %s's wake %s; it will not be in that read",
+                               self.room, post.id, bot, run.wake.wake_id)
+
     def _trigger(self, bot: str, post: Post | None) -> Trigger | None:
         if post is None:
             return None
@@ -921,6 +936,11 @@ class RoomCore:
                     trigger=self._trigger(bot, trigger), rules_version=self.rules_version,
                     reset=self.persisted[bot].reset_pending)
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
+        if wake.reset:
+            # a fresh session holds none of its unfinished threads: their posts come again (design §3.4)
+            again = {p.id: p for t in self.persisted[bot].unfinished for p in self.platform.thread_posts(t)}
+            again.update({p.id: p for p in payload})
+            payload = tuple(sorted(again.values(), key=lambda p: p.position))
         run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not payload)
         self.volatile[bot].turn = run
         if bot not in self.platform.members():  # configured here, not in the room: loud, until the roster owns it

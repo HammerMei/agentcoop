@@ -321,3 +321,36 @@ async def test_a_state_file_of_another_format_is_noted_and_the_room_starts_fresh
         assert any("not a 1 room state document" in n for n in svc.notes)
     finally:
         await svc.stop()
+
+
+async def test_an_attachment_is_fetched_through_a_hosted_bot(running):
+    svc, fc = running
+    post = await fc.human("c1", "H", "@a_bot see this", files=(("a.txt", "text/plain", b"hello"),))
+    await settle()
+    wake = svc.gateway.poll("a")
+    _, posts = svc.gateway.read("a", wake.wake_id)
+    delivered = svc.gateway.deliverable("a", "fake:team", next(p for p in posts if p.id == post.id))
+    handle = delivered.attachments[0].id  # the handle a read over the doorbell prints
+    found, data = await svc.gateway.fetch_attachment("a", handle)
+    assert found.name == "a.txt" and data == b"hello"
+
+
+async def test_malformed_saved_threads_start_the_room_fresh_loudly(tmp_path):
+    fc = connector()
+    (tmp_path / "state" / "fake").mkdir(parents=True)
+    (tmp_path / "state" / "fake" / "c1.json").write_text('{"format": 1, "bots": {}, "threads": {"t1": {"bogus": 1}}}')
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert "fake:team" in svc.rooms and svc.rooms["fake:team"].core.settings == {}
+        assert any("malformed room state" in n for n in svc.notes)
+    finally:
+        await svc.stop()
+
+
+async def test_a_reload_that_changes_a_connected_bots_credentials_says_a_restart_is_needed(running, tmp_path):
+    svc, fc = running
+    (tmp_path / "b2.bot").write_text("rotated\n")
+    notes = await svc.reload(config(tmp_path, CONFIG.replace("token_file: b.bot", "token_file: b2.bot")))
+    assert any("'b' has new credentials" in n and "restart" in n for n in notes)
+    assert fc.bots["b"] == "bot-token-b"  # the connection kept the old one, as the note says

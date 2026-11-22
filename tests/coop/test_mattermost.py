@@ -137,7 +137,9 @@ class FakeMattermost:
         if len(parts) == 2:
             return httpx.Response(200, json=self.channels[parts[1]])
         if parts[2] == "members":
-            return httpx.Response(200, json=[{"user_id": u, "channel_id": parts[1]} for u in self.members[parts[1]]])
+            page, per_page = int(params.get("page", 0)), int(params.get("per_page", 200))
+            users = self.members[parts[1]][page * per_page:(page + 1) * per_page]
+            return httpx.Response(200, json=[{"user_id": u, "channel_id": parts[1]} for u in users])
         if parts[2] == "posts":
             return self._page(parts[1], params)
         return httpx.Response(404, json={"message": "no route"})
@@ -261,10 +263,10 @@ async def test_history_pages_by_post_id_oldest_first_and_resync_re_emits_what_a_
     assert [p.text for p in older] == ["n1", "n2", "n3"]
     newer = await connector.history("c01", after=(posts[4]["create_at"], posts[4]["id"]))
     assert [p.text for p in newer] == ["n5", "n6"]
-    await mm.deliver(posts[2])  # the live copy of n2 sets the high-water mark
+    await mm.deliver(posts[2])  # a live copy older than the history already read: the mark stays at n6
     mm.post("c01", mm.ids["glin"], "missed")
     await mm.sockets[0].on_reconnect()
-    assert [e.post.text for e in seen] == ["n2", "n3", "n4", "n5", "n6", "missed"]
+    assert [e.post.text for e in seen] == ["n2", "missed"]
 
 
 async def test_a_post_goes_out_with_bot_usernames_and_comes_back_as_the_echo(connected):
@@ -348,3 +350,22 @@ async def test_transport_failures_are_platform_errors_and_a_missing_file_a_key_e
     mm.failure, mm.not_found = None, True
     with pytest.raises(KeyError):
         await connector.fetch_file("laomei", "f1")
+
+
+async def test_resync_starts_after_the_startup_history_when_no_live_post_came_yet(connected):
+    connector, mm, seen, _ = connected
+    mm.post("c01", mm.ids["glin"], "seen at start")
+    await connector.history("c01")  # the daemon's backfill at open
+    for i in range(70):
+        mm.post("c01", mm.ids["glin"], f"during the outage {i}")
+    await mm.sockets[0].on_reconnect()
+    assert [e.post.text for e in seen] == [f"during the outage {i}" for i in range(70)]
+
+
+async def test_members_are_paged_past_two_hundred(connected):
+    connector, mm, seen, _ = connected
+    for i in range(250):
+        uid = mm.user(f"member{i}")
+        mm.members["c01"].append(uid)
+    found = await connector.members("c01")
+    assert len(found) == 255 and any(m.username == "member249" for m in found)

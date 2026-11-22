@@ -207,7 +207,7 @@ class Service:
         saved = run.saved.get("bots", {}).get(agent)
         run.core.add_hosted(agent, run.log.last_position())
         if saved is not None:
-            load_room(run.core, {"format": run.saved["format"], "bots": {agent: saved}})
+            self._restore(run, {"format": run.saved["format"], "bots": {agent: saved}})
         logger.info("%s: hosting %r", handle, agent)
 
     async def _unhost(self, run: RoomRun, agent: str) -> None:
@@ -230,6 +230,7 @@ class Service:
                         self._classifier_factory(self.config, handle) if rule.params.classifier_enabled else None,
                         name="coop", rules_version=self.gateway.rules_version, wake_seed=self.wake_seed)
         run = RoomRun(handle, server, info, log, core, rule, saved=self._load_room_doc(server, info.id))
+        log.hosted = core.hosted  # the one list: a file is fetched through a bot hosted here
         log.on_new = core.on_post
         core.on_change = lambda: self._save_room(run)
         # registered before the first await: a post arriving while the members and the
@@ -244,9 +245,20 @@ class Service:
             self._close_room(run)
             raise
         if run.saved:
-            load_room(core, {"format": run.saved["format"], "threads": run.saved.get("threads", {})})
+            self._restore(run, {"format": run.saved["format"], "threads": run.saved.get("threads", {})})
         self.gateway.add_room(core)
         return run
+
+    def _restore(self, run: RoomRun, document: dict) -> None:
+        """Part of the room's saved state into the core; a malformed part starts the room
+        fresh, loudly, as an unreadable file does."""
+        try:
+            load_room(run.core, document)
+        except (ValueError, TypeError, AttributeError) as exc:
+            self._note(f"[ERROR] {self._room_file(run.server, run.info.id)}: malformed room state, starting the room "
+                       f"fresh: {exc}")
+            run.saved = {}
+            run.core.settings.clear()
 
     def _close_room(self, run: RoomRun) -> None:
         self._close_worker(run)
@@ -354,7 +366,7 @@ class Service:
         Returns the notes for the operator."""
         self._refuse_server_changes(config)
         self._set_tokens(config)  # read before the switch: a missing token file refuses the whole reload
-        self.config = config
+        old, self.config = self.config, config
         notes: list[str] = []
         self.notes = notes
         for server in config.servers.values():
@@ -362,7 +374,7 @@ class Service:
         for run in list(self.rooms.values()):
             await self._reload_room(run, notes)  # rosters first: a bot connected below is hosted by them
         for server in config.servers.values():
-            await self._reload_bots(server, notes)
+            await self._reload_bots(server, old.servers[server.name], notes)
         await self._host_newly_ruled(notes)
         for run in self.rooms.values():
             await self._ensure_started(run)
@@ -377,7 +389,7 @@ class Service:
             if name not in config.servers:
                 raise ConfigError(f"servers.{name}: removing a server needs a restart")
 
-    async def _reload_bots(self, server: Server, notes: list[str]) -> None:
+    async def _reload_bots(self, server: Server, before: Server, notes: list[str]) -> None:
         hosted_now = {a for a, b in server.bots.items() if b.hosted}
         for agent in sorted(self._connected[server.name] - hosted_now):
             await self._disconnect_bot(server.name, agent)
@@ -385,6 +397,12 @@ class Service:
         for agent in sorted(hosted_now - self._connected[server.name]):
             if await self._connect_bot(server, agent):
                 notes.append(f"{server.name}: bot {agent!r} connected")
+        for agent in sorted(hosted_now & self._connected[server.name]):
+            was, now = before.bots.get(agent), server.bots[agent]
+            if was is not None and (was.username, was.token_file) != (now.username, now.token_file):
+                # the connection keeps the credentials it was opened with: said, not silently kept
+                self._note(f"[WARNING] {server.name}: bot {agent!r} has new credentials in the configuration; "
+                           "the connection keeps the old ones until a restart")
 
     async def _reload_room(self, run: RoomRun, notes: list[str]) -> None:
         """The rule the room matches now, applied in place; no rule closes it."""

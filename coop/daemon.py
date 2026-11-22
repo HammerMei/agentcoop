@@ -27,18 +27,36 @@ logger = logging.getLogger(__name__)
 
 
 def acquire_lock(pid_file: Path = paths.PID_FILE) -> None:
+    """Create the pid file, or fail: two starts in the same instant cannot both pass. A
+    file left by a daemon that is gone is replaced once. ``RuntimeError`` names the
+    live holder."""
     pid_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = pid_file.with_name(f"{pid_file.name}.{os.getpid()}.tmp")
-    try:
-        tmp.write_text(str(os.getpid()))
-        tmp.replace(pid_file)
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
+    for attempt in range(2):
+        try:
+            fd = os.open(pid_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            holder = locked_pid(pid_file)
+            if holder is not None:
+                raise RuntimeError(f"coop daemon already running (pid={holder})") from None
+            if attempt == 0:
+                pid_file.unlink(missing_ok=True)  # stale: the next attempt creates it
+                continue
+            raise
+        with os.fdopen(fd, "w") as f:
+            f.write(str(os.getpid()))
+        return
+    raise RuntimeError(f"could not take the pid file {pid_file}")
 
 
 def release_lock(pid_file: Path = paths.PID_FILE) -> None:
-    pid_file.unlink(missing_ok=True)
+    """Remove the pid file when it is ours, or stale; never another live daemon's."""
+    try:
+        holder = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        pid_file.unlink(missing_ok=True)
+        return
+    if holder == os.getpid() or locked_pid(pid_file) is None:
+        pid_file.unlink(missing_ok=True)
 
 
 def locked_pid(pid_file: Path = paths.PID_FILE) -> int | None:
@@ -129,7 +147,11 @@ def run_foreground(config_path: Path) -> int:
     if running:
         print(f"[ERROR] coop daemon already running (pid={pid})", file=sys.stderr)
         return 1
-    acquire_lock()
+    try:
+        acquire_lock()
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
     try:
         return asyncio.run(run(config_path))
     finally:
@@ -164,8 +186,12 @@ def start_daemon(config_path: Path, log_file: Path = paths.LOG_FILE) -> int:
     os.dup2(devnull, 0)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stderr, force=True)
-    acquire_lock()
     code = 1
+    try:
+        acquire_lock()
+    except RuntimeError as exc:
+        _startup_report(write_fd, [f"error:{exc}"], ok=False)
+        os._exit(1)
     try:
         code = asyncio.run(run(config_path, startup_fd=write_fd))
     except Exception:  # noqa: BLE001

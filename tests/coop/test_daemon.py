@@ -72,3 +72,19 @@ def test_the_pid_lock_names_a_live_process_and_forgets_a_dead_one(tmp_path):
 def test_stop_daemon_without_a_daemon_says_so(tmp_path, capsys):
     assert daemon.stop_daemon(tmp_path / "coop.pid") == 0
     assert "not running" in capsys.readouterr().out
+
+
+def test_the_pid_file_is_taken_once_and_released_only_by_its_holder(tmp_path):
+    pid_file = tmp_path / "coop.pid"
+    daemon.acquire_lock(pid_file)
+    with pytest.raises(RuntimeError, match="already running"):
+        daemon.acquire_lock(pid_file)
+    pid_file.write_text("2147483647")  # another, dead, holder
+    daemon.acquire_lock(pid_file)  # stale: taken over
+    assert daemon.locked_pid(pid_file) == os.getpid()
+    pid_file.write_text(str(os.getppid()))  # a live holder that is not us
+    daemon.release_lock(pid_file)
+    assert pid_file.exists(), "a live daemon's pid file is not ours to remove"
+    pid_file.write_text(str(os.getpid()))
+    daemon.release_lock(pid_file)
+    assert not pid_file.exists()
