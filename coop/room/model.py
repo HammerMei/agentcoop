@@ -228,9 +228,11 @@ class Wake:
 @dataclass
 class Reply:
     """One ``send``: a reply item of section 5.9 as the CLI states it. ``wake_id`` is
-    attribution only (design §3.5): ``None`` is an unsolicited send."""
+    attribution only (design §3.5): ``None`` is an unsolicited send. ``thread`` is
+    ``None`` for a new top-level post, which opens a thread of its own (design §3.3:
+    a top-level post is its own thread root)."""
 
-    thread: str
+    thread: str | None
     to: list[str] | None = None
     text: str | None = None
     control: dict | None = None

@@ -934,7 +934,7 @@ class RoomCore:
         try:
             post = await self._post_reply(bot, reply, run)
         finally:
-            if run is not None:
+            if run is not None and reply.thread is not None:
                 run.ledger.add(reply.thread)  # a reply the platform refused was still given (5.6, 5.9)
         self.trace.add(self.now(), "send", gateway=self.name, bot=bot, wake=reply.wake_id,
                        thread=reply.thread, post=post.id if post else None)
@@ -953,8 +953,10 @@ class RoomCore:
             reply.wake_id = None
             return None
 
-    def _validation_context(self, bot: str, thread: str, run: TurnRun | None) -> ValidationContext:
-        if run is not None and (group := run.wake.hint.group_of(thread)) is not None:
+    def _validation_context(self, bot: str, thread: str | None, run: TurnRun | None) -> ValidationContext:
+        if thread is None:
+            closed_by = ()  # a new top-level post opens a thread nobody has closed yet
+        elif run is not None and (group := run.wake.hint.group_of(thread)) is not None:
             closed_by = group.closed_by  # fixed at turn start (5.3, 5.9)
         else:
             # unsolicited, or a wake's reply outside its hint: the thread's mute now; rate and
@@ -980,7 +982,7 @@ class RoomCore:
     def _note_hinted(self, bot: str, reply: Reply, run: TurnRun | None) -> None:
         """Spec 5.9's "reply only in a delivered or hinted thread" is an instruction and a
         counter here, never a refusal (design §3.1, 5.9 row)."""
-        if run is None:
+        if run is None or reply.thread is None:  # a new thread is neither delivered nor hinted
             return
         inside = run.wake.hint.group_of(reply.thread) is not None
         self._count_rule(bot, reply.thread, HINTED_THREAD, "complied" if inside else "violated")
@@ -1002,16 +1004,23 @@ class RoomCore:
             if not reply.control and reply.text is None:
                 return None  # ``all`` resolved to nobody and nothing else remains: post nothing (8.3)
         text = canonical_text(reply)
-        previous_last = self.volatile[bot].last_post.get(reply.thread)
-        entry = self._count_own_post(bot, reply.thread, self.now(), count_words(text))
+        words = count_words(text)
+        # a new top-level post has no thread to count in until the platform names it;
+        # the count after is still ahead of the echo, which never counts a hosted bot
+        new_thread = reply.thread is None
+        previous_last = None if new_thread else self.volatile[bot].last_post.get(reply.thread)
+        entry = None if new_thread else self._count_own_post(bot, reply.thread, self.now(), words)
         try:
             post = await self.platform.post(bot, text, reply.thread, kind="bot")
         except RefusedPost:
-            self._uncount_own_post(bot, reply.thread, entry, previous_last)
+            if not new_thread:
+                self._uncount_own_post(bot, reply.thread, entry, previous_last)
             self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
-            if run is not None:
+            if run is not None and reply.thread is not None:
                 run.refused.append(reply.thread)
             raise
+        if new_thread:
+            self._count_own_post(bot, post.thread, self.now(), words)
         if run is not None:
             run.posts += 1
         return post

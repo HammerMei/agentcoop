@@ -187,9 +187,10 @@ async def send(request: web.Request) -> web.Response:
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:
-    """A wake's send with no thread goes to the wake's starting thread; once the lease
-    is gone the gateway no longer knows it, so a late send names its thread."""
-    if body.get("thread") is not None:
+    """A wake's send with neither thread nor room goes to the wake's starting thread;
+    once the lease is gone the gateway no longer knows it, so a late send names its
+    thread. With a room and no thread the send is a new top-level post there."""
+    if body.get("thread") is not None or body.get("room") is not None:
         return None
     if not isinstance(body.get("wake_id"), str):
         return _error(400, "send: an unsolicited send names its room or thread")

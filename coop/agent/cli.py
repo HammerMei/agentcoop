@@ -33,7 +33,7 @@ from ..errors import (
     NoLiveLease,
     RefusedSend,
 )
-from ..room.model import ALL, MAIN_THREAD, Attachment, Post, Reply, Wake
+from ..room.model import ALL, Attachment, Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..room.prompt import one_line, render_hint
 from .client import HttpDoorbell
@@ -136,10 +136,9 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
         parser().error("send: text needs --to")
     if args.unsolicited and args.room is None and args.thread is None:
         parser().error("send --unsolicited: --room or --thread")
-    # --room is a top-level post there; --thread a reply; a wake's send with neither goes
-    # to the wake's starting thread, which the gateway fills in
-    thread = args.thread if args.thread is not None else (MAIN_THREAD if args.room else None)
-    reply = Reply(thread=thread, to=names(args.to) if args.to else None, text=text, control=control,
+    # --room is a new top-level post there (its own thread); --thread a reply; a wake's
+    # send with neither goes to the wake's starting thread, which the gateway fills in
+    reply = Reply(thread=args.thread, to=names(args.to) if args.to else None, text=text, control=control,
                   wake_id=None if args.unsolicited else args.wake)
     post = await doorbell.send(reply, room=args.room)
     if post is not None:

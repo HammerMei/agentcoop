@@ -47,8 +47,9 @@ class Platform(Protocol):
         ``KeyError`` for an id the platform does not know."""
         ...
 
-    async def post(self, author: str, text: str, thread: str, kind: PostKind | None = None) -> Post:
-        """Post as ``author`` (a bot the gateway holds the account for). Raises
-        :class:`RefusedPost` when the platform refuses it. The post reaches the core
-        again as an inbound post, like every other post in the room."""
+    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None) -> Post:
+        """Post as ``author`` (a bot the gateway holds the account for); ``thread``
+        ``None`` posts at the top level, and the returned post's ``thread`` is then its
+        own id. Raises :class:`RefusedPost` when the platform refuses it. The post
+        reaches the core again as an inbound post, like every other post in the room."""
         ...

@@ -71,7 +71,9 @@ async def test_an_unsolicited_send_goes_to_the_rooms_root_or_a_thread(sb, coop, 
     await sb.human("a question", "t3")
     assert await coop("send", "--unsolicited", "--room", "team", "--to", "H", "report") == 0
     assert await coop("send", "--unsolicited", "--thread", "t3", "--to", "H", "an answer") == 0
-    assert [(p.thread, p.text) for p in sb.posts_by("a")] == [("main", "@H report"), ("t3", "@H an answer")]
+    report, answer = sb.posts_by("a")
+    assert (report.thread, report.text) == (report.id, "@H report")  # --room opens a thread of its own
+    assert (answer.thread, answer.text) == ("t3", "@H an answer")
 
 
 @pytest.mark.parametrize("argv", [
@@ -88,8 +90,8 @@ async def test_usage_errors_exit_2(coop, argv):
 
 
 async def test_a_refused_send_is_an_error_line(sb, coop, capsys):
-    await sb.human("mute: @a")
-    assert await coop("send", "--unsolicited", "--room", "team", "--to", "H", "still here") == 1
+    await sb.human("mute: @a", "t1")  # a mute holds in its thread; a new top-level post is a new thread
+    assert await coop("send", "--unsolicited", "--thread", "t1", "--to", "H", "still here") == 1
     err = capsys.readouterr().err.splitlines()[-1]
     assert err.startswith("[ERROR]") and "mute" in err and sb.posts_by("a") == []
 

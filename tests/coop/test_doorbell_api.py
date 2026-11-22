@@ -332,3 +332,19 @@ async def test_the_packaged_rules_are_served_by_default(sb):
         async with httpx.AsyncClient(base_url=doorbell.url) as client:
             text = (await client.get("/v1/rules", headers=as_("a"))).json()["text"]
     assert text.startswith("# Room rules") and "your own posts included" in text and "coop done" in text
+
+
+async def test_a_wakes_send_with_a_room_and_no_thread_is_a_new_top_level_post(api, sb):
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": None, "to": ["H"], "text": "x", "wake_id": wake["wake_id"], "room": "team"})
+    assert r.status_code == 200, r.text
+    post = r.json()["post"]
+    assert post["thread"] == post["id"] != "t1"  # not filled with the wake's starting thread
+
+
+async def test_a_control_with_no_thread_is_400(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": None, "wake_id": None, "room": "team", "control": {"mute": ["b"]}})
+    assert r.status_code == 400 and "names the thread" in r.json()["error"]

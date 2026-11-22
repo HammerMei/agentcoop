@@ -86,6 +86,9 @@ def _check_control(reply: Reply, ctx: ValidationContext, structural: list[Proble
     if unsupported:
         structural.append(Problem("schema", reply.thread, f"unsupported control {sorted(unsupported)}"))
         return
+    if reply.thread is None:
+        structural.append(Problem("schema", None, "a control names the thread it applies to"))
+        return
     for key in ("mute", "unmute"):
         if key in control:
             _check_name_list(control[key], key, reply.thread, ctx, structural)
