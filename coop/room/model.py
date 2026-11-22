@@ -223,6 +223,8 @@ class Wake:
     trigger: Trigger | None = None
     rules_version: int = 0
     lease_expires_at: float | None = None
+    # ``coop reset``: the agent starts a fresh session for this room (design §3.4).
+    reset: bool = False
 
 
 @dataclass

@@ -36,6 +36,7 @@ def dump_room(core: RoomCore) -> dict:
                 "cursor": _position_out(state.cursor),
                 "unfinished": sorted(state.unfinished),
                 "paused": state.paused,
+                "reset_pending": state.reset_pending,
             }
             for bot, state in core.persisted.items()
         },
@@ -71,6 +72,7 @@ def load_room(core: RoomCore, data: dict) -> None:
             cursor=_position_in(raw.get("cursor")),
             unfinished=set(raw.get("unfinished", [])),
             paused=bool(raw.get("paused", False)),
+            reset_pending=bool(raw.get("reset_pending", False)),
         )
     for thread, raw in data.get("threads", {}).items():
         unknown = set(raw) - known

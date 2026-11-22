@@ -32,6 +32,7 @@ def encode_wake(wake: Wake) -> Json:
         "trigger": None if wake.trigger is None else encode_trigger(wake.trigger),
         "rules_version": wake.rules_version,
         "lease_expires_at": wake.lease_expires_at,
+        "reset": wake.reset,
     }
 
 
@@ -48,6 +49,7 @@ def decode_wake(doc: Json) -> Wake:
         trigger=None if trigger is None else decode_trigger(trigger),
         rules_version=doc.get("rules_version", 0),
         lease_expires_at=doc.get("lease_expires_at"),
+        reset=bool(doc.get("reset", False)),
     )
 
 

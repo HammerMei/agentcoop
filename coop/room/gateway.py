@@ -46,8 +46,12 @@ class Gateway:
         # read first delivers the post; a fetch names the handle, never the platform id.
         self._handles: dict[str, tuple[str, Attachment]] = {}
         self._handle_of: dict[tuple[str, str], str] = {}
+        # Told after every bio push: the daemon saves the agents' document then.
+        self.on_bio: Callable[[], None] | None = None
 
     def add_room(self, core: RoomCore) -> RoomCore:
+        if core.room in self.rooms:
+            raise ValueError(f"room {core.room!r} is already on this gateway")
         core.on_wake = self._wake_issued
         core.bios = self.bios
         core.rules_version = self.rules_version
@@ -55,6 +59,9 @@ class Gateway:
         for bot in core.hosted:
             self.agents.setdefault(bot, AgentState())
         return core
+
+    def remove_room(self, room: str) -> RoomCore | None:
+        return self.rooms.pop(room, None)
 
     def start(self) -> None:
         for core in self.rooms.values():
@@ -206,6 +213,8 @@ class Gateway:
         state.bio = text
         state.bio_version += 1
         self.bios[agent] = text
+        if self.on_bio is not None:
+            self.on_bio()
         return state.bio_version
 
     def status(self) -> dict:
