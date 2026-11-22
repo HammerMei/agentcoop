@@ -359,3 +359,30 @@ async def test_a_room_read_after_a_post_id_starts_there_and_an_unknown_id_is_404
     assert [p["text"] for p in r.json()["posts"]] == ["one", "two"]  # from the cursor: everything
     r = await api.get("/v1/agents/me/posts", params={"room": "team", "after": "nope"}, headers=as_("a"))
     assert r.status_code == 404 and "no post 'nope'" in r.json()["error"]
+
+
+async def test_a_platform_that_does_not_answer_is_502_and_a_turn_still_ends(api, sb, monkeypatch):
+    from coop.room.platform import PlatformError
+
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+
+    async def down(*a, **kw):
+        raise PlatformError("mm: down")
+    monkeypatch.setattr(sb.room, "post", down)
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": "t1", "to": ["H"], "text": "x", "wake_id": wake["wake_id"]})
+    assert r.status_code == 502 and r.json()["thread"] == "t1" and "did not answer" in r.json()["error"]
+    assert sb.gw.status()["threads"]["t1"]["recent_posts"] == 0  # not counted as posted
+    r = await api.post("/v1/agents/me/done", headers=as_("a"), json={"wake_id": wake["wake_id"], "failed": "x"})
+    assert r.status_code == 200 and r.json()["done"] is True  # the failure notice could not post; the turn ended
+    assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure" and not sb.gateway.holds_lease("a")
+    monkeypatch.undo()
+    monkeypatch.setattr(sb.room, "fetch_attachment", down)
+    post = await sb.human("see", attachments=(("a.txt", "text/plain", b"x"),))
+    await sb.human("@a look", "t1")
+    wake = await wake_for(api, "a")
+    r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
+    handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
+    r = await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+    assert r.status_code == 502 and "did not answer" in r.json()["error"]

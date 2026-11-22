@@ -315,6 +315,10 @@ class FakeConnector:
     async def stop(self) -> None:
         self.started = False
 
+    def configure(self, server) -> None:
+        """The usernames from the configuration, as the real connectors do."""
+        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
+
     async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
         self.bots[agent] = token
         username = self.names.username_of(agent)

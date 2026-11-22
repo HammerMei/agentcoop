@@ -34,7 +34,7 @@ from aiohttp import web
 from ..errors import InvalidReply, NoLiveLease, RefusedSend, RoomUnresolved
 from ..room.gateway import Gateway
 from ..room.model import Post, Wake
-from ..room.platform import RefusedPost
+from ..room.platform import PlatformError, RefusedPost
 from ..wire import decode_reply, encode_post, encode_wake
 
 DEFAULT_WAIT = 30.0
@@ -190,6 +190,8 @@ async def send(request: web.Request) -> web.Response:
         post = await core.send(agent, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
+    except PlatformError as exc:
+        return _error(502, f"the platform did not answer: {exc}", thread=reply.thread)
     return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post))})
 
 
@@ -230,7 +232,10 @@ async def done(request: web.Request) -> web.Response:
         return _error(400, f"done: {problem}")
     answered = tuple(body.get("answered") or ())
     failed = body.get("failed")
-    ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
+    try:
+        ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
+    except PlatformError as exc:
+        return _error(502, f"the platform did not answer: {exc}")
     return web.json_response({"done": ok})
 
 
@@ -256,6 +261,8 @@ async def attachment(request: web.Request) -> web.Response:
         return _error(404, f"no attachment {handle!r}: fetch by the handle a read printed")
     except PermissionError as exc:
         return _error(403, str(exc))
+    except PlatformError as exc:
+        return _error(502, f"the platform did not answer: {exc}")
     name = _HEADER_UNSAFE.sub("", found.name)  # a control character or a quote would break the header
     return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})

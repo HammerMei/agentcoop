@@ -14,6 +14,12 @@ from typing import Protocol
 from .model import Member, Position, Post, PostKind
 
 
+class PlatformError(Exception):
+    """The platform did not answer, or failed: whether the call took effect is not
+    known. The doorbell answers 502 and the agent reads the room before trying again
+    (design §3.3)."""
+
+
 class RefusedPost(Exception):
     """The platform refused an outbound post in ``thread``."""
 

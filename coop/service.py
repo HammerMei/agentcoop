@@ -43,7 +43,7 @@ from .room.clock import AsyncioClock, Clock
 from .room.core import RoomCore
 from .room.gateway import Gateway
 from .room.model import Position
-from .room.store import dump_agents, dump_room, load_agents, load_room
+from .room.store import FORMAT, dump_agents, dump_room, load_agents, load_room
 from .room.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -164,18 +164,19 @@ class Service:
         self.tokens.clear()
         self.tokens.update(fresh)
 
-    async def _connect_bot(self, server: Server, agent: str) -> None:
+    async def _connect_bot(self, server: Server, agent: str) -> bool:
         bot = server.bots[agent]
         try:
             rooms = await self.connectors[server.name].add_bot(agent, read_token(bot.token_file))
         except Exception as exc:  # noqa: BLE001 - one bot's failure degrades, never stops, the daemon
             self._note(f"[ERROR] {server.name}: bot {agent!r} not connected: {exc}")
             logger.exception("%s: bot %r not connected", server.name, agent)
-            return
+            return False
         self._connected[server.name].add(agent)
         self._rooms_of[(server.name, agent)] = rooms
         for info in rooms:
             await self._host(server.name, info, agent)
+        return True
 
     async def _disconnect_bot(self, server: str, agent: str) -> None:
         for run in list(self.rooms.values()):
@@ -194,9 +195,15 @@ class Service:
             return
         run = self._by_id.get((server, info.id))
         if run is None:
-            run = await self._open_room(server, info, rule)
+            try:
+                run = await self._open_room(server, info, rule)
+            except ConfigError as exc:
+                self._note(f"[ERROR] {exc}")
+                return
         if agent in run.core.hosted:
             return
+        if run.started:  # a bot joining a running room: the member list has changed
+            run.log.set_members(await self.connectors[server].members(info.id))
         saved = run.saved.get("bots", {}).get(agent)
         run.core.add_hosted(agent, run.log.last_position())
         if saved is not None:
@@ -205,6 +212,7 @@ class Service:
 
     async def _unhost(self, run: RoomRun, agent: str) -> None:
         await run.core.remove_hosted(agent)
+        run.saved.get("bots", {}).pop(agent, None)  # a return starts at the latest post, not here
         self._save_room(run)
         if not run.core.hosted:
             self._close_room(run)
@@ -224,21 +232,27 @@ class Service:
         run = RoomRun(handle, server, info, log, core, rule, saved=self._load_room_doc(server, info.id))
         log.on_new = core.on_post
         core.on_change = lambda: self._save_room(run)
+        # registered before the first await: a post arriving while the members and the
+        # history are fetched waits on the queue, which the worker drains once the room runs
+        self.rooms[handle] = run
+        self._by_id[(server, info.id)] = run
         connector.watch(info.id, roster)
-        log.set_members(await connector.members(info.id))
-        await self._backfill(run)
+        try:
+            log.set_members(await connector.members(info.id))
+            await self._backfill(run)
+        except Exception:
+            self._close_room(run)
+            raise
         if run.saved:
             load_room(core, {"format": run.saved["format"], "threads": run.saved.get("threads", {})})
         self.gateway.add_room(core)
-        self.rooms[handle] = run
-        self._by_id[(server, info.id)] = run
-        run.worker = asyncio.create_task(self._work(run), name=f"room {handle}")
         return run
 
     def _close_room(self, run: RoomRun) -> None:
         self._close_worker(run)
         self.connectors[run.server].unwatch(run.info.id)
         self.gateway.remove_room(run.handle)
+        run.started = False
         self.rooms.pop(run.handle, None)
         self._by_id.pop((run.server, run.info.id), None)
         logger.info("%s: closed", run.handle)
@@ -287,6 +301,7 @@ class Service:
         cursors = [run.core.persisted[b].cursor for b in run.core.hosted]
         await run.core.restart(replay_after=min(cursors) if cursors and None not in cursors else None)
         run.core.start()
+        run.worker = asyncio.create_task(self._work(run), name=f"room {run.handle}")
 
     async def _work(self, run: RoomRun) -> None:
         while True:
@@ -342,6 +357,8 @@ class Service:
         self.config = config
         notes: list[str] = []
         self.notes = notes
+        for server in config.servers.values():
+            self.connectors[server.name].configure(server)  # the bots and usernames it holds now
         for run in list(self.rooms.values()):
             await self._reload_room(run, notes)  # rosters first: a bot connected below is hosted by them
         for server in config.servers.values():
@@ -366,8 +383,8 @@ class Service:
             await self._disconnect_bot(server.name, agent)
             notes.append(f"{server.name}: bot {agent!r} disconnected")
         for agent in sorted(hosted_now - self._connected[server.name]):
-            await self._connect_bot(server, agent)
-            notes.append(f"{server.name}: bot {agent!r} connected")
+            if await self._connect_bot(server, agent):
+                notes.append(f"{server.name}: bot {agent!r} connected")
 
     async def _reload_room(self, run: RoomRun, notes: list[str]) -> None:
         """The rule the room matches now, applied in place; no rule closes it."""
@@ -379,8 +396,10 @@ class Service:
             return
         roster = self.config.roster_for(run.server, rule)
         run.rule = rule
-        run.core.update(roster, rule.params)
+        classifier = self._classifier_factory(self.config, run.handle) if rule.params.classifier_enabled else None
+        run.core.update(roster, rule.params, classifier)
         run.log.roster = roster
+        run.log.names = self._names(run.server)
         self.connectors[run.server].watch(run.info.id, roster)
         for agent in list(run.core.hosted):
             if agent not in rule.agents or not self._is_hosted(run.server, agent):
@@ -450,10 +469,14 @@ class Service:
         if not path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            doc = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             self._note(f"[ERROR] {path}: unreadable room state, starting the room fresh: {exc}")
             return {}
+        if not isinstance(doc, dict) or doc.get("format") != FORMAT:
+            self._note(f"[ERROR] {path}: not a {FORMAT!r} room state document, starting the room fresh")
+            return {}
+        return doc
 
     def _save_room(self, run: RoomRun) -> None:
         _write_json(self._room_file(run.server, run.info.id), dump_room(run.core))

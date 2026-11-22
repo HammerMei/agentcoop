@@ -53,6 +53,8 @@ class FakeMattermost:
         self.posts: dict[str, list[dict]] = {}
         self.files: dict[str, bytes] = {}
         self.refuse_posts = False
+        self.failure: Exception | None = None  # raised by every request while set: the server is unreachable
+        self.not_found = False  # every request answers 404
         self._ms = 1_700_000_000_000
         self._n = 0
         self.sockets: list[FakeSocket] = []
@@ -93,6 +95,10 @@ class FakeMattermost:
 
     # the transport
     async def handle(self, request: httpx.Request) -> httpx.Response:
+        if self.failure is not None:
+            raise self.failure
+        if self.not_found:
+            return httpx.Response(404, json={"message": "nothing here"})
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         me = self.tokens.get(token)
         if me is None:
@@ -141,10 +147,11 @@ class FakeMattermost:
         ids = [p["id"] for p in posts]
         if "before" in params:
             posts = posts[:ids.index(params["before"])]
-        if "after" in params:
-            posts = posts[ids.index(params["after"]) + 1:]
         per_page = int(params.get("per_page", 60))
-        posts = posts[-per_page:]
+        if "after" in params:
+            posts = posts[ids.index(params["after"]) + 1:][:per_page]  # the chunk nearest the anchor
+        else:
+            posts = posts[-per_page:]
         order = [p["id"] for p in reversed(posts)]
         return httpx.Response(200, json={"order": order, "posts": {p["id"]: p for p in posts},
                                          "prev_post_id": "", "next_post_id": ""})
@@ -306,3 +313,38 @@ def test_normalize_is_pure_and_marks_webhooks_as_integrations():
     assert post.kind == "integration" and post.text == "hi @laomei" and post.mentions == {"laomei"}
     assert post.time == 5.0 and post.position == (5000, "p1") and post.author == "ci"
     assert normalize({**raw, "type": "system_add_to_channel"}, {}, ROSTER, names, set()) is None
+
+
+async def test_resync_pages_through_everything_the_socket_missed(connected):
+    connector, mm, seen, _ = connected
+    await mm.deliver(mm.post("c01", mm.ids["glin"], "last seen"))
+    for i in range(130):
+        mm.post("c01", mm.ids["glin"], f"missed {i}")
+    await mm.sockets[0].on_reconnect()
+    assert [e.post.text for e in seen][-1] == "missed 129" and len(seen) == 131
+
+
+async def test_history_pages_past_a_page_of_system_posts(connected):
+    connector, mm, seen, _ = connected
+    real = [mm.post("c01", mm.ids["glin"], f"real {i}") for i in range(3)]
+    for _ in range(60):
+        mm.post("c01", mm.ids["glin"], "joined", kind="system_join_channel")
+    page = await connector.history("c01", limit=60)
+    assert [p.text for p in page] == ["real 0", "real 1", "real 2"] and page[0].id == real[0]["id"]
+    assert await connector.history("c01", before=page[0].position) == []  # and the end is still the end
+
+
+async def test_transport_failures_are_platform_errors_and_a_missing_file_a_key_error(connected):
+    connector, mm, seen, _ = connected
+    from coop.room.platform import PlatformError
+
+    mm.failure = httpx.ConnectError("down")
+    with pytest.raises(PlatformError):
+        await connector.post("laomei", "c01", "x", None)
+    with pytest.raises(PlatformError):
+        await connector.fetch_file("laomei", "f1")
+    with pytest.raises(PlatformError):
+        await connector.history("c01")
+    mm.failure, mm.not_found = None, True
+    with pytest.raises(KeyError):
+        await connector.fetch_file("laomei", "f1")

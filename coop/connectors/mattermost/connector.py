@@ -19,7 +19,7 @@ import httpx
 
 from ...config import Server
 from ...room.model import Position, Post
-from ...room.platform import RefusedPost
+from ...room.platform import PlatformError, RefusedPost
 from ...room.roster import Roster
 from ..base import MemberInfo, Membership, OnEvent, Posted, RoomInfo
 from ..normalize import Names
@@ -59,6 +59,10 @@ class MattermostConnector:
 
     async def start(self) -> None:
         pass
+
+    def configure(self, server: Server) -> None:
+        self.server = server
+        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
 
     async def stop(self) -> None:
         for agent in list(self._bots):
@@ -158,14 +162,28 @@ class MattermostConnector:
     async def history(self, room_id: str, after: Position | None = None, before: Position | None = None,
                       limit: int = 60) -> list[Post]:
         bot = self._any_bot(room_id)
-        page = await bot.rest.posts(room_id, before=None if before is None else before[1],
-                                    after=None if after is None else after[1], per_page=limit)
-        posts = []
-        for post_id in reversed(page.get("order", [])):  # oldest first
-            raw = page.get("posts", {}).get(post_id)
-            if raw is not None and (post := await self._normalize(bot, room_id, raw)) is not None:
-                posts.append(post)
-        return posts
+        before_id = None if before is None else before[1]
+        after_id = None if after is None else after[1]
+        try:
+            while True:
+                page = await bot.rest.posts(room_id, before=before_id, after=after_id, per_page=limit)
+                order = page.get("order", [])
+                if not order:
+                    return []
+                posts = []
+                for post_id in reversed(order):  # oldest first
+                    raw = page.get("posts", {}).get(post_id)
+                    if raw is not None and (post := await self._normalize(bot, room_id, raw)) is not None:
+                        posts.append(post)
+                if posts:
+                    return posts
+                # a page of nothing but system posts: the next page, not the end of history
+                if after_id is not None and before_id is None:
+                    after_id = order[0]
+                else:
+                    before_id = order[-1]
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: history of {room_id}: {exc}") from exc
 
     async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
         bot = self._bots[agent]
@@ -175,14 +193,23 @@ class MattermostConnector:
             if 400 <= exc.response.status_code < 500:
                 logger.warning("%s: post refused (%s): %s", self.name, exc.response.status_code, exc.response.text[:200])
                 raise RefusedPost(thread) from exc
-            raise
+            raise PlatformError(f"{self.name}: post: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: post: {exc}") from exc
         post = await self._normalize(bot, room_id, raw)
         if post is None:  # cannot happen for a post we made; a defensive default
             raise RefusedPost(thread)
         return post
 
     async def fetch_file(self, agent: str, file_id: str) -> bytes:
-        return await self._bots[agent].rest.file(file_id)
+        try:
+            return await self._bots[agent].rest.file(file_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                raise KeyError(file_id) from exc
+            raise PlatformError(f"{self.name}: file {file_id}: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: file {file_id}: {exc}") from exc
 
     async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
         bot = self._bots.get(agent)
@@ -239,9 +266,13 @@ class MattermostConnector:
                 if room_id not in self._rosters:
                     continue
                 try:
-                    for post in await self.history(room_id, after=self._last.get(room_id)):
-                        self._seen_live(room_id, post)
-                        await self.on_event(Posted(room_id, post, seen_by=bot.agent))
+                    while True:  # every page the socket missed, not the first one
+                        page = await self.history(room_id, after=self._last.get(room_id))
+                        for post in page:
+                            self._seen_live(room_id, post)
+                            await self.on_event(Posted(room_id, post, seen_by=bot.agent))
+                        if not page:
+                            break
                 except Exception:  # noqa: BLE001
                     logger.exception("%s: resync of %s failed", self.name, room_id)
         return resync

@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..config import Server
 from ..room.model import Position, Post
 from ..room.roster import Roster
 
@@ -77,6 +78,11 @@ class Connector(Protocol):
 
     async def stop(self) -> None: ...
 
+    def configure(self, server: Server) -> None:
+        """A reload's view of the server: the bots it holds and their usernames. Called
+        before any bot the new configuration adds is connected."""
+        ...
+
     async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
         """Connect ``agent``'s bot account with ``token`` and return the rooms it is a
         member of. Opening a connection at runtime is the same call as at start."""
@@ -99,15 +105,21 @@ class Connector(Protocol):
                       limit: int = 60) -> list[Post]:
         """One page of the room's posts, oldest first, strictly inside ``(after, before)``
         and nearest ``before`` (or the latest) when there are more than ``limit``. The
-        caller pages by passing the oldest returned position as the next ``before``."""
+        caller pages by passing the oldest returned position as the next ``before``. An
+        empty page means the platform has nothing more in that direction, never that a
+        page held only posts the core does not see (system posts)."""
         ...
 
     async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
         """Post as ``agent``'s bot; ``thread`` ``None`` is a new top-level post. Raises
-        :class:`~coop.room.platform.RefusedPost`."""
+        :class:`~coop.room.platform.RefusedPost` when the platform refuses it and
+        :class:`~coop.room.platform.PlatformError` when it did not answer."""
         ...
 
-    async def fetch_file(self, agent: str, file_id: str) -> bytes: ...
+    async def fetch_file(self, agent: str, file_id: str) -> bytes:
+        """``KeyError`` for a file the platform does not have, ``PlatformError`` when it
+        did not answer."""
+        ...
 
     async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
         """Best effort; never raises."""

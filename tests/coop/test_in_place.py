@@ -106,3 +106,20 @@ async def test_a_bio_push_tells_the_daemon():
     seen = []
     sb.gateway.on_bio = lambda: seen.append(1)
     assert sb.gateway.bio("a", "I do things") == 1 and seen == [1]
+
+
+async def test_a_reload_that_turns_sweeps_and_the_classifier_on_starts_them_in_place():
+    sb = Sandbox(bots=("a", "b"), params=Params(**{**vars(FAST), "sweep_interval_seconds": 0}), attach_agent=False)
+    marker = object()
+    sb.gw.update(sb.gw.roster, Params(**{**vars(FAST), "sweep_interval_seconds": 5}), classifier=marker)
+    assert sb.gw.classifier is marker
+    await sb.run(11)
+    assert sb.trace.last("sweep", reason="periodic") is not None
+
+
+async def test_reset_stays_pending_until_the_agent_polls_the_wake():
+    sb = Sandbox(bots=("a", "b"), attach_agent=False)
+    sb.gw.reset("a")
+    await sb.human("@a hello", "t1")
+    assert sb.gw.persisted["a"].reset_pending  # issued, not yet polled: a restart would reissue it with reset
+    assert sb.gateway.poll("a").reset and not sb.gw.persisted["a"].reset_pending

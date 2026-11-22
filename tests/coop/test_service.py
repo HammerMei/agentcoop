@@ -58,6 +58,7 @@ def connector() -> FakeConnector:
 def service(tmp_path: Path, fc: FakeConnector, text: str = CONFIG) -> Service:
     def factory(server, on_event):
         fc.on_event = on_event
+        fc.configure(server)  # the daemon's view of the bots, as with the real connectors
         return fc
     return Service(config(tmp_path, text), tmp_path / "state", factory, wake_seed=0)
 
@@ -221,5 +222,102 @@ async def test_the_doorbell_listens_with_the_configured_address(tmp_path):
             assert r.status_code == 200 and "Room rules" in r.json()["text"]
             r = await client.get(f"http://{host}:{port}/v1/rules", headers={"Authorization": "Bearer nope"})
             assert r.status_code == 401
+    finally:
+        await svc.stop()
+
+
+class SlowHistory(FakeConnector):
+    """History that waits for the test's signal: the window in which a post can arrive
+    while a room is being opened."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.gate = asyncio.Event()
+        self.gate.set()
+
+    async def history(self, room_id, after=None, before=None, limit=60):
+        await self.gate.wait()
+        return await super().history(room_id, after, before, limit)
+
+
+async def test_a_post_arriving_while_the_room_is_being_opened_is_not_lost(tmp_path):
+    fc = SlowHistory(names=NAMES)
+    fc.add_room("c1", "team", PEOPLE)
+    first = service(tmp_path, fc)
+    await first.start(listen=False)  # a saved cursor: a restart replays what came after it
+    await fc.human("c1", "H", "@a_bot earlier")
+    await settle()
+    wake = first.gateway.poll("a")
+    first.gateway.read("a", wake.wake_id)
+    await first.gateway.done("a", wake.wake_id)
+    await first.stop()
+    svc = service(tmp_path, fc)
+    fc.gate.clear()
+    starting = asyncio.create_task(svc.start(listen=False))
+    await settle()
+    assert "fake:team" in svc.rooms and not svc.rooms["fake:team"].started
+    await fc.human("c1", "H", "@a_bot while opening")  # the fake's history holds it too: the dedup covers that
+    fc.gate.set()
+    await starting
+    await settle()
+    wake = svc.gateway.poll("a")
+    assert wake is not None and wake.trigger.post_id == fc.posts["c1"][-1].id
+    await svc.stop()
+
+
+async def test_a_reload_gives_the_connector_the_new_bots_usernames(running, tmp_path):
+    svc, fc = running
+    assert fc.names.username_of("c") == "c"  # not a bot the connector knows yet
+    added = CONFIG.replace("      x: {username: x_bot}", "      c: {username: c_bot, token_file: c.bot}\n      x: {username: x_bot}")
+    added = added.replace("  b: {type: remote, token_file: b.agent}", "  b: {type: remote, token_file: b.agent}\n  c: {type: remote, token_file: c.agent}")
+    added = added.replace("agents: [a, b, x]", "agents: [a, b, c, x]")
+    fc.membership["c1"].append(MemberInfo("c_bot", is_bot=True))
+    notes = await svc.reload(config(tmp_path, added))
+    assert fc.names.username_of("c") == "c_bot" and any("'c' connected" in n for n in notes)
+    post = await fc.human("c1", "c_bot", "hello from c")
+    await settle()
+    assert post.author == "c" and post.kind == "bot"
+    assert svc.rooms["fake:team"].log.names.username_of("c") == "c_bot"
+    assert svc.rooms["fake:team"].log.members()["c"].is_bot
+
+
+async def test_a_bot_that_leaves_and_returns_starts_at_the_latest_post(running):
+    svc, fc = running
+    await fc.human("c1", "H", "@b_bot before")
+    await settle()
+    wake = svc.gateway.poll("b")
+    svc.gateway.read("b", wake.wake_id)
+    await svc.gateway.done("b", wake.wake_id)
+    await fc.leave("c1", "b")
+    await settle()
+    missed = await fc.human("c1", "H", "@b_bot while away")
+    await settle()
+    await fc.join("c1", "b")
+    await settle()
+    core = svc.rooms["fake:team"].core
+    assert core.persisted["b"].cursor == missed.position and svc.gateway.poll("b") is None
+
+
+async def test_two_rooms_with_one_handle_are_noted_and_the_daemon_still_starts(tmp_path):
+    fc = connector()
+    fc.add_room("c9", "team", PEOPLE)  # a second room named like the first
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert set(svc.rooms) == {"fake:team"} and svc.rooms["fake:team"].info.id == "c1"
+        assert any("share this name" in n for n in svc.notes)
+    finally:
+        await svc.stop()
+
+
+async def test_a_state_file_of_another_format_is_noted_and_the_room_starts_fresh(tmp_path):
+    fc = connector()
+    (tmp_path / "state" / "fake").mkdir(parents=True)
+    (tmp_path / "state" / "fake" / "c1.json").write_text('{"bots": {"a": {"cursor": [1, "x"]}}}')
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert svc.rooms["fake:team"].core.persisted["a"].cursor is None
+        assert any("not a 1 room state document" in n for n in svc.notes)
     finally:
         await svc.stop()

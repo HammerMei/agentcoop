@@ -57,7 +57,7 @@ from .model import (
     Wake,
     after,
 )
-from .platform import Platform, RefusedPost
+from .platform import Platform, PlatformError, RefusedPost
 from .replies import Problem, ValidationContext, canonical_text, check_reply, resolve_control
 from .roster import Roster
 from .trace import Trace
@@ -324,11 +324,17 @@ class RoomCore:
             self.volatile.pop(bot, None)
             self.trace.add(self.now(), "hosted_removed", gateway=self.name, bot=bot)
 
-    def update(self, roster: Roster, params: Params) -> None:
-        """A reload's new roster and parameters, applied in place."""
+    def update(self, roster: Roster, params: Params, classifier: Classifier | None = None) -> None:
+        """A reload's new roster, parameters and classifier, applied in place. A sweep
+        interval that was off starts its timers now."""
+        was_off = self.params.sweep_interval_seconds <= 0
         self.roster = roster
         self.agents = list(roster.bots)
         self.params = params
+        self.classifier = classifier
+        if was_off and params.sweep_interval_seconds > 0:
+            for bot in self.hosted:
+                self._schedule_periodic_sweep(bot)
 
     def _changed(self) -> None:
         if self.on_change is not None:
@@ -914,9 +920,6 @@ class RoomCore:
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
                     trigger=self._trigger(bot, trigger), rules_version=self.rules_version,
                     reset=self.persisted[bot].reset_pending)
-        if wake.reset:
-            self.persisted[bot].reset_pending = False
-            self._changed()
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
         run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not payload)
         self.volatile[bot].turn = run
@@ -944,6 +947,10 @@ class RoomCore:
         if run is None or run.leased or self.persisted[bot].paused:
             return None
         run.leased = True
+        if run.wake.reset:
+            # the agent has the flag now; a wake lost to a restart before this carried it again
+            self.persisted[bot].reset_pending = False
+            self._changed()
         if self.params.lease_seconds:  # 0: a lease never expires (3.1: zero disables a limit)
             run.expires_at = self.now() + self.params.lease_seconds
             run.wake = replace(run.wake, lease_expires_at=run.expires_at)
@@ -1107,6 +1114,12 @@ class RoomCore:
             if run is not None and reply.thread is not None:
                 run.refused.append(reply.thread)
             raise
+        except PlatformError:
+            # whether it landed is unknown; counted as not, the agent reads the room (design §3.3)
+            if not new_thread:
+                self._uncount_own_post(bot, reply.thread, entry, previous_last)
+            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
+            raise
         if new_thread:
             self._count_own_post(bot, post.thread, self.now(), words)
         if run is not None:
@@ -1235,6 +1248,9 @@ class RoomCore:
         try:
             post = await self.platform.post(bot, f"{NOTICE_PREFIX} {cause}", thread, kind="notice")
         except RefusedPost:
+            return
+        except PlatformError as exc:  # the notice is best effort; the turn's bookkeeping goes on
+            logger.warning("%s: notice not posted: %s", self.room, exc)
             return
         self.trace.add(self.now(), "notice", gateway=self.name, bot=bot, post=post.id, cause=cause)
 
