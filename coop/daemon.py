@@ -27,9 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def acquire_lock(pid_file: Path = paths.PID_FILE) -> None:
-    """Create the pid file, or fail: two starts in the same instant cannot both pass. A
-    file left by a daemon that is gone is replaced once. ``RuntimeError`` names the
-    live holder."""
+    """Create the pid file, or fail when a live daemon holds it. A file left by a daemon
+    that is gone is replaced once. ``RuntimeError`` names the live holder. This is a pid
+    file, not a lock: two starts in the same few milliseconds can both pass (the stale
+    check and the create are two steps, as is ``is_running``'s cleanup); the loser then
+    fails on the control socket. Closing that window means an ``flock`` held for the
+    daemon's life, which is not worth its state at the rate two starts coincide."""
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(2):
         try:

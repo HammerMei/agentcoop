@@ -26,3 +26,8 @@ def test_mentions_come_from_the_text_among_known_names_room_wide_is_all():
     assert mentions_in("@here @glin", known) == {ALL, "glin"}
     assert mentions_in("mute: @laomei\n@wavebro take over", known) == {"wavebro"}  # a control line targets
     assert mentions_in("nothing here", known) == frozenset()
+
+
+def test_a_person_with_an_agents_name_is_a_collision_the_bot_itself_is_not():
+    assert NAMES.collides("laomei") and not NAMES.collides("laomei_bot") and not NAMES.collides("glin")
+    assert not Names({"muse": "muse"}).collides("muse")  # a bot whose username is its agent name

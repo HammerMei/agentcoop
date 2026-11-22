@@ -164,3 +164,17 @@ async def test_a_post_arriving_below_a_cursor_or_a_wakes_mark_is_logged(caplog):
     with caplog.at_level(logging.WARNING, logger="coop.room.core"):
         await sb.gw.on_post(Post(id="later", position=0, time=0.0, thread="t1", author="H", text="x", kind="human"))
     assert any("below a's cursor" in r.message for r in caplog.records)
+
+
+async def test_a_bot_hosted_before_start_gets_one_periodic_timer_not_two():
+    sb = Sandbox(bots=("a", "b"), hosted=["b"], agents=["a", "b"], attach_agent=False,
+                 params=Params(**{**vars(FAST), "sweep_interval_seconds": 10}))
+    core = RoomCore("ops", sb.room, sb.clock, sb.trace, [], sb.gw.roster, sb.gw.params, name="ops")  # as the daemon builds it
+    core.add_hosted("a", None)
+    core.start()
+    sb.room.cores.append(core)
+    await sb.run(31)
+    assert sb.trace.count("sweep", gateway="ops", bot="a", reason="periodic") == 3  # 10, 20, 30: one timer
+    core.add_hosted("b", None)  # joining a started room: scheduled now, once
+    await sb.run(10)
+    assert sb.trace.count("sweep", gateway="ops", bot="b", reason="periodic") == 1

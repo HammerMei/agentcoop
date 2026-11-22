@@ -254,6 +254,7 @@ class RoomCore:
         # classifier reads a member's bio in place of the platform profile.
         self.bios: dict[str, str] = {}
         self.online = True
+        self.started = False
         self.settings: dict[str, ThreadSettings] = {}
         self.thread_state: dict[str, ThreadVolatile] = {}
         self.persisted: dict[str, BotPersisted] = {b: BotPersisted() for b in hosted}
@@ -275,6 +276,7 @@ class RoomCore:
     # ── lifecycle ───────────────────────────────────────────────────────────
 
     def start(self) -> None:
+        self.started = True
         for bot in self.hosted:
             self.volatile[bot].idle_since = self.now()
             self._schedule_periodic_sweep(bot)
@@ -304,7 +306,8 @@ class RoomCore:
         self.hosted.append(bot)
         self.persisted[bot] = BotPersisted(cursor=cursor)
         self.volatile[bot] = BotVolatile(idle_since=self.now())
-        self._schedule_periodic_sweep(bot)
+        if self.started:  # before ``start`` the room's own start schedules it, once
+            self._schedule_periodic_sweep(bot)
         self.trace.add(self.now(), "hosted_added", gateway=self.name, bot=bot)
 
     async def remove_hosted(self, bot: str) -> None:

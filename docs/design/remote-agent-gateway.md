@@ -521,7 +521,10 @@ the runtime directory in a normal install.
 file in place: agents and their tokens, bots connected or disconnected, room
 rules swapped under running rooms, rooms opened or closed, while every other
 bot's lease, backoff and rate window stay as they are. A new or changed
-`servers` entry is the one thing that needs a restart.
+`servers` entry refuses the reload and needs a restart. Two changes the reload
+cannot apply are said rather than refused, since the next `config add agent`
+must still reload: a connected bot's credentials, and `gateway.listen` / `tls`;
+each prints `[WARNING] … until a restart`.
 
 `type: claude` and `type: opencode` entries stop being accepted by the gateway;
 `coop config` migrates them to `type: remote` and prints the utility command for

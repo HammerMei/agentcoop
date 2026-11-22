@@ -160,7 +160,13 @@ class Service:
     # ── bots and rooms ──────────────────────────────────────────────────────
 
     def _set_tokens(self, config: Config) -> None:
-        fresh = {read_token(agent.token_file): name for name, agent in config.agents.items()}
+        fresh: dict[str, str] = {}
+        for name, agent in config.agents.items():
+            token = read_token(agent.token_file)
+            if token in fresh:
+                raise ConfigError(f"agents.{name} and agents.{fresh[token]} hold the same token; "
+                                  "one agent's client would act as the other")
+            fresh[token] = name
         self.tokens.clear()
         self.tokens.update(fresh)
 
@@ -278,8 +284,12 @@ class Service:
         """Page history back until every saved cursor of the rule's bots is in the log,
         or the pages run out. A cursor the pages never reached is moved up to the oldest
         post fetched, and the operator is told what that bot will not see."""
+        saved = run.saved.get("bots", {})
         cursors = [c for c in (self._saved_cursor(run, a) for a in run.rule.agents) if c is not None]
         floor = min(cursors) if cursors else None
+        # a saved null cursor is a bot that never finished a turn: before every post, so
+        # the pages go to the start of history (or the cap), not to the newest page
+        exhaust = any(a in saved and self._saved_cursor(run, a) is None for a in run.rule.agents)
         before: Position | None = None
         oldest: Position | None = None
         for _ in range(MAX_BACKFILL_PAGES):
@@ -288,10 +298,10 @@ class Service:
                 return
             run.log.backfill(page)
             oldest = page[0].position
-            if floor is None or oldest <= floor:
+            if not exhaust and (floor is None or oldest <= floor):
                 return
             before = oldest
-        if oldest is not None and floor is not None and oldest > floor:
+        if oldest is not None and (exhaust or (floor is not None and oldest > floor)):
             self._note(f"[ERROR] {run.handle}: history pages ran out above a saved cursor; posts between "
                        f"{floor!r} and {oldest!r} are not delivered")
             for agent, raw in run.saved.get("bots", {}).items():
@@ -366,9 +376,10 @@ class Service:
         Returns the notes for the operator."""
         self._refuse_server_changes(config)
         self._set_tokens(config)  # read before the switch: a missing token file refuses the whole reload
-        old, self.config = self.config, config
         notes: list[str] = []
         self.notes = notes
+        self._note_listener_changes(config, notes)
+        old, self.config = self.config, config
         for server in config.servers.values():
             self.connectors[server.name].configure(server)  # the bots and usernames it holds now
         for run in list(self.rooms.values()):
@@ -379,6 +390,12 @@ class Service:
         for run in self.rooms.values():
             await self._ensure_started(run)
         return notes
+
+    def _note_listener_changes(self, config: Config, notes: list[str]) -> None:
+        """The listener is bound once: a changed address or certificate is said, not applied."""
+        if (config.gateway.address, config.gateway.tls) != (self.config.gateway.address, self.config.gateway.tls):
+            self._note("[WARNING] gateway.listen/tls changed in the configuration; the listener keeps the old "
+                       "ones until a restart")
 
     def _refuse_server_changes(self, config: Config) -> None:
         for name, server in config.servers.items():
@@ -504,7 +521,7 @@ class Service:
         if path.exists():
             try:
                 load_agents(self.gateway, json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
                 self._note(f"[ERROR] {path}: unreadable agents state, bios start empty: {exc}")
 
     def _save_agents(self) -> None:

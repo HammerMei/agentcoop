@@ -31,6 +31,11 @@ class Names:
     def agent_of(self, username: str) -> str:
         return self._agent.get(username, username)
 
+    def collides(self, username: str) -> bool:
+        """A platform username that is an agent's name without being that agent's
+        username: the core would take the person for the bot."""
+        return username in self._username and self._username[username] != username
+
     def username_of(self, agent: str) -> str:
         return self._username.get(agent, agent)
 

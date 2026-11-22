@@ -213,6 +213,14 @@ def cmd_config_tls(args) -> int:
         return 1
     base = args.config.parent
     cert, key = base / "gateway" / "cert.pem", base / "gateway" / "key.pem"
+    gateway = raw.setdefault("gateway", {}) or {}
+    gateway["tls"] = {"cert": str(cert.relative_to(base)), "key": str(key.relative_to(base))}
+    raw["gateway"] = gateway
+    try:
+        _validate(raw, base)  # before the files exist: a bad configuration leaves the live pair alone
+    except ConfigError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
     cert.parent.mkdir(parents=True, exist_ok=True)
     command = ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
                "-subj", f"/CN={args.host}", "-keyout", str(key), "-out", str(cert)]
@@ -223,14 +231,6 @@ def cmd_config_tls(args) -> int:
         print(f"[ERROR] openssl failed: {detail}", file=sys.stderr)
         return 1
     key.chmod(0o600)
-    gateway = raw.setdefault("gateway", {}) or {}
-    gateway["tls"] = {"cert": str(cert.relative_to(base)), "key": str(key.relative_to(base))}
-    raw["gateway"] = gateway
-    try:
-        _validate(raw, base)
-    except ConfigError as exc:
-        print(f"[ERROR] {exc}", file=sys.stderr)
-        return 1
     _write_yaml(args.config, raw)
     print(f"certificate {cert}, key {key}; restart the daemon to serve it.")
     print(f"  COOP_FINGERPRINT={fingerprint_of_file(cert)}")

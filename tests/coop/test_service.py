@@ -354,3 +354,47 @@ async def test_a_reload_that_changes_a_connected_bots_credentials_says_a_restart
     notes = await svc.reload(config(tmp_path, CONFIG.replace("token_file: b.bot", "token_file: b2.bot")))
     assert any("'b' has new credentials" in n and "restart" in n for n in notes)
     assert fc.bots["b"] == "bot-token-b"  # the connection kept the old one, as the note says
+
+
+async def test_two_agents_with_one_token_refuse_the_configuration(tmp_path):
+    fc = connector()
+    svc = service(tmp_path, fc)
+    (tmp_path / "b.agent").write_text("agent-token-a\n")
+    with pytest.raises(ConfigError, match="hold the same token"):
+        await svc.start(listen=False)
+    await svc.stop()
+
+
+async def test_a_saved_null_cursor_backfills_to_the_start_of_history(tmp_path):
+    fc = connector()
+    (tmp_path / "state" / "fake").mkdir(parents=True)
+    (tmp_path / "state" / "fake" / "c1.json").write_text(
+        '{"format": 1, "bots": {"a": {"cursor": null, "unfinished": [], "paused": false}}, "threads": {}}')
+    for i in range(130):
+        fc.make_post("c1", "H", f"@a_bot n{i}" if i == 0 else f"n{i}")
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert len(svc.rooms["fake:team"].log.posts) == 130
+        await settle()
+        assert svc.gateway.poll("a").trigger.post_id == fc.posts["c1"][0].id  # the oldest post, replayed
+    finally:
+        await svc.stop()
+
+
+async def test_malformed_agents_state_is_noted_and_bios_start_empty(tmp_path):
+    fc = connector()
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "agents.json").write_text('{"format": 1, "agents": []}')
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        assert any("unreadable agents state" in n for n in svc.notes) and svc.gateway.bios == {}
+    finally:
+        await svc.stop()
+
+
+async def test_a_reload_that_changes_the_listener_says_a_restart_is_needed(running, tmp_path):
+    svc, fc = running
+    notes = await svc.reload(config(tmp_path, CONFIG + "gateway:\n  listen: 127.0.0.1:9999\n"))
+    assert any("gateway.listen/tls changed" in n and "restart" in n for n in notes)

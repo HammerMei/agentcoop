@@ -80,6 +80,9 @@ class RoomLog:
         ``guest``, and a platform-flagged account the roster does not list a ``bot``."""
         found: dict[str, Member] = {}
         for m in members:
+            if self.names.collides(m.username):
+                logger.warning("%s: member %r has an agent's name but is not its bot; the core will take the "
+                               "person for the bot until the account is renamed", self.info.name, m.username)
             name = self.names.agent_of(m.username)
             kind: PostKind = self.roster.kind_of(name, "bot" if m.is_bot else None)
             role: Role = "bot" if kind == "bot" else ("owner" if any(

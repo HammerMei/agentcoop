@@ -144,3 +144,8 @@ def test_an_int_serves_a_float_parameter_and_a_bad_yaml_file_is_a_config_error(t
     path.write_text("servers: [unclosed")
     with pytest.raises(ConfigError, match="not YAML"):
         load(path)
+
+
+def test_a_listed_person_with_an_agents_name_is_refused():
+    with pytest.raises(ConfigError, match="is a person and the name of agent 'laomei'"):
+        parsed(FULL.replace("guests: [pat]", "guests: [pat, laomei]"))

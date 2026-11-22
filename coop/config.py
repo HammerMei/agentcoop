@@ -312,6 +312,12 @@ def _cross_check(config: Config) -> None:
             if not bot.hosted and bot.agent in config.agents:
                 raise ConfigError(f"servers.{server.name}.bots.{bot.agent}: no token_file, yet agents.{bot.agent} exists; "
                                   "the gateway cannot post as a bot it has no token for")
+    for server in config.servers.values():
+        for person in sorted(server.owners | server.guests | {o for b in server.bots.values() for o in b.owners}):
+            bot = server.bots.get(person)
+            if bot is not None and bot.username != person:
+                raise ConfigError(f"servers.{server.name}: {person!r} is a person and the name of agent {person!r}, "
+                                  f"whose bot is {bot.username!r}; the core could not tell them apart")
     known = set(config.agents) | {a for s in config.servers.values() for a in s.bots}
     for rule in config.rooms:
         unknown = [a for a in rule.agents if a not in known]

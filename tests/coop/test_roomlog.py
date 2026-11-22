@@ -107,3 +107,12 @@ async def test_the_fake_connector_delivers_one_copy_per_bot_connection_in_the_ro
     assert [(e.room_id, e.seen_by) for e in seen] == [("c1", "a"), ("c1", "b"), ("c2", "a")]
     assert seen[0].post.mentions == {"a"} and seen[0].post.text == "@a hi"
     assert (await fc.room("c2")).name == "other" and isinstance(await fc.room("c1"), RoomInfo)
+
+
+async def test_a_member_with_an_agents_name_is_warned_about(caplog):
+    import logging
+
+    fc, log = make_log()
+    with caplog.at_level(logging.WARNING, logger="coop.connectors.roomlog"):
+        log.set_members([MemberInfo("a"), MemberInfo("a_bot", is_bot=True)])  # a person named like agent a
+    assert any("has an agent's name" in r.message for r in caplog.records)
