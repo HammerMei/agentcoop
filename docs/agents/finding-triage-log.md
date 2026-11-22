@@ -1897,3 +1897,20 @@ Lenses: authenticated bad request → 500; platform text into a rendered line, h
 **Cost:** ~55 min (two raters ~10 min in parallel, fixes and 13 tests ~35 min, replies ~8 min).
 
 **Status: open** — round 4 requested on `c5f0f1c`; F6 (DM handle) and the namespace split await the owner.
+
+## 2026-11-22 — PR #211 round 4 (Codex on `539c2ee`, `coop/service.py`, `coop/doorbell/api.py`, `coop/connectors/mattermost/connector.py`)
+
+`chain-check.py`: no chain (one line at `service.py:539 @ 5ba2fef` could not be blamed — moved since — so absence is unproven for it). **Control:** none; agreement is not evidence of independence.
+
+| # | finding | rater 1 | rater 2 (blind) | verdict | evidence |
+|---|---|---|---|---|---|
+| J1 | archived rooms are hosted | DROP: probed on the docker Mattermost 11.x — `GET /users/{id}/channels` lists no archived channel without `include_deleted`; a post into one is 400 → `RefusedPost`, traced | FIX (cheap, 2-line guard at the one seam; the trigger unverified from the tree; the finding's `RoomLog.archived` half is wrong — a set of thread ids) | **FIX** the guard, with the probe recorded: at connect the case cannot occur; the field now has a reader. A channel archived while hosted is a lifecycle event outside this increment | `test_an_archived_room_is_not_hosted` |
+| J2 | a room send without the `thread` key → 500 | FIX (cheap; the "authenticated bad request → 500" lens) | FIX (cheap; in the decoder, which owns "absent = null", not the API) | **FIX** `decode_reply` `.get` | `test_a_room_send_without_the_thread_key_is_a_new_top_level_post_not_500` |
+| J3 | `typing` has no call site | deferred (plan S3-2) | DROP for this PR: the PR body's deferral list is the only record in reach (the plan is outside the tree); reversal: S3-2 merges with `typing` uncalled | **deferred** — thread left open as the pointer | — |
+| J4 | a room reopened in one daemon reuses wake ids; a late `done`/`send` can land on the new lease | FIX (cheap, per-open seed) | FIX (cheap; carry the closed core's counter forward — strictly monotonic, where a per-open time seed is only probably unique); **silent, reachability unresolved** (the tree ships no poller; design §3.4 serial vs §3.2 one request always open); the PR body's "its `done` then finds no lease, by design" was false after a reopen | **FIX** per rater 2's shape; PR body corrected | `test_a_room_reopened_in_the_same_daemon_never_reuses_a_wake_id` |
+
+**Convergence:** J2–J4 agreed; J1 converged on rater 2's shape with rater 1's probe as the evidence the tree lacked. **Composition:** J1 edge (cannot occur at connect), J2 edge + loud, J3 deferred, J4 silent — by the letter not an all-edge round; **both raters close the PR anyway**: every fix ≤ 3 lines in a function no earlier round touched, no chain in four rounds, and a fifth round would review five lines. **Whole PR:** internal 10 + Codex 12/9/8/4 = 43 findings; 36 fixed, 4 loud + filed (r1 F2 rotated token, r1 F9 late post delivery, r2 G9 namespace, r3 dump_room), 3 dropped (r2 G2 pid race, r2 G3 stale classifier result, — ), 1 deferred (typing); 2 escalated to the owner (r1 F6 DM handle; the namespace split). Adoption 84%. Pattern across rounds: "a state the daemon holds is not kept in step on a hosting/reload path" — 12 of 43; closed by the reload enumeration test in round 3. Rater disagreements: 6 of 33 scored twice, every one on `cheap`'s shape or on the mechanism, none on a number; rater 1 conceded 5 of 6 on checkable evidence, 1 escalated.
+
+**Cost:** ~40 min this round; ~4 h 40 min across the five rounds (reviewer/rater agents ~1 h in parallel, fixes and ~50 tests ~3 h, replies and logs ~40 min).
+
+**Status: closed** — fixes pushed (`8430821`); no further Codex pass; the PR is handed to the owner for merge with two open threads awaiting his decision.
