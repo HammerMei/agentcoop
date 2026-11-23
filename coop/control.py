@@ -101,7 +101,7 @@ class ControlServer:
             # ``hosted`` names agents, as ``pause``/``resume``/``reset`` do; ``bots`` are the
             # room's bot usernames, the names in the room's text (design §2)
             return _ok({handle: {"hosted": service.hosted_agents(run), "bots": list(run.core.agents),
-                                 "room_id": run.info.id, "dm": run.info.is_dm}
+                                 "room_id": run.info.id, "dm": run.info.is_dm, "name": run.info.name}
                         for handle, run in sorted(service.rooms.items())})
         if cmd in ("pause", "resume", "reset"):
             agent, room = str(request.get("agent", "")), str(request.get("room", ""))

@@ -146,7 +146,8 @@ class Config:
     classifier: ClassifierConfig = ClassifierConfig()
 
     def rule_for(self, handle: str) -> RoomRule | None:
-        """The first ``rooms`` entry matching ``<server>:<room>``, or none."""
+        """The first ``rooms`` entry matching the room's handle
+        (:func:`~coop.connectors.base.handle_for`), or none."""
         for rule in self.rooms:
             if rule.pattern.matches(handle):
                 return rule

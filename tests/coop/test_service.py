@@ -661,7 +661,8 @@ async def test_a_group_message_is_one_room_under_a_digest_whichever_bot_lists_it
 
 async def test_a_direct_channel_between_two_bots_is_not_hosted(tmp_path):
     """Each bot names the channel after the other. Nobody human is there and only the
-    platform's admin can see it: a bot-to-bot DM is not supported, at start or on a join."""
+    platform's admin can see it: a bot-to-bot DM is not supported, at start, on a join,
+    and on a reload that lists the counterpart as a bot."""
     fc = FakeConnector()
     fc.add_room("c1", "team", PEOPLE)
     seen_as = {"a_bot": "b_bot", "b_bot": "a_bot"}
@@ -677,14 +678,18 @@ async def test_a_direct_channel_between_two_bots_is_not_hosted(tmp_path):
     nc.rooms, nc.membership, nc.posts = fc.rooms, fc.membership, fc.posts
     nc.add_room("d1", "dm", [MemberInfo("a_bot", is_bot=True), MemberInfo("x_bot", is_bot=True)], "dm")
     nc.add_room("d2", "x_bot", [MemberInfo("a_bot", is_bot=True), MemberInfo("x_bot", is_bot=True)], "dm")  # a roster-only bot
+    nc.add_room("d3", "y_bot", [MemberInfo("a_bot", is_bot=True), MemberInfo("y_bot", is_bot=True)], "dm")  # a bot the file does not list
     svc = service(tmp_path, nc, CONFIG.replace('"fake:team*"', '"fake:*"'))
     await svc.start(listen=False)
     try:
-        assert set(svc.rooms) == {"fake:team"} and not any(n.startswith("[ERROR]") for n in svc.notes)
+        assert set(svc.rooms) == {"fake:team", "fake:dm:a_bot:y_bot"} and not any(n.startswith("[ERROR]") for n in svc.notes)
         nc.membership["d1"].append(MemberInfo("b_bot", is_bot=True))
         await nc.on_event(Membership("d1", "b_bot", joined=True))
         await settle()
-        assert set(svc.rooms) == {"fake:team"}
+        assert set(svc.rooms) == {"fake:team", "fake:dm:a_bot:y_bot"}
+        notes = await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:*"')
+                                        .replace("x: {username: x_bot}", "x: {username: x_bot}\n      y: {username: y_bot}")))
+        assert set(svc.rooms) == {"fake:team"} and "fake:dm:a_bot:y_bot: no rule matches now; closed" in notes
     finally:
         await svc.stop()
 

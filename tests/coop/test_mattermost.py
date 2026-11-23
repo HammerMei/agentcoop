@@ -298,7 +298,9 @@ async def test_membership_frames_name_the_username_and_track_the_bots_own_rooms(
 async def test_a_dm_a_bot_joins_after_connecting_is_described_from_that_bots_side(connected):
     """``room()`` reads through a bot that is in the room; its own join is tracked before
     the event is delivered, so a DM opened at runtime is named for the counterpart, not
-    read through the first bot and named for the joining bot."""
+    read through the first bot and named for the joining bot. The join is fed as
+    ``user_added``, the one membership frame the connector handles; Mattermost announces
+    a new direct channel with ``direct_added``, which it does not (plan S3-2)."""
     connector, mm, seen, _ = connected
     await connector.add_bot("wavebro_bot", "tok-wavebro")
     glin, wavebro = mm.ids["glin"], mm.ids["wavebro"]

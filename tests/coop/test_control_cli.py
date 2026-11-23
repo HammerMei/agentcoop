@@ -45,7 +45,8 @@ async def test_status_list_and_holds_round_trip_through_the_socket(daemon):
     status = await send_command(control.socket_path, {"cmd": "status"})
     assert status["ok"] and status["data"]["servers"] == {"fake": ["a", "b"]}
     listed = await send_command(control.socket_path, {"cmd": "list"})
-    assert listed["data"] == {"fake:team": {"hosted": ["a", "b"], "bots": ["a_bot", "b_bot", "x_bot"], "room_id": "c1", "dm": False}}
+    assert listed["data"] == {"fake:team": {"hosted": ["a", "b"], "bots": ["a_bot", "b_bot", "x_bot"], "room_id": "c1", "dm": False,
+                                           "name": "team"}}
     assert (await send_command(control.socket_path, {"cmd": "pause", "agent": "a", "room": "fake:team"}))["ok"]
     assert svc.rooms["fake:team"].core.persisted["a_bot"].paused
     refused = await send_command(control.socket_path, {"cmd": "pause", "agent": "a", "room": "fake:zzz"})
@@ -98,6 +99,15 @@ async def test_the_cli_prints_status_list_and_holds(daemon, capsys):
     assert await asyncio.to_thread(cli.main, ["resume", "a", "fake:team"]) == 0
     assert await asyncio.to_thread(cli.main, ["reset", "zz", "fake:team"]) == 1
     assert capsys.readouterr().err.startswith("[ERROR]")
+
+
+def test_list_prints_a_group_messages_platform_name_after_its_digest_handle(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ask", lambda _: {
+        "fake:gdm:0123456789abcdef": {"hosted": ["a"], "bots": ["a_bot"], "room_id": "g1", "dm": False, "name": "H, a_bot"},
+        "fake:dm:a_bot:H": {"hosted": ["a"], "bots": ["a_bot"], "room_id": "d1", "dm": True, "name": "H"}})
+    assert cli.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "fake:gdm:0123456789abcdef: hosted a; bots a_bot (H, a_bot)\n" in out and "fake:dm:a_bot:H: hosted a; bots a_bot (dm)\n" in out
 
 
 def test_the_cli_without_a_daemon_is_an_error_line(tmp_path, monkeypatch, capsys):
