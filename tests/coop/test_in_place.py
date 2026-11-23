@@ -19,6 +19,7 @@ async def test_a_bot_added_in_place_starts_at_the_latest_post_and_the_others_kee
     await sb.human("later")
     assert sb.gateway.poll("a") is not None
     sb.gw.add_hosted("c", sb.room.last_position())
+    sb.gateway.bind("team", "c", "c")  # the daemon binds the agent right after hosting its bot
     assert sb.gw.volatile["a"].turn is not None  # a's lease is untouched
     assert sb.gw.persisted["c"].cursor == sb.room.last_position()
     assert sb.room.posts_after(sb.gw.persisted["c"].cursor) == []  # nothing old is c's first wake
@@ -178,3 +179,28 @@ async def test_a_bot_hosted_before_start_gets_one_periodic_timer_not_two():
     core.add_hosted("b", None)  # joining a started room: scheduled now, once
     await sb.run(10)
     assert sb.trace.count("sweep", gateway="ops", bot="b", reason="periodic") == 1
+
+
+async def test_the_binding_is_per_room_and_strict_an_unbound_bot_of_an_agents_name_is_not_the_agents():
+    """Agent ``a`` is ``b`` in the first room; the second room hosts a bot called ``a``
+    that belongs to agent ``x``. Nothing ``a`` does reaches that bot: the gateway
+    translates by binding, never by name."""
+    sb = Sandbox(bots=("b",), attach_agent=False)
+    sb.gateway.unbind("team", "b")
+    sb.gateway.bind("team", "a", "b")
+    other = sb.add_room("other", ["a"])
+    sb.gateway.unbind("other", "a")
+    sb.gateway.bind("other", "x", "a")
+    await sb.human("@b hello", "t1")
+    await other.post("H", "@a hello")
+    await sb.run(1)
+    wake = sb.gateway.poll("a")
+    assert wake is not None and wake.room == "team" and wake.bot == "b"
+    assert sb.gateway.poll("a") is None  # the wake in ``other`` is x's
+    assert sb.gateway.poll("x").room == "other"
+    with pytest.raises(PermissionError):
+        sb.gateway.read_room("a", "other")
+    assert not sb.gateway.hosts("a", "other") and sb.gateway.hosts("x", "other")
+    with pytest.raises(ValueError, match="is 'x'\\'s bot"):
+        sb.gateway.bind("other", "a", "a")
+    assert Roster(("a",)).kind_of("a") == "bot"  # the roster is in the room's namespace too

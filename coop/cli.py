@@ -120,7 +120,7 @@ def cmd_list(args) -> int:
     if not data:
         print("no hosted rooms")
     for handle, room in data.items():
-        print(f"{handle}: hosted {', '.join(room['hosted'])}; roster {', '.join(room['agents'])}"
+        print(f"{handle}: hosted {', '.join(room['hosted'])}; bots {', '.join(room['bots'])}"
               f"{' (dm)' if room['dm'] else ''}")
     return 0
 

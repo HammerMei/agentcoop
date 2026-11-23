@@ -15,7 +15,7 @@ from .core import BotPersisted, RoomCore, ThreadSettings
 from .gateway import AgentState, Gateway
 from .model import Position
 
-FORMAT = 1
+FORMAT = 2  # 2: bots and control targets keyed by the bot's platform username
 
 
 def _position_out(position: Position | None) -> Any:
@@ -104,8 +104,8 @@ def dump_agents(gateway: Gateway) -> dict:
 
 
 def load_agents(gateway: Gateway, data: dict) -> None:
-    """Restore the bios into ``gateway`` before it starts. The bios dict is updated in
-    place: every room's core holds that same dict for its classifier."""
+    """Restore the bios into ``gateway``: into every room already bound, and a later
+    binding copies the agent's bio into its room's core under the bot's username."""
     if data.get("format") != FORMAT:
         raise ValueError(f"agent state format {data.get('format')!r} is not {FORMAT}")
     for agent, raw in data.get("agents", {}).items():
@@ -113,4 +113,4 @@ def load_agents(gateway: Gateway, data: dict) -> None:
         state.bio = raw.get("bio")
         state.bio_version = int(raw.get("bio_version", 0))
         if state.bio is not None:
-            gateway.bios[agent] = state.bio
+            gateway.set_bio(agent, state.bio)

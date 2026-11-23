@@ -58,6 +58,13 @@ role.
 - **agent**: an `agents:` entry. In this increment an agent is remote: the gateway
   holds a token for it and a cursor per room, and never a process.
 - **bot**: unchanged (CONTEXT.md): an agent's presence on one chat server.
+- **name**: a room has one namespace, the chat server's. An author is its username,
+  a bot is its bot account's `username`, and a post's text is delivered as written:
+  `@a_bot` stays `@a_bot`. The agent name (the `agents:` key) names the token, the
+  bio and the cursor files; the gateway binds it to the bot's username per room,
+  and an agent may be one username on one server and another on the next. A person
+  whose username happens to be an agent's key is a person: nothing in a room is
+  looked up by agent name.
 - **role**: the label on a delivered post's author: `owner`, `guest` or `agent`
   (direction §3.1). `agent` is any bot in the room's roster. `owner` is a person
   the configuration lists as an owner of the bot the post is delivered to, so one
@@ -510,21 +517,24 @@ rooms:                           # keys are patterns over <server>:<room name>;
     classifier_enabled: true
 ```
 
-Who is a bot is decided from this file first and from the platform last: a name
-under `bots` is a bot, a person under `owners` or `guests` is human, and only
-then does a platform flag (Mattermost's `is_bot`) count, because not every
+Who is a bot is decided from this file first and from the platform last: a bot's
+`username` under `bots` is a bot, a person under `owners` or `guests` is human, and
+only then does a platform flag (Mattermost's `is_bot`) count, because not every
 platform has one and a platform's restricted bot account is not necessarily the
-one an agent uses. Relative paths are relative to the directory the file is in,
-the runtime directory in a normal install.
+one an agent uses. `owners` and `guests` are usernames, as everything in a room is
+(§2, *name*); the `bots` keys are agent names, which the gateway resolves to the
+`username` when it opens a room. Relative paths are relative to the directory the
+file is in, the runtime directory in a normal install.
 
 `coop reload` (and `coop config add agent`, which asks for one) applies a changed
 file in place: agents and their tokens, bots connected or disconnected, room
 rules swapped under running rooms, rooms opened or closed, while every other
 bot's lease, backoff and rate window stay as they are. A new or changed
-`servers` entry refuses the reload and needs a restart. Two changes the reload
-cannot apply are said rather than refused, since the next `config add agent`
-must still reload: a connected bot's credentials, and `gateway.listen` / `tls`;
-each prints `[WARNING] … until a restart`.
+`servers` entry refuses the reload and needs a restart, and so does a connected
+bot's `username`: it is the bot's name in every room's state. Two changes the
+reload cannot apply are said rather than refused, since the next `config add
+agent` must still reload: a connected bot's `token_file`, and `gateway.listen` /
+`tls`; each prints `[WARNING] … until a restart`.
 
 `type: claude` and `type: opencode` entries stop being accepted by the gateway;
 `coop config` migrates them to `type: remote` and prints the utility command for

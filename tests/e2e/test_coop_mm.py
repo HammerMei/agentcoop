@@ -76,7 +76,7 @@ async def test_a_mention_wakes_the_agent_over_the_doorbell_and_its_reply_threads
             assert wake.starting_thread == trigger["id"]  # a top-level post is its own thread
             _, posts = await agent.read(wake.wake_id)
             assert [p.id for p in posts][-1] == trigger["id"]
-            assert posts[-1].text == f"@bot {marker}"  # the bot's username became its agent name
+            assert posts[-1].text == f"@{mm_setup['bot_username']} {marker}"  # delivered as written
             reply = await agent.send(Reply(thread=None, to=[mm_setup["test_user_username"]],
                                            text=f"got it {marker}", wake_id=wake.wake_id))
             assert reply is not None

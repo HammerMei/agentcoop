@@ -18,7 +18,6 @@ from coop.config import parse
 from coop.connectors.base import Membership, Posted
 from coop.connectors.mattermost.connector import MattermostConnector
 from coop.connectors.mattermost.normalize import normalize
-from coop.connectors.normalize import Names
 from coop.room.platform import PlatformError, RefusedPost
 from coop.room.roster import Roster
 
@@ -38,8 +37,8 @@ agents:
   wavebro: {type: remote, token_file: b.agent}
 """), Path("/srv")).servers["lab"]
 
-ROSTER = Roster(("laomei", "wavebro", "muse"), {"laomei": frozenset({"glin"}), "wavebro": frozenset({"glin"}),
-                                               "muse": frozenset()}, frozenset())
+ROSTER = Roster(("laomei_bot", "wavebro_bot", "muse"), {"laomei_bot": frozenset({"glin"}), "wavebro_bot": frozenset({"glin"}),
+                                                       "muse": frozenset()}, frozenset())
 
 
 class FakeMattermost:
@@ -212,7 +211,7 @@ async def connected(mm):
 
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle),
                                     websocket=FakeSocket(mm))
-    rooms = await connector.add_bot("laomei", "tok-laomei")
+    rooms = await connector.add_bot("laomei_bot", "tok-laomei")
     connector.watch("c01", ROSTER)
     await connector.members("c01")
     yield connector, mm, seen, rooms
@@ -223,20 +222,20 @@ async def test_add_bot_lists_the_teams_rooms_and_dms_with_the_counterparts_name(
     connector, mm, seen, rooms = connected
     assert [(r.id, r.name, r.is_dm) for r in rooms] == [("c01", "team", False), ("c03", "glin", True)]
     with pytest.raises(ValueError, match="not 'wavebro_bot'"):
-        await connector.add_bot("wavebro", "tok-laomei")
+        await connector.add_bot("wavebro_bot", "tok-laomei")
     with pytest.raises(httpx.HTTPStatusError):
-        await connector.add_bot("wavebro", "tok-nope")
+        await connector.add_bot("wavebro_bot", "tok-nope")
 
 
-async def test_a_posted_frame_becomes_a_normalised_post_in_the_cores_namespace(connected):
+async def test_a_posted_frame_becomes_a_normalised_post_delivered_as_written(connected):
     connector, mm, seen, _ = connected
     post = mm.post("c01", mm.ids["glin"], "@laomei_bot and @muse: please look\nmute: @wavebro_bot")
     await mm.deliver(post)
-    assert len(seen) == 1 and isinstance(seen[0], Posted) and seen[0].seen_by == "laomei"
+    assert len(seen) == 1 and isinstance(seen[0], Posted) and seen[0].seen_by == "laomei_bot"
     found = seen[0].post
     assert found.author == "glin" and found.kind == "human" and found.author_role == ""
-    assert found.text == "@laomei and @muse: please look\nmute: @wavebro"
-    assert found.mentions == {"laomei", "muse"} and found.controls.mute == ("wavebro",)
+    assert found.text == "@laomei_bot and @muse: please look\nmute: @wavebro_bot"
+    assert found.mentions == {"laomei_bot", "muse"} and found.controls.mute == ("wavebro_bot",)
     assert found.thread == found.id and found.position == (post["create_at"], post["id"])
     # a frame for a room nobody watches is dropped, a system post too
     await mm.deliver(mm.post("c02", mm.ids["glin"], "x"))
@@ -249,7 +248,7 @@ async def test_kinds_come_from_the_roster_first_and_the_platform_last(connected)
     for who in ("muse", "hook", "laomei"):
         await mm.deliver(mm.post("c01", mm.ids[who], "hi"))
     kinds = {e.post.author: e.post.kind for e in seen}
-    assert kinds == {"muse": "bot", "hook": "bot", "laomei": "bot"}  # muse by roster, hook by is_bot
+    assert kinds == {"muse": "bot", "hook": "bot", "laomei_bot": "bot"}  # muse by roster, hook by is_bot
     members = {m.username: m for m in await connector.members("c01")}
     assert members["glin"].display_name == "Glin" and members["hook"].is_bot and not members["muse"].is_bot
 
@@ -269,29 +268,29 @@ async def test_history_pages_by_post_id_oldest_first_and_resync_re_emits_what_a_
     assert [e.post.text for e in seen] == ["n2", "missed"]
 
 
-async def test_a_post_goes_out_with_bot_usernames_and_comes_back_as_the_echo(connected):
+async def test_a_post_goes_out_as_written_and_comes_back_as_the_echo(connected):
     connector, mm, seen, _ = connected
-    post = await connector.post("laomei", "c01", "@wavebro @glin done", None)
+    post = await connector.post("laomei_bot", "c01", "@wavebro_bot @glin done", None)
     assert mm.posts["c01"][-1]["message"] == "@wavebro_bot @glin done"
-    assert post.author == "laomei" and post.text == "@wavebro @glin done" and post.thread == post.id
+    assert post.author == "laomei_bot" and post.text == "@wavebro_bot @glin done" and post.thread == post.id
     await asyncio.sleep(0.01)
     assert [e.post.id for e in seen] == [post.id]  # the echo, for the room log to drop
-    reply = await connector.post("laomei", "c01", "in thread", post.id)
+    reply = await connector.post("laomei_bot", "c01", "in thread", post.id)
     assert reply.thread == post.id
     mm.refuse_posts = True
     with pytest.raises(RefusedPost):
-        await connector.post("laomei", "c01", "x", None)
+        await connector.post("laomei_bot", "c01", "x", None)
 
 
-async def test_membership_frames_name_the_agent_and_track_the_bots_own_rooms(connected):
+async def test_membership_frames_name_the_username_and_track_the_bots_own_rooms(connected):
     connector, mm, seen, _ = connected
     sock = mm.sockets[0]
     await sock.feed({"event": "user_added", "data": {"user_id": mm.ids["wavebro"], "team_id": "team1"},
                      "broadcast": {"channel_id": "c01"}})
     await sock.feed({"event": "user_removed", "data": {"channel_id": "c02"}, "broadcast": {"user_id": mm.ids["laomei"]}})
-    assert seen == [Membership("c01", "wavebro", True), Membership("c02", "laomei", False)]
-    assert "c02" not in connector._bots["laomei"].rooms
-    await connector.typing("laomei", "c01", "p001")
+    assert seen == [Membership("c01", "wavebro_bot", True), Membership("c02", "laomei_bot", False)]
+    assert "c02" not in connector._bots["laomei_bot"].rooms
+    await connector.typing("laomei_bot", "c01", "p001")
     assert sock.typed == [("c01", "p001")]
     await connector.typing("nobody", "c01", None)  # best effort, never raises
 
@@ -299,7 +298,7 @@ async def test_membership_frames_name_the_agent_and_track_the_bots_own_rooms(con
 async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):
     connector, mm, seen, _ = connected
     mm.files["f1"] = b"hello"
-    assert await connector.fetch_file("laomei", "f1") == b"hello"
+    assert await connector.fetch_file("laomei_bot", "f1") == b"hello"
     info = await connector.room("c03")
     assert info.name == "glin" and info.is_dm
     post = mm.post("c01", mm.ids["glin"], "see", files=({"id": "f1", "name": "a.txt"},))
@@ -308,13 +307,12 @@ async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):
 
 
 def test_normalize_is_pure_and_marks_webhooks_as_integrations():
-    names = Names({"laomei": "laomei_bot"})
     raw = {"id": "p1", "user_id": "u9", "message": "hi @laomei_bot", "create_at": 5000, "root_id": "",
            "type": "", "props": {"from_webhook": "true"}}
-    post = normalize(raw, {"username": "ci", "is_bot": True}, ROSTER, names, {"laomei"})
-    assert post.kind == "integration" and post.text == "hi @laomei" and post.mentions == {"laomei"}
+    post = normalize(raw, {"username": "ci", "is_bot": True}, ROSTER, {"laomei_bot"})
+    assert post.kind == "integration" and post.text == "hi @laomei_bot" and post.mentions == {"laomei_bot"}
     assert post.time == 5.0 and post.position == (5000, "p1") and post.author == "ci"
-    assert normalize({**raw, "type": "system_add_to_channel"}, {}, ROSTER, names, set()) is None
+    assert normalize({**raw, "type": "system_add_to_channel"}, {}, ROSTER, set()) is None
 
 
 async def test_resync_pages_through_everything_the_socket_missed(connected):
@@ -342,14 +340,14 @@ async def test_transport_failures_are_platform_errors_and_a_missing_file_a_key_e
 
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
-        await connector.post("laomei", "c01", "x", None)
+        await connector.post("laomei_bot", "c01", "x", None)
     with pytest.raises(PlatformError):
-        await connector.fetch_file("laomei", "f1")
+        await connector.fetch_file("laomei_bot", "f1")
     with pytest.raises(PlatformError):
         await connector.history("c01")
     mm.failure, mm.not_found = None, True
     with pytest.raises(KeyError):
-        await connector.fetch_file("laomei", "f1")
+        await connector.fetch_file("laomei_bot", "f1")
 
 
 async def test_resync_starts_after_the_startup_history_when_no_live_post_came_yet(connected):
@@ -379,7 +377,7 @@ async def test_a_group_message_is_a_room_not_a_one_to_one_dm(mm):
     async def on_event(event):
         seen.append(event)
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle), websocket=FakeSocket(mm))
-    rooms = await connector.add_bot("laomei", "tok-laomei")
+    rooms = await connector.add_bot("laomei_bot", "tok-laomei")
     group = next(r for r in rooms if r.name == "glin, laomei_bot, wavebro_bot")
     assert not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
     mm.failure = httpx.ConnectError("down")

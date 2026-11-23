@@ -22,7 +22,6 @@ from ...room.model import Position, Post
 from ...room.platform import PlatformError, RefusedPost
 from ...room.roster import Roster
 from ..base import MemberInfo, Membership, OnEvent, Posted, RoomInfo
-from ..normalize import Names
 from .normalize import display_name, normalize
 from .rest import MattermostREST
 from .websocket import MattermostWebSocket
@@ -32,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _Bot:
-    agent: str
+    username: str
     rest: MattermostREST
     ws: MattermostWebSocket | None = None
     user_id: str = ""
@@ -50,8 +49,7 @@ class MattermostConnector:
         self.on_event = on_event
         self._transport = transport
         self._websocket = websocket
-        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
-        self._bots: dict[str, _Bot] = {}
+        self._bots: dict[str, _Bot] = {}  # by username
         self._rosters: dict[str, Roster] = {}
         self._members: dict[str, dict[str, MemberInfo]] = {}  # room id -> username -> member
         self._last: dict[str, Position] = {}  # room id -> newest position seen live
@@ -62,22 +60,21 @@ class MattermostConnector:
 
     def configure(self, server: Server) -> None:
         self.server = server
-        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
 
     async def stop(self) -> None:
-        for agent in list(self._bots):
-            await self.remove_bot(agent)
+        for username in list(self._bots):
+            await self.remove_bot(username)
 
     # ── bots ────────────────────────────────────────────────────────────────
 
-    async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
+    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
         rest = MattermostREST(self.server.url, token, transport=self._transport)
-        bot = _Bot(agent, rest)
+        bot = _Bot(username, rest)
         try:
             me = await rest.me()
             bot.user_id = me["id"]
-            if me.get("username") != self.server.bots[agent].username:
-                raise ValueError(f"the token is {me.get('username')!r}'s, not {self.server.bots[agent].username!r}'s")
+            if me.get("username") != username:
+                raise ValueError(f"the token is {me.get('username')!r}'s, not {username!r}'s")
             team_id = await self._team(rest)
             channels = [c for c in await rest.my_channels(bot.user_id)
                         if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
@@ -88,11 +85,11 @@ class MattermostConnector:
         except Exception:
             await rest.close()
             raise
-        self._bots[agent] = bot
+        self._bots[username] = bot
         return rooms
 
-    async def remove_bot(self, agent: str) -> None:
-        bot = self._bots.pop(agent, None)
+    async def remove_bot(self, username: str) -> None:
+        bot = self._bots.pop(username, None)
         if bot is None:
             return
         if bot.ws is not None:
@@ -157,8 +154,7 @@ class MattermostConnector:
 
     def _known(self, room_id: str) -> set[str]:
         roster = self._rosters.get(room_id)
-        names = {self.names.agent_of(u) for u in self._members.get(room_id, {})}
-        return names | (set(roster.bots) if roster else set())
+        return set(self._members.get(room_id, {})) | (set(roster.bots) if roster else set())
 
     # ── posts ───────────────────────────────────────────────────────────────
 
@@ -191,10 +187,10 @@ class MattermostConnector:
         except httpx.HTTPError as exc:
             raise PlatformError(f"{self.name}: history of {room_id}: {exc}") from exc
 
-    async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
-        bot = self._bots[agent]
+    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
+        bot = self._bots[username]
         try:
-            raw = await bot.rest.create_post(room_id, self.names.outbound(text), thread)
+            raw = await bot.rest.create_post(room_id, text, thread)
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 logger.warning("%s: post refused (%s): %s", self.name, exc.response.status_code, exc.response.text[:200])
@@ -207,9 +203,9 @@ class MattermostConnector:
             raise RefusedPost(thread)
         return post
 
-    async def fetch_file(self, agent: str, file_id: str) -> bytes:
+    async def fetch_file(self, username: str, file_id: str) -> bytes:
         try:
-            return await self._bots[agent].rest.file(file_id)
+            return await self._bots[username].rest.file(file_id)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in (403, 404):
                 raise KeyError(file_id) from exc
@@ -217,8 +213,8 @@ class MattermostConnector:
         except httpx.HTTPError as exc:
             raise PlatformError(f"{self.name}: file {file_id}: {exc}") from exc
 
-    async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
-        bot = self._bots.get(agent)
+    async def typing(self, username: str, room_id: str, thread: str | None) -> None:
+        bot = self._bots.get(username)
         if bot is None or bot.ws is None:
             return
         try:
@@ -229,7 +225,7 @@ class MattermostConnector:
     async def _normalize(self, bot: _Bot, room_id: str, raw: dict) -> Post | None:
         roster = self._rosters.get(room_id) or Roster(())
         author = await bot.rest.user(raw.get("user_id", "")) if raw.get("user_id") else {}
-        return normalize(raw, author, roster, self.names, self._known(room_id))
+        return normalize(raw, author, roster, self._known(room_id))
 
     def _seen_live(self, room_id: str, post: Post) -> None:
         """The newest position a connection delivered: what a resync starts after. A
@@ -250,7 +246,7 @@ class MattermostConnector:
                 post = await self._normalize(bot, room_id, raw)
                 if post is not None:
                     self._seen_live(room_id, post)
-                    await self.on_event(Posted(room_id, post, seen_by=bot.agent))
+                    await self.on_event(Posted(room_id, post, seen_by=bot.username))
             elif event in ("user_added", "user_removed"):
                 # the two carry their ids in mirrored places (frozen gateway §2.7)
                 room_id = data.get("channel_id") or broadcast.get("channel_id") or ""
@@ -261,7 +257,7 @@ class MattermostConnector:
                 if user_id == bot.user_id:
                     (bot.rooms.add if joined else bot.rooms.discard)(room_id)
                 username = (await bot.rest.user(user_id)).get("username", user_id)
-                await self.on_event(Membership(room_id, self.names.agent_of(username), joined))
+                await self.on_event(Membership(room_id, username, joined))
         return handle
 
     def _resync_handler(self, bot: _Bot):
@@ -276,7 +272,7 @@ class MattermostConnector:
                         page = await self.history(room_id, after=self._last.get(room_id))
                         for post in page:
                             self._seen_live(room_id, post)
-                            await self.on_event(Posted(room_id, post, seen_by=bot.agent))
+                            await self.on_event(Posted(room_id, post, seen_by=bot.username))
                         if not page:
                             break
                 except Exception:  # noqa: BLE001

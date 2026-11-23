@@ -188,8 +188,8 @@ async def send(request: web.Request) -> web.Response:
         return refused
     reply, room = decode_reply(body), body.get("room")
     try:
-        core = gateway.room_for(agent, reply, room)
-        post = await core.send(agent, reply)
+        core, bot = gateway.room_for(agent, reply, room)
+        post = await core.send(bot, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
     except PlatformError as exc:

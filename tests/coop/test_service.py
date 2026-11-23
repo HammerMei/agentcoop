@@ -19,7 +19,6 @@ from coop.service import Service
 
 from .helpers import FakeConnector
 
-NAMES = {"a": "a_bot", "b": "b_bot", "c": "c_bot", "x": "x_bot"}
 PEOPLE = [MemberInfo("H"), MemberInfo("G"), MemberInfo("a_bot", is_bot=True), MemberInfo("b_bot", is_bot=True),
           MemberInfo("x_bot", is_bot=True)]
 ROOM = "sweep_interval_seconds: 0, catch_up_idle_seconds: 0, classifier_enabled: false, lease_seconds: 60"
@@ -50,7 +49,7 @@ def config(tmp_path: Path, text: str = CONFIG):
 
 
 def connector() -> FakeConnector:
-    fc = FakeConnector(names=NAMES)
+    fc = FakeConnector()
     fc.add_room("c1", "team", PEOPLE)
     fc.add_room("c2", "other", PEOPLE)
     return fc
@@ -80,21 +79,23 @@ async def running(tmp_path):
 
 async def test_startup_hosts_the_ruled_room_and_a_bots_reply_wakes_the_other(running):
     svc, fc = running
-    assert set(svc.rooms) == {"fake:team"} and fc.bots.keys() == {"a", "b"}
-    assert svc.rooms["fake:team"].core.hosted == ["a", "b"] and svc.rooms["fake:team"].core.agents == ["a", "b", "x"]
+    assert set(svc.rooms) == {"fake:team"} and fc.bots.keys() == {"a_bot", "b_bot"}
+    core = svc.rooms["fake:team"].core
+    assert core.hosted == ["a_bot", "b_bot"] and core.agents == ["a_bot", "b_bot", "x_bot"]  # the platform's names
+    assert svc.gateway.username_of("fake:team", "a") == "a_bot" and svc.gateway.agent_of("fake:team", "b_bot") == "b"
     assert svc.tokens == {"agent-token-a": "a", "agent-token-b": "b"}
     await fc.human("c1", "H", "@a_bot hello")
     await settle()
     wake = svc.gateway.poll("a")
     assert wake is not None and wake.trigger.author == "H" and wake.trigger.author_role == "owner"
     _, posts = svc.gateway.read("a", wake.wake_id)
-    assert [p.text for p in posts] == ["@a hello"]  # the bot's username became its agent name
-    reply = Reply(thread=wake.starting_thread, to=["b"], text="your turn", wake_id=wake.wake_id)
+    assert [p.text for p in posts] == ["@a_bot hello"] and wake.bot == "a_bot"  # the room's names, as written
+    reply = Reply(thread=wake.starting_thread, to=["b_bot"], text="your turn", wake_id=wake.wake_id)
     post = await svc.gateway.send("a", reply)
-    assert fc.posts["c1"][-1].text == "@b your turn" and post.author == "a"
+    assert fc.posts["c1"][-1].text == "@b_bot your turn" and post.author == "a_bot"
     await settle()
     wake_b = svc.gateway.poll("b")
-    assert wake_b is not None and wake_b.trigger.author == "a" and wake_b.trigger.author_role == "agent"
+    assert wake_b is not None and wake_b.trigger.author == "a_bot" and wake_b.trigger.author_role == "agent"
     assert svc.gateway.poll("a") is None  # the echo of a's own post woke nobody twice
     assert await svc.gateway.done("a", wake.wake_id)
     assert svc.gateway.poll("b") is None and svc.gateway.holds_lease("b")
@@ -121,7 +122,7 @@ async def test_state_is_saved_on_commit_and_a_restart_replays_what_it_missed(tmp
     svc.gateway.read("a", wake.wake_id)  # a done without a read is a failed turn, which saves nothing
     await svc.gateway.done("a", wake.wake_id)
     saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
-    assert tuple(saved["bots"]["a"]["cursor"]) == wake.hwm
+    assert tuple(saved["bots"]["a_bot"]["cursor"]) == wake.hwm  # the state file is in the room's namespace
     svc.gateway.bio("a", "I am a")
     assert json.loads((tmp_path / "state" / "agents.json").read_text())["agents"]["a"]["bio"] == "I am a"
     await svc.stop()
@@ -130,7 +131,7 @@ async def test_state_is_saved_on_commit_and_a_restart_replays_what_it_missed(tmp
     again = service(tmp_path, fc)
     await again.start(listen=False)
     core = again.rooms["fake:team"].core
-    assert core.persisted["a"].cursor == wake.hwm and core.persisted["b"].cursor is None
+    assert core.persisted["a_bot"].cursor == wake.hwm and core.persisted["b_bot"].cursor is None
     assert again.gateway.agents["a"].bio_version == 1
     await settle()
     wake_b = again.gateway.poll("b")
@@ -142,18 +143,18 @@ async def test_a_bot_joining_a_room_at_runtime_is_hosted_at_the_latest_post_and_
     svc, fc = running
     fc.add_room("c3", "team-2", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)])
     fc.make_post("c3", "H", "@b_bot before b was here")
-    await fc.join("c3", "b")
+    await fc.join("c3", "b_bot")
     await settle()
     run = svc.rooms["fake:team-2"]
-    assert run.core.hosted == ["b"] and run.started
-    assert run.core.persisted["b"].cursor == run.log.last_position()
+    assert run.core.hosted == ["b_bot"] and run.started
+    assert run.core.persisted["b_bot"].cursor == run.log.last_position()
     assert svc.gateway.poll("b") is None  # nothing before the join is a wake
     await fc.human("c3", "H", "@b_bot now")
     await settle()
     assert svc.gateway.poll("b").room == "fake:team-2"
-    await fc.leave("c3", "b")
+    await fc.leave("c3", "b_bot")
     await settle()
-    assert "fake:team-2" not in svc.rooms and svc.trace.last("turn_end", bot="b").outcome == "removed"
+    assert "fake:team-2" not in svc.rooms and svc.trace.last("turn_end", bot="b_bot").outcome == "removed"
 
 
 async def test_a_reload_adds_and_removes_bots_in_place_without_touching_another_bots_lease(running, tmp_path):
@@ -170,15 +171,15 @@ async def test_a_reload_adds_and_removes_bots_in_place_without_touching_another_
     tokens = svc.tokens
     notes = await svc.reload(config(tmp_path, added))
     core = svc.rooms["fake:team"].core
-    assert core.hosted == ["a", "c"] and core.agents == ["a", "c", "x"] and core.params.enforce
-    assert fc.bots.keys() == {"a", "c"} and "b" not in fc.bots
+    assert core.hosted == ["a_bot", "c_bot"] and core.agents == ["a_bot", "c_bot", "x_bot"] and core.params.enforce
+    assert fc.bots.keys() == {"a_bot", "c_bot"} and "b_bot" not in fc.bots
     assert svc.tokens is tokens and tokens == {"agent-token-a": "a", "agent-token-c": "c"}
-    assert svc.gateway.holds_lease("a") and core.volatile["a"].turn.wake.wake_id == wake.wake_id
-    assert core.persisted["c"].cursor == svc.rooms["fake:team"].log.last_position()
+    assert svc.gateway.holds_lease("a") and core.volatile["a_bot"].turn.wake.wake_id == wake.wake_id
+    assert core.persisted["c_bot"].cursor == svc.rooms["fake:team"].log.last_position()
     assert any("'c' connected" in n for n in notes) and any("'b' disconnected" in n for n in notes)
     with pytest.raises(ConfigError, match="needs a restart"):
         await svc.reload(config(tmp_path, added.replace("url: http://fake", "url: http://elsewhere")))
-    assert core.hosted == ["a", "c"]
+    assert core.hosted == ["a_bot", "c_bot"]
 
 
 async def test_a_reload_that_drops_the_rule_closes_the_room_and_one_that_adds_it_opens_it(running, tmp_path):
@@ -197,17 +198,17 @@ async def test_a_reload_that_drops_the_rule_closes_the_room_and_one_that_adds_it
 async def test_operator_commands_and_status(running):
     svc, fc = running
     svc.pause("a", "fake:team")
-    assert svc.status()["rooms"]["fake:team"]["bots"]["a"]["paused"]
+    assert svc.status()["rooms"]["fake:team"]["bots"]["a_bot"]["paused"]  # the operator names the agent
     svc.resume("a", "fake:team")
     svc.reset("a", "fake:team")
-    assert svc.rooms["fake:team"].core.persisted["a"].reset_pending
+    assert svc.rooms["fake:team"].core.persisted["a_bot"].reset_pending
     with pytest.raises(KeyError, match="no hosted room"):
         svc.pause("a", "fake:nope")
     with pytest.raises(KeyError, match="not hosted"):
         svc.pause("x", "fake:team")
     status = svc.status()
     assert status["servers"] == {"fake": ["a", "b"]} and status["agents"]["a"]["online"] is False
-    assert status["listening"] is None and status["rooms"]["fake:team"]["agents"] == ["a", "b", "x"]
+    assert status["listening"] is None and status["rooms"]["fake:team"]["agents"] == ["a_bot", "b_bot", "x_bot"]
 
 
 async def test_the_doorbell_listens_with_the_configured_address(tmp_path):
@@ -242,7 +243,7 @@ class SlowHistory(FakeConnector):
 
 
 async def test_a_post_arriving_while_the_room_is_being_opened_is_not_lost(tmp_path):
-    fc = SlowHistory(names=NAMES)
+    fc = SlowHistory()
     fc.add_room("c1", "team", PEOPLE)
     first = service(tmp_path, fc)
     await first.start(listen=False)  # a saved cursor: a restart replays what came after it
@@ -266,20 +267,20 @@ async def test_a_post_arriving_while_the_room_is_being_opened_is_not_lost(tmp_pa
     await svc.stop()
 
 
-async def test_a_reload_gives_the_connector_the_new_bots_usernames(running, tmp_path):
+async def test_a_reload_connects_a_new_bot_under_its_username_and_its_posts_read_as_a_bots(running, tmp_path):
     svc, fc = running
-    assert fc.names.username_of("c") == "c"  # not a bot the connector knows yet
+    assert "c_bot" not in fc.bots
     added = CONFIG.replace("      x: {username: x_bot}", "      c: {username: c_bot, token_file: c.bot}\n      x: {username: x_bot}")
     added = added.replace("  b: {type: remote, token_file: b.agent}", "  b: {type: remote, token_file: b.agent}\n  c: {type: remote, token_file: c.agent}")
     added = added.replace("agents: [a, b, x]", "agents: [a, b, c, x]")
     fc.membership["c1"].append(MemberInfo("c_bot", is_bot=True))
     notes = await svc.reload(config(tmp_path, added))
-    assert fc.names.username_of("c") == "c_bot" and any("'c' connected" in n for n in notes)
+    assert "c_bot" in fc.bots and any("'c' connected" in n for n in notes)
     post = await fc.human("c1", "c_bot", "hello from c")
     await settle()
-    assert post.author == "c" and post.kind == "bot"
-    assert svc.rooms["fake:team"].log.names.username_of("c") == "c_bot"
-    assert svc.rooms["fake:team"].log.members()["c"].is_bot
+    assert post.author == "c_bot" and post.kind == "bot"
+    assert svc.rooms["fake:team"].log.members()["c_bot"].is_bot
+    assert svc.gateway.username_of("fake:team", "c") == "c_bot"
 
 
 async def test_a_bot_that_leaves_and_returns_starts_at_the_latest_post(running):
@@ -289,14 +290,14 @@ async def test_a_bot_that_leaves_and_returns_starts_at_the_latest_post(running):
     wake = svc.gateway.poll("b")
     svc.gateway.read("b", wake.wake_id)
     await svc.gateway.done("b", wake.wake_id)
-    await fc.leave("c1", "b")
+    await fc.leave("c1", "b_bot")
     await settle()
     missed = await fc.human("c1", "H", "@b_bot while away")
     await settle()
-    await fc.join("c1", "b")
+    await fc.join("c1", "b_bot")
     await settle()
     core = svc.rooms["fake:team"].core
-    assert core.persisted["b"].cursor == missed.position and svc.gateway.poll("b") is None
+    assert core.persisted["b_bot"].cursor == missed.position and svc.gateway.poll("b") is None
 
 
 async def test_two_rooms_with_one_handle_are_noted_and_the_daemon_still_starts(tmp_path):
@@ -314,12 +315,12 @@ async def test_two_rooms_with_one_handle_are_noted_and_the_daemon_still_starts(t
 async def test_a_state_file_of_another_format_is_noted_and_the_room_starts_fresh(tmp_path):
     fc = connector()
     (tmp_path / "state" / "fake").mkdir(parents=True)
-    (tmp_path / "state" / "fake" / "c1.json").write_text('{"bots": {"a": {"cursor": [1, "x"]}}}')
+    (tmp_path / "state" / "fake" / "c1.json").write_text('{"bots": {"a_bot": {"cursor": [1, "x"]}}}')
     svc = service(tmp_path, fc)
     await svc.start(listen=False)
     try:
-        assert svc.rooms["fake:team"].core.persisted["a"].cursor is None
-        assert any("not a 1 room state document" in n for n in svc.notes)
+        assert svc.rooms["fake:team"].core.persisted["a_bot"].cursor is None
+        assert any("not a 2 room state document" in n for n in svc.notes)
     finally:
         await svc.stop()
 
@@ -339,7 +340,7 @@ async def test_an_attachment_is_fetched_through_a_hosted_bot(running):
 async def test_malformed_saved_threads_start_the_room_fresh_loudly(tmp_path):
     fc = connector()
     (tmp_path / "state" / "fake").mkdir(parents=True)
-    (tmp_path / "state" / "fake" / "c1.json").write_text('{"format": 1, "bots": {}, "threads": {"t1": {"bogus": 1}}}')
+    (tmp_path / "state" / "fake" / "c1.json").write_text('{"format": 2, "bots": {}, "threads": {"t1": {"bogus": 1}}}')
     svc = service(tmp_path, fc)
     await svc.start(listen=False)
     try:
@@ -354,7 +355,11 @@ async def test_a_reload_that_changes_a_connected_bots_credentials_says_a_restart
     (tmp_path / "b2.bot").write_text("rotated\n")
     notes = await svc.reload(config(tmp_path, CONFIG.replace("token_file: b.bot", "token_file: b2.bot")))
     assert any("'b' has new credentials" in n and "restart" in n for n in notes)
-    assert fc.bots["b"] == "bot-token-b"  # the connection kept the old one, as the note says
+    assert fc.bots["b_bot"] == "bot-token-b"  # the connection kept the old one, as the note says
+    # a username is the bot's name in every room it is in: changing it is refused, not warned
+    with pytest.raises(ConfigError, match="changing a connected bot's username needs a restart"):
+        await svc.reload(config(tmp_path, CONFIG.replace("username: b_bot", "username: b2_bot")))
+    assert svc.rooms["fake:team"].core.hosted == ["a_bot", "b_bot"]
 
 
 async def test_two_agents_with_one_token_refuse_the_configuration(tmp_path):
@@ -370,7 +375,7 @@ async def test_a_saved_null_cursor_backfills_to_the_start_of_history(tmp_path):
     fc = connector()
     (tmp_path / "state" / "fake").mkdir(parents=True)
     (tmp_path / "state" / "fake" / "c1.json").write_text(
-        '{"format": 1, "bots": {"a": {"cursor": null, "unfinished": [], "paused": false}}, "threads": {}}')
+        '{"format": 2, "bots": {"a_bot": {"cursor": null, "unfinished": [], "paused": false}}, "threads": {}}')
     for i in range(130):
         fc.make_post("c1", "H", f"@a_bot n{i}" if i == 0 else f"n{i}")
     svc = service(tmp_path, fc)
@@ -386,7 +391,7 @@ async def test_a_saved_null_cursor_backfills_to_the_start_of_history(tmp_path):
 async def test_malformed_agents_state_is_noted_and_bios_start_empty(tmp_path):
     fc = connector()
     (tmp_path / "state").mkdir()
-    (tmp_path / "state" / "agents.json").write_text('{"format": 1, "agents": []}')
+    (tmp_path / "state" / "agents.json").write_text('{"format": 2, "agents": []}')
     svc = service(tmp_path, fc)
     await svc.start(listen=False)
     try:
@@ -413,14 +418,14 @@ class FlakyMembers(FakeConnector):
 
 
 async def test_one_room_that_cannot_open_is_noted_and_the_bots_other_rooms_are_hosted(tmp_path):
-    fc = FlakyMembers(names=NAMES)
+    fc = FlakyMembers()
     fc.add_room("c1", "team", PEOPLE)
     fc.add_room("c3", "team-2", PEOPLE)
     fc.failing = {"c1"}
     svc = service(tmp_path, fc)
     await svc.start(listen=False)
     try:
-        assert set(svc.rooms) == {"fake:team-2"} and fc.bots.keys() == {"a", "b"}
+        assert set(svc.rooms) == {"fake:team-2"} and fc.bots.keys() == {"a_bot", "b_bot"}
         assert any("fake:team: not opened" in n for n in svc.notes)
         fc.failing = set()
         notes = await svc.reload(svc.config)  # the next reload hosts it: the bot's rooms were kept
@@ -435,34 +440,36 @@ async def test_a_newly_hosted_bots_cursor_is_on_disk_before_any_turn(tmp_path):
     svc = service(tmp_path, fc)
     await svc.start(listen=False)
     saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
-    assert tuple(saved["bots"]["a"]["cursor"]) == fc.posts["c1"][-1].position
+    assert tuple(saved["bots"]["a_bot"]["cursor"]) == fc.posts["c1"][-1].position
     await svc.stop()
 
 
 async def test_a_leave_from_an_unhosted_room_is_forgotten_so_a_later_rule_does_not_host_it(running, tmp_path):
     svc, fc = running
-    await fc.leave("c2", "a")  # fake:other is not hosted; a is no longer in it
+    await fc.leave("c2", "a_bot")  # fake:other is not hosted; a is no longer in it
     await settle()
     notes = await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:*"')))
-    assert "fake:other" in svc.rooms and svc.rooms["fake:other"].core.hosted == ["b"]  # b is still a member
+    assert "fake:other" in svc.rooms and svc.rooms["fake:other"].core.hosted == ["b_bot"]  # b is still a member
     assert not any("'a' hosted" in n and "other" in n for n in notes)
 
 
-async def test_a_reload_that_adds_a_roster_only_bot_renormalises_the_members(running, tmp_path):
+async def test_a_reload_that_adds_a_roster_only_bot_puts_it_in_the_room_under_its_username(running, tmp_path):
     svc, fc = running
     fc.membership["c1"].append(MemberInfo("y_bot", is_bot=True))
+    await svc._refresh_members(svc.rooms["fake:team"])  # the platform told the daemon of the join
     added = CONFIG.replace("      x: {username: x_bot}", "      x: {username: x_bot}\n      y: {username: y_bot}")
     added = added.replace("agents: [a, b, x]", "agents: [a, b, x, y]")
     await svc.reload(config(tmp_path, added))
     log = svc.rooms["fake:team"].log
-    assert "y" in log.members() and log.members()["y"].is_bot and "y_bot" not in log.members()
-    assert "y" in svc.rooms["fake:team"].core._bots_in_room()
+    assert "y_bot" in log.members() and log.members()["y_bot"].is_bot and "y" not in log.members()
+    assert "y_bot" in svc.rooms["fake:team"].core._bots_in_room()
 
 
 RELOAD_CASES = [
     # (change to the file, what the reload does: applied | refused | warned, how to tell)
-    ("agents: [a, b, x]", "agents: [a, x]", "applied", lambda svc, fc, notes: svc.rooms["fake:team"].core.hosted == ["a"]),
+    ("agents: [a, b, x]", "agents: [a, x]", "applied", lambda svc, fc, notes: svc.rooms["fake:team"].core.hosted == ["a_bot"]),
     ("token_file: b.agent", "token_file: a.agent", "refused", None),
+    ("username: b_bot", "username: b2_bot", "refused", None),
     ("url: http://fake", "url: http://other", "refused", None),
     ("token_file: b.bot", "token_file: b2.bot", "warned", lambda svc, fc, notes: any("new credentials" in n for n in notes)),
     ("rooms:", "gateway: {listen: 127.0.0.1:1}\nrooms:", "warned", lambda svc, fc, notes: any("gateway.listen/tls" in n for n in notes)),
@@ -509,5 +516,32 @@ async def test_an_archived_room_is_not_hosted(tmp_path):
     await svc.start(listen=False)
     try:
         assert svc.rooms == {}
+    finally:
+        await svc.stop()
+
+
+async def test_crossed_usernames_wake_by_binding_not_by_name(tmp_path):
+    """Agent ``a``'s bot is called ``b`` and agent ``b``'s bot is called ``a``: a mention
+    of ``@a`` wakes agent ``b``, and the state file is keyed by the room's names."""
+    crossed = CONFIG.replace("a: {username: a_bot, token_file: a.bot}", "a: {username: b, token_file: a.bot}")
+    crossed = crossed.replace("b: {username: b_bot, token_file: b.bot}", "b: {username: a, token_file: b.bot}")
+    fc = FakeConnector()
+    fc.add_room("c1", "team", [MemberInfo("H"), MemberInfo("a", is_bot=True), MemberInfo("b", is_bot=True)])
+    svc = service(tmp_path, fc, crossed)
+    await svc.start(listen=False)
+    try:
+        assert svc.gateway.username_of("fake:team", "a") == "b" and svc.gateway.username_of("fake:team", "b") == "a"
+        await fc.human("c1", "H", "@a hello")
+        await settle()
+        assert svc.gateway.poll("a") is None
+        wake = svc.gateway.poll("b")
+        assert wake is not None and wake.bot == "a"
+        _, posts = svc.gateway.read("b", wake.wake_id)
+        post = await svc.gateway.send("b", Reply(thread=wake.starting_thread, to=["H"], text="hi", wake_id=wake.wake_id))
+        assert post.author == "a" and await svc.gateway.done("b", wake.wake_id)
+        saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
+        assert set(saved["bots"]) == {"a", "b"} and tuple(saved["bots"]["a"]["cursor"]) == wake.hwm
+        svc.pause("b", "fake:team")
+        assert svc.rooms["fake:team"].core.persisted["a"].paused
     finally:
         await svc.stop()

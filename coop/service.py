@@ -33,7 +33,6 @@ from aiohttp import web
 
 from .config import Config, ConfigError, RoomRule, Server
 from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo
-from .connectors.normalize import Names
 from .connectors.roomlog import RoomLog
 from .doorbell.api import build_app
 from .doorbell.tls import server_context
@@ -110,7 +109,7 @@ class Service:
         self.connectors: dict[str, Connector] = {}
         self.rooms: dict[str, RoomRun] = {}  # by handle
         self._by_id: dict[tuple[str, str], RoomRun] = {}
-        self._connected: dict[str, set[str]] = {}  # server -> agents whose bot is connected
+        self._connected: dict[str, dict[str, str]] = {}  # server -> connected agent -> its bot's username
         self._rooms_of: dict[tuple[str, str], list[RoomInfo]] = {}  # (server, agent) -> its rooms
         self._runner: web.AppRunner | None = None
         self.listening: tuple[str, int] | None = None
@@ -125,7 +124,7 @@ class Service:
         for server in self.config.servers.values():
             connector = self._connector_factory(server, self._event_handler(server.name))
             self.connectors[server.name] = connector
-            self._connected[server.name] = set()
+            self._connected[server.name] = {}
             await connector.start()
             for bot in server.bots.values():
                 if bot.hosted:
@@ -174,12 +173,12 @@ class Service:
     async def _connect_bot(self, server: Server, agent: str) -> bool:
         bot = server.bots[agent]
         try:
-            rooms = await self.connectors[server.name].add_bot(agent, read_token(bot.token_file))
+            rooms = await self.connectors[server.name].add_bot(bot.username, read_token(bot.token_file))
         except Exception as exc:  # noqa: BLE001 - one bot's failure degrades, never stops, the daemon
             self._note(f"[ERROR] {server.name}: bot {agent!r} not connected: {exc}")
             logger.exception("%s: bot %r not connected", server.name, agent)
             return False
-        self._connected[server.name].add(agent)
+        self._connected[server.name][agent] = bot.username
         self._rooms_of[(server.name, agent)] = rooms
         for info in rooms:
             await self._host(server.name, info, agent)
@@ -187,10 +186,10 @@ class Service:
 
     async def _disconnect_bot(self, server: str, agent: str) -> None:
         for run in list(self.rooms.values()):
-            if run.server == server and agent in run.core.hosted:
+            if run.server == server and self._hosted(run, agent):
                 await self._unhost(run, agent)
-        await self.connectors[server].remove_bot(agent)
-        self._connected[server].discard(agent)
+        await self.connectors[server].remove_bot(self._username(server, agent))
+        self._connected[server].pop(agent, None)
         self._rooms_of.pop((server, agent), None)
 
     async def _host(self, server: str, info: RoomInfo, agent: str) -> None:
@@ -210,16 +209,18 @@ class Service:
             except (ConfigError, PlatformError) as exc:
                 self._note(f"[ERROR] {handle}: not opened: {exc}")
                 return
-        if agent in run.core.hosted:
+        if self._hosted(run, agent):
             return
         if run.started:  # a bot joining a running room: the member list has changed
             await self._refresh_members(run)
-        saved = run.saved.get("bots", {}).get(agent)
-        run.core.add_hosted(agent, run.log.last_position())
+        username = self._username(server, agent)
+        saved = run.saved.get("bots", {}).get(username)
+        run.core.add_hosted(username, run.log.last_position())
+        self.gateway.bind(handle, agent, username)
         if saved is not None:
-            self._restore(run, {"format": run.saved["format"], "bots": {agent: saved}})
+            self._restore(run, {"format": run.saved["format"], "bots": {username: saved}})
         self._save_room(run)  # the starting cursor is on disk before any turn: an unclean stop keeps it
-        logger.info("%s: hosting %r", handle, agent)
+        logger.info("%s: hosting %r as %r", handle, agent, username)
 
     async def _refresh_members(self, run: RoomRun) -> None:
         """The member list again; a platform that does not answer leaves the old one."""
@@ -229,8 +230,10 @@ class Service:
             self._note(f"[WARNING] {run.handle}: members not refreshed: {exc}")
 
     async def _unhost(self, run: RoomRun, agent: str) -> None:
-        await run.core.remove_hosted(agent)
-        run.saved.get("bots", {}).pop(agent, None)  # a return starts at the latest post, not here
+        username = self._username(run.server, agent)
+        await run.core.remove_hosted(username)
+        self.gateway.unbind(run.handle, agent)
+        run.saved.get("bots", {}).pop(username, None)  # a return starts at the latest post, not here
         self._save_room(run)
         if not run.core.hosted:
             self._close_room(run)
@@ -243,7 +246,7 @@ class Service:
         roster = self.config.roster_for(server, rule)
         for missing in self.config.missing_bots(server, rule):
             self._note(f"[WARNING] {handle}: {missing!r} is in the rule but has no bot on {server}")
-        log = RoomLog(connector, info, roster, [], self._names(server))
+        log = RoomLog(connector, info, roster, [])
         core = RoomCore(handle, log, self.clock, self.trace, [], roster, rule.params,
                         self._classifier_factory(self.config, handle) if rule.params.classifier_enabled else None,
                         name="coop", rules_version=self.gateway.rules_version, wake_seed=self.wake_seed)
@@ -300,11 +303,12 @@ class Service:
         or the pages run out. A cursor the pages never reached is moved up to the oldest
         post fetched, and the operator is told what that bot will not see."""
         saved = run.saved.get("bots", {})
-        cursors = [c for c in (self._saved_cursor(run, a) for a in run.rule.agents) if c is not None]
+        bots = run.core.roster.bots  # the rule's agents that have a bot here, by username
+        cursors = [c for c in (self._saved_cursor(run, b) for b in bots) if c is not None]
         floor = min(cursors) if cursors else None
         # a saved null cursor is a bot that never finished a turn: before every post, so
         # the pages go to the start of history (or the cap), not to the newest page
-        exhaust = any(a in saved and self._saved_cursor(run, a) is None for a in run.rule.agents)
+        exhaust = any(b in saved and self._saved_cursor(run, b) is None for b in bots)
         before: Position | None = None
         oldest: Position | None = None
         for _ in range(MAX_BACKFILL_PAGES):
@@ -319,12 +323,12 @@ class Service:
         if oldest is not None and (exhaust or (floor is not None and oldest > floor)):
             self._note(f"[ERROR] {run.handle}: history pages ran out above a saved cursor; posts between "
                        f"{floor!r} and {oldest!r} are not delivered")
-            for agent, raw in run.saved.get("bots", {}).items():
+            for raw in run.saved.get("bots", {}).values():
                 if raw.get("cursor") is not None and tuple(raw["cursor"]) < oldest:
                     raw["cursor"] = list(oldest)
 
-    def _saved_cursor(self, run: RoomRun, agent: str) -> Position | None:
-        raw = run.saved.get("bots", {}).get(agent, {}).get("cursor")
+    def _saved_cursor(self, run: RoomRun, username: str) -> Position | None:
+        raw = run.saved.get("bots", {}).get(username, {}).get("cursor")
         return tuple(raw) if isinstance(raw, list) else raw
 
     async def _ensure_started(self, run: RoomRun) -> None:
@@ -363,26 +367,28 @@ class Service:
             return
         if isinstance(event, Membership):
             run = self._by_id.get((server, event.room_id))
-            hosted_here = event.agent in self.config.servers[server].bots and self._is_hosted(server, event.agent)
+            bot = self.config.servers[server].bot_by_username(event.username)
+            agent = None if bot is None else bot.agent
+            hosted_here = agent is not None and self._is_hosted(server, agent)
             if hosted_here and event.joined:
                 info = await self.connectors[server].room(event.room_id)
-                self._rooms_of.setdefault((server, event.agent), []).append(info)
-                await self._host(server, info, event.agent)
+                self._rooms_of.setdefault((server, agent), []).append(info)
+                await self._host(server, info, agent)
                 run = self._by_id.get((server, event.room_id))
                 if run is not None:
                     await self._ensure_started(run)
             elif hosted_here:  # a leave: forgotten whether or not a rule hosts the room now
-                self._rooms_of[(server, event.agent)] = [
-                    r for r in self._rooms_of.get((server, event.agent), []) if r.id != event.room_id]
-                if run is not None and event.agent in run.core.hosted:
-                    await self._unhost(run, event.agent)
+                self._rooms_of[(server, agent)] = [
+                    r for r in self._rooms_of.get((server, agent), []) if r.id != event.room_id]
+                if run is not None and self._hosted(run, agent):
+                    await self._unhost(run, agent)
                     run = self._by_id.get((server, event.room_id))
             if run is not None:
                 await self._refresh_members(run)
 
     def _is_hosted(self, server: str, agent: str) -> bool:
         bot = self.config.servers[server].bots.get(agent)
-        return bot is not None and bot.hosted and agent in self._connected.get(server, set())
+        return bot is not None and bot.hosted and agent in self._connected.get(server, {})
 
     # ── reload ──────────────────────────────────────────────────────────────
 
@@ -421,18 +427,25 @@ class Service:
         for name in self.config.servers:
             if name not in config.servers:
                 raise ConfigError(f"servers.{name}: removing a server needs a restart")
+            for agent, was in self._connected.get(name, {}).items():
+                now = config.servers[name].bots.get(agent)
+                if now is not None and now.username != was:
+                    # the bot's username is its name in every room it is hosted in (the core's
+                    # namespace, design §2); renaming it in place would strand the rooms' state
+                    raise ConfigError(f"servers.{name}.bots.{agent}: changing a connected bot's username "
+                                      "needs a restart")
 
     async def _reload_bots(self, server: Server, before: Server, notes: list[str]) -> None:
         hosted_now = {a for a, b in server.bots.items() if b.hosted}
-        for agent in sorted(self._connected[server.name] - hosted_now):
+        for agent in sorted(set(self._connected[server.name]) - hosted_now):
             await self._disconnect_bot(server.name, agent)
             notes.append(f"{server.name}: bot {agent!r} disconnected")
-        for agent in sorted(hosted_now - self._connected[server.name]):
+        for agent in sorted(hosted_now - set(self._connected[server.name])):
             if await self._connect_bot(server, agent):
                 notes.append(f"{server.name}: bot {agent!r} connected")
-        for agent in sorted(hosted_now & self._connected[server.name]):
+        for agent in sorted(hosted_now & set(self._connected[server.name])):
             was, now = before.bots.get(agent), server.bots[agent]
-            if was is not None and (was.username, was.token_file) != (now.username, now.token_file):
+            if was is not None and was.token_file != now.token_file:
                 # the connection keeps the credentials it was opened with: said, not silently kept
                 self._note(f"[WARNING] {server.name}: bot {agent!r} has new credentials in the configuration; "
                            "the connection keeps the old ones until a restart")
@@ -441,7 +454,7 @@ class Service:
         """The rule the room matches now, applied in place; no rule closes it."""
         rule = self.config.rule_for(run.handle)
         if rule is None:
-            for agent in list(run.core.hosted):
+            for agent in self.hosted_agents(run):
                 await self._unhost(run, agent)
             notes.append(f"{run.handle}: no rule matches now; closed")
             return
@@ -450,13 +463,8 @@ class Service:
         classifier = self._classifier_factory(self.config, run.handle) if rule.params.classifier_enabled else None
         run.core.update(roster, rule.params, classifier)
         run.log.roster = roster
-        names = self._names(run.server)
-        renamed = names.mapping() != run.log.names.mapping()
-        run.log.names = names
         self.connectors[run.server].watch(run.info.id, roster)
-        if renamed:  # members were normalised under the old names
-            await self._refresh_members(run)
-        for agent in list(run.core.hosted):
+        for agent in self.hosted_agents(run):
             if agent not in rule.agents or not self._is_hosted(run.server, agent):
                 await self._unhost(run, agent)
                 notes.append(f"{run.handle}: {agent!r} no longer hosted")
@@ -466,11 +474,11 @@ class Service:
         for (server, agent), rooms in list(self._rooms_of.items()):
             for info in rooms:
                 run = self._by_id.get((server, info.id))
-                if run is not None and agent in run.core.hosted:
+                if run is not None and self._hosted(run, agent):
                     continue
                 await self._host(server, info, agent)
                 run = self._by_id.get((server, info.id))
-                if run is not None and agent in run.core.hosted:
+                if run is not None and self._hosted(run, agent):
                     notes.append(f"{run.handle}: {agent!r} hosted")
 
     # ── operator commands ───────────────────────────────────────────────────
@@ -500,19 +508,25 @@ class Service:
             raise KeyError(f"no hosted room {handle!r}; `list` shows them") from None
 
     def pause(self, agent: str, handle: str) -> None:
-        self._hosted_in(agent, handle).core.pause(agent)
+        run, bot = self._hosted_in(agent, handle)
+        run.core.pause(bot)
 
     def resume(self, agent: str, handle: str) -> None:
-        self._hosted_in(agent, handle).core.resume(agent)
+        run, bot = self._hosted_in(agent, handle)
+        run.core.resume(bot)
 
     def reset(self, agent: str, handle: str) -> None:
-        self._hosted_in(agent, handle).core.reset(agent)
+        run, bot = self._hosted_in(agent, handle)
+        run.core.reset(bot)
 
-    def _hosted_in(self, agent: str, handle: str) -> RoomRun:
+    def _hosted_in(self, agent: str, handle: str) -> tuple[RoomRun, str]:
+        """The room and the agent's username in it; an operator names agents, the
+        core knows usernames."""
         run = self.room(handle)
-        if agent not in run.core.hosted:
+        bot = self.gateway.username_of(handle, agent)
+        if bot is None:
             raise KeyError(f"{agent!r} is not hosted in {handle!r}")
-        return run
+        return run, bot
 
     # ── persistence ─────────────────────────────────────────────────────────
 
@@ -549,8 +563,18 @@ class Service:
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
-    def _names(self, server: str) -> Names:
-        return Names({agent: bot.username for agent, bot in self.config.servers[server].bots.items()})
+    def _username(self, server: str, agent: str) -> str:
+        """The bot's username on ``server``: the one it connected with (a reload cannot
+        change it, ``_refuse_server_changes``), else the configuration's."""
+        connected = self._connected.get(server, {}).get(agent)
+        return connected if connected is not None else self.config.servers[server].bots[agent].username
+
+    def _hosted(self, run: RoomRun, agent: str) -> bool:
+        return self.gateway.username_of(run.handle, agent) is not None
+
+    def hosted_agents(self, run: RoomRun) -> list[str]:
+        """The agents hosted in ``run``, in the core's order."""
+        return [a for a in (self.gateway.agent_of(run.handle, u) for u in list(run.core.hosted)) if a is not None]
 
     def _note(self, text: str) -> None:
         self.notes.append(text)

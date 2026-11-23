@@ -70,11 +70,11 @@ def test_the_first_matching_rule_wins_and_the_roster_is_per_server():
     assert config.rule_for("lab-rc:general").agents == ("laomei",)
     assert config.rule_for("prod:team") is None
     roster = config.roster_for("lab-mm", config.rule_for("lab-mm:team"))
-    assert roster.bots == ("laomei", "wavebro", "muse")
-    assert roster.owners == {"laomei": {"glin"}, "wavebro": {"wave"}, "muse": {"glin"}}
+    assert roster.bots == ("laomei_bot", "wavebro_bot", "muse_bot")  # the platform's names, not the agents'
+    assert roster.owners == {"laomei_bot": {"glin"}, "wavebro_bot": {"wave"}, "muse_bot": {"glin"}}
     assert roster.guests == {"pat"}
-    assert roster.is_moderator("wave") and roster.label("laomei", "wave") == "guest"
-    assert roster.kind_of("muse") == "bot"
+    assert roster.is_moderator("wave") and roster.label("laomei_bot", "wave") == "guest"
+    assert roster.kind_of("muse_bot") == "bot" and roster.kind_of("laomei") == "human"  # a person named laomei
     rc_rule = config.rule_for("lab-rc:general")
     assert config.roster_for("lab-rc", rc_rule).bots == ("laomei",)
     assert config.missing_bots("lab-rc", config.rooms[0]) == ("wavebro", "muse")
@@ -144,11 +144,6 @@ def test_an_int_serves_a_float_parameter_and_a_bad_yaml_file_is_a_config_error(t
     path.write_text("servers: [unclosed")
     with pytest.raises(ConfigError, match="not YAML"):
         load(path)
-
-
-def test_a_listed_person_with_an_agents_name_is_refused():
-    with pytest.raises(ConfigError, match="is a person and the name of agent 'laomei'"):
-        parsed(FULL.replace("guests: [pat]", "guests: [pat, laomei]"))
 
 
 @pytest.mark.parametrize("text, message", [

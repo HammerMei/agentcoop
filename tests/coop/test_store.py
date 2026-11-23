@@ -69,12 +69,12 @@ def test_an_unknown_format_or_setting_is_refused():
     with pytest.raises(ValueError, match="format"):
         load_room(core, {"format": 99})
     with pytest.raises(ValueError, match="unknown settings"):
-        load_room(core, {"format": 1, "threads": {"main": {"mode": "strict"}}})
+        load_room(core, {"format": 2, "threads": {"main": {"mode": "strict"}}})
 
 
 def test_a_bot_the_room_no_longer_hosts_is_left_out():
     core = Sandbox(bots=("a",)).gw
-    load_room(core, {"format": 1, "bots": {"zed": {"cursor": 9}}})
+    load_room(core, {"format": 2, "bots": {"zed": {"cursor": 9}}})
     assert list(core.persisted) == ["a"]
 
 
@@ -88,7 +88,8 @@ async def test_the_agents_document_restores_bios_and_versions_into_the_dict_the_
     fresh = Sandbox(bots=("a", "b"))
     load_agents(fresh.gateway, data)
     assert fresh.gateway.status()["agents"]["a"] == {"bio_version": 2, "last_seen": None}
-    assert fresh.gw.bios is fresh.gateway.bios and fresh.gw.bios == {"a": "I run the deploys and the on-call"}
+    assert fresh.gateway.bios == {"a": "I run the deploys and the on-call"}
+    assert fresh.gw.bios == {"a": "I run the deploys and the on-call"}  # the room's copy, under the bot's username
     assert fresh.gateway.bio("a", "now the backups too") == 3  # the version continues, it does not restart
     with pytest.raises(ValueError, match="format"):
         load_agents(fresh.gateway, {"format": 0, "agents": {}})

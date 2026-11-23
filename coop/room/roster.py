@@ -21,7 +21,8 @@ class Roster:
     """``bots`` is every bot in the room's roster, in order: the ones this gateway
     hosts and the roster-only ones another gateway drives. ``owners`` maps a bot to
     the people whose instructions it takes; ``guests`` are the people listed as
-    guests of any bot. Names are agent names, the namespace the room core works in."""
+    guests of any bot. Names are platform usernames, the namespace the room core works
+    in: a bot is its bot account's username (design §2)."""
 
     bots: tuple[str, ...]
     owners: Mapping[str, frozenset[str]] = field(default_factory=dict)
