@@ -95,3 +95,19 @@ async def test_a_send_the_gateway_does_not_answer_is_lost_not_retried(http_sandb
     with pytest.raises(LostResponse, match="may have been posted"):
         await a.send(Reply(thread="main", text="x", wake_id=None), room="team")
     assert len(calls) == 1
+
+
+async def test_a_504_is_a_lost_response_the_agent_reads_the_room_for():
+    from aiohttp import web
+
+    from coop.errors import LostResponse
+
+    async def handler(request):
+        return web.json_response({"error": "the platform did not answer", "thread": "t1"}, status=504)
+    app = web.Application()
+    app.router.add_post("/v1/agents/me/posts", handler)
+    from aiohttp.test_utils import TestServer
+    async with TestServer(app) as server:
+        async with HttpDoorbell(str(server.make_url("")), "tok") as agent:
+            with pytest.raises(LostResponse):
+                await agent.send(Reply(thread="t1", to=["H"], text="x", wake_id=None), room="team")

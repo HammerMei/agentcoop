@@ -46,8 +46,12 @@ class Gateway:
         # read first delivers the post; a fetch names the handle, never the platform id.
         self._handles: dict[str, tuple[str, Attachment]] = {}
         self._handle_of: dict[tuple[str, str], str] = {}
+        # Told after every bio push: the daemon saves the agents' document then.
+        self.on_bio: Callable[[], None] | None = None
 
     def add_room(self, core: RoomCore) -> RoomCore:
+        if core.room in self.rooms:
+            raise ValueError(f"room {core.room!r} is already on this gateway")
         core.on_wake = self._wake_issued
         core.bios = self.bios
         core.rules_version = self.rules_version
@@ -55,6 +59,9 @@ class Gateway:
         for bot in core.hosted:
             self.agents.setdefault(bot, AgentState())
         return core
+
+    def remove_room(self, room: str) -> RoomCore | None:
+        return self.rooms.pop(room, None)
 
     def start(self) -> None:
         for core in self.rooms.values():
@@ -101,12 +108,12 @@ class Gateway:
 
     # ── attachments ─────────────────────────────────────────────────────────
 
-    def deliverable(self, room: str, post: Post) -> Post:
-        """The post as the doorbell delivers it: its author labelled, its attachments
-        named by handle."""
+    def deliverable(self, agent: str, room: str, post: Post) -> Post:
+        """The post as the doorbell delivers it to ``agent``: its author labelled as that
+        agent sees them, its attachments named by handle."""
         core = self._room(room)
         attachments = tuple(replace(a, id=self._handle(room, a)) for a in post.attachments)
-        return replace(post, author_role=core.role_label(post.author), attachments=attachments)
+        return replace(post, author_role=core.role_label(agent, post.author), attachments=attachments)
 
     def _handle(self, room: str, attachment: Attachment) -> str:
         key = (room, attachment.id)
@@ -132,8 +139,8 @@ class Gateway:
     def read(self, agent: str, wake_id: str) -> tuple[Wake, list[Post]]:
         return self._room_of_wake(agent, wake_id).read(agent, wake_id)
 
-    def read_room(self, agent: str, room: str) -> list[Post]:
-        return self._room(room).read_room(agent)
+    def read_room(self, agent: str, room: str, after: str | None = None) -> list[Post]:
+        return self._room(room).read_room(agent, after)
 
     async def send(self, agent: str, reply: Reply, room: str | None = None) -> Post | None:
         return await self.room_for(agent, reply, room).send(agent, reply)
@@ -206,6 +213,8 @@ class Gateway:
         state.bio = text
         state.bio_version += 1
         self.bios[agent] = text
+        if self.on_bio is not None:
+            self.on_bio()
         return state.bio_version
 
     def status(self) -> dict:

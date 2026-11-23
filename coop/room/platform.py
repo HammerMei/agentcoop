@@ -14,6 +14,12 @@ from typing import Protocol
 from .model import Member, Position, Post, PostKind
 
 
+class PlatformError(Exception):
+    """The platform did not answer, or failed: whether the call took effect is not
+    known. The doorbell answers 502 and the agent reads the room before trying again
+    (design §3.3)."""
+
+
 class RefusedPost(Exception):
     """The platform refused an outbound post in ``thread``."""
 
@@ -28,8 +34,6 @@ class Platform(Protocol):
 
     def members(self) -> dict[str, Member]: ...
 
-    def role_of(self, username: str) -> str | None: ...
-
     def is_archived(self, thread: str) -> bool: ...
 
     def posts_after(self, position: Position | None, through: Position | None = None) -> list[Post]:
@@ -38,6 +42,10 @@ class Platform(Protocol):
         ...
 
     def thread_posts(self, thread: str, newest_first: bool = False) -> list[Post]: ...
+
+    def position_of(self, post_id: str) -> Position | None:
+        """The position of a post the room holds, or ``None``."""
+        ...
 
     def last_position(self) -> Position | None:
         """The position of the newest post, or ``None`` in an empty room."""
@@ -49,8 +57,9 @@ class Platform(Protocol):
         ``KeyError`` for an id the platform does not know."""
         ...
 
-    async def post(self, author: str, text: str, thread: str, kind: PostKind | None = None) -> Post:
-        """Post as ``author`` (a bot the gateway holds the account for). Raises
-        :class:`RefusedPost` when the platform refuses it. The post reaches the core
-        again as an inbound post, like every other post in the room."""
+    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None) -> Post:
+        """Post as ``author`` (a bot the gateway holds the account for); ``thread``
+        ``None`` posts at the top level, and the returned post's ``thread`` is then its
+        own id. Raises :class:`RefusedPost` when the platform refuses it. The post
+        reaches the core again as an inbound post, like every other post in the room."""
         ...

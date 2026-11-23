@@ -28,9 +28,9 @@ class Doorbell(Protocol):
         read --wake``)."""
         ...
 
-    async def read_room(self, room: str) -> list[Post]:
-        """The posts after the cursor through the latest, outside a wake (``coop read
-        --room``)."""
+    async def read_room(self, room: str, after: str | None = None) -> list[Post]:
+        """The posts after the cursor, or after the post ``after`` names, through the
+        latest, outside a wake (``coop read --room [--after ID]``)."""
         ...
 
     async def send(self, reply: Reply, room: str | None = None) -> Post | None:
@@ -56,8 +56,8 @@ class InProcessDoorbell:
     async def read(self, wake_id: str) -> tuple[Wake, list[Post]]:
         return self.gateway.read(self.agent, wake_id)
 
-    async def read_room(self, room: str) -> list[Post]:
-        return self.gateway.read_room(self.agent, room)
+    async def read_room(self, room: str, after: str | None = None) -> list[Post]:
+        return self.gateway.read_room(self.agent, room, after)
 
     async def send(self, reply: Reply, room: str | None = None) -> Post | None:
         return await self.gateway.send(self.agent, reply, room)

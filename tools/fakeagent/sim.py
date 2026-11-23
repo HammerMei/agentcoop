@@ -124,15 +124,19 @@ class FakePlatform:
                 found.add(name)
         return frozenset(found)
 
-    def append(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+    def append(self, author: str, text: str, thread: str | None = MAIN_THREAD, kind: PostKind | None = None,
                attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
         """Append a post in server order without delivering it. Raises ``RefusedPost``
         when the platform refuses it (an archived thread, or a thread marked refusing).
+        ``thread`` ``None`` is a top-level post that opens its own thread, as the real
+        platforms do (scenario posts stay in ``main``, the simulator's one top level).
         ``attachments`` are ``(name, content type, bytes)`` files stored by file id."""
         if thread in self.archived or thread in self.refusing:
             self.refusing.discard(thread)
             raise RefusedPost(thread)
         self._seq += 1
+        if thread is None:
+            thread = f"p{self._seq}"
         files = []
         for name, content_type, data in attachments:
             file_id = f"f{len(self.files) + 1}"
@@ -161,7 +165,7 @@ class FakePlatform:
         for core in self.cores:
             await core.on_post(post)
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
+    async def post(self, author: str, text: str, thread: str | None = MAIN_THREAD, kind: PostKind | None = None,
                    attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
         post = self.append(author, text, thread, kind, attachments)
         await self.deliver(post)
@@ -194,6 +198,9 @@ class FakePlatform:
 
     def by_id(self, post_id: str) -> Post:
         return next(p for p in self.posts if p.id == post_id)
+
+    def position_of(self, post_id: str):
+        return next((p.position for p in self.posts if p.id == post_id), None)
 
     async def archive(self, thread: str) -> None:
         self.archived.add(thread)

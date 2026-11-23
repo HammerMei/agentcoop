@@ -20,12 +20,18 @@ from collections.abc import Callable
 from aiohttp.test_utils import TestServer
 
 from coop.client import InProcessDoorbell
+from coop.connectors.base import MemberInfo, Membership, Posted, RoomInfo
+from coop.connectors.normalize import Names, mentions_in
 from coop.doorbell.api import build_app
 from coop.room.clock import Clock
+from coop.room.controls import parse_controls
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
-from coop.room.model import MAIN_THREAD, Member, Params, Post, PostKind
+from coop.room.model import MAIN_THREAD, Attachment, Member, Params, Post, PostKind
+from coop.room.platform import RefusedPost
+from coop.room.roster import Roster
 from coop.room.trace import Trace
+from coop.room.words import count_words
 from tools.fakeagent.agent import FakeAgent, Script, Turn, done_everywhere
 from tools.fakeagent.sim import FakePlatform, InjectedFailures, ScriptedClassifier, SimClock
 
@@ -77,6 +83,7 @@ class Sandbox:
         hosted: list[str] | None = None,
         agents: list[str] | None = None,
         extra_members: tuple[Member, ...] = (),
+        roster: Roster | None = None,
         is_dm: bool = False,
         start_time: float = 0.0,
         duration: float = 1.0,
@@ -93,14 +100,16 @@ class Sandbox:
         self.classifier = classifier if classifier is not None else ScriptedClassifier()
         self.gateways: list[Gateway] = []
         self.bot = FakeAgent(self.clock, script or Script(), duration)
-        self.gw = self.add_gateway("g1", hosted or list(bots), agents or list(bots), self.bot, self.classifier, params)
+        self.gw = self.add_gateway("g1", hosted or list(bots), agents or list(bots), self.bot, self.classifier, params,
+                                   roster=roster)
         self.gateway = self.gateways[0]
 
     def add_gateway(self, name, hosted, agents=None, agent: FakeAgent | None = None, classifier=None,
-                    params=None) -> RoomCore:
+                    params=None, roster: Roster | None = None) -> RoomCore:
         gateway = Gateway(self.clock, self.trace, name=name)
+        roster = roster or Roster.from_members(self.room.members().values(), agents or list(hosted))
         core = RoomCore(
-            self.room.name, self.room, self.clock, self.trace, hosted, agents or list(hosted),
+            self.room.name, self.room, self.clock, self.trace, hosted, roster,
             params or self.params, classifier if classifier is not None else self.classifier, name=name,
         )
         gateway.add_room(core)
@@ -116,7 +125,8 @@ class Sandbox:
     def add_room(self, name: str, hosted: list[str], humans=(("H", "owner"),)) -> FakePlatform:
         """A second room on the first gateway, hosting ``hosted`` there."""
         room = FakePlatform(name, members(tuple(hosted), humans), self.clock, self.trace)
-        core = RoomCore(name, room, self.clock, self.trace, hosted, list(hosted), self.params, self.classifier,
+        roster = Roster.from_members(room.members().values(), hosted)
+        core = RoomCore(name, room, self.clock, self.trace, hosted, roster, self.params, self.classifier,
                         name=self.gateway.name)
         self.gateway.add_room(core)
         room.cores.append(core)
@@ -210,3 +220,141 @@ class Doorbell:
     def headers(self, agent: str) -> dict[str, str]:
         token = next(t for t, a in self.tokens.items() if a == agent)
         return {"Authorization": f"Bearer {token}"}
+
+
+# ── a fake connector ────────────────────────────────────────────────────────
+
+
+class FakeConnector:
+    """A chat server in memory, behind the :class:`~coop.connectors.base.Connector`
+    protocol: rooms with members, posts with ``(time_ms, id)`` positions, files by
+    id, and one event per bot connection in a room, as the real platforms deliver."""
+
+    name = "fake"
+
+    def __init__(self, on_event=None, names: dict[str, str] | None = None) -> None:
+        self.on_event = on_event
+        self.names = Names(names or {})
+        self.rooms: dict[str, RoomInfo] = {}
+        self.membership: dict[str, list[MemberInfo]] = {}
+        self.posts: dict[str, list[Post]] = {}
+        self.files: dict[str, bytes] = {}
+        self.bots: dict[str, str] = {}  # agent -> token
+        self.rosters: dict[str, Roster] = {}
+        self.refusing: set[str] = set()
+        self.typed: list[tuple[str, str, str | None]] = []
+        self.started = False
+        self._seq = 0
+        self.now_ms = 1_000_000
+
+    # test-side setup
+    def add_room(self, room_id: str, name: str, members: list[MemberInfo], is_dm: bool = False) -> RoomInfo:
+        self.rooms[room_id] = RoomInfo(room_id, name, is_dm)
+        self.membership[room_id] = list(members)
+        self.posts.setdefault(room_id, [])
+        return self.rooms[room_id]
+
+    def _hint(self, room_id: str, username: str) -> PostKind | None:
+        for m in self.membership.get(room_id, []):
+            if m.username == username:
+                return "bot" if m.is_bot else None
+        return None
+
+    def make_post(self, room_id: str, username: str, text: str, thread: str | None = None,
+                  files: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        """A post as the platform would store it, normalised with the room's roster."""
+        self._seq += 1
+        self.now_ms += 1
+        post_id = f"m{self._seq}"
+        attachments = []
+        for name, content_type, data in files:
+            file_id = f"f{len(self.files) + 1}"
+            self.files[file_id] = data
+            attachments.append(Attachment(file_id, name, content_type, len(data)))
+        roster = self.rosters.get(room_id) or Roster(())
+        author = self.names.agent_of(username)
+        text = self.names.inbound(text)
+        known = {self.names.agent_of(m.username) for m in self.membership.get(room_id, [])} | set(roster.bots)
+        post = Post(
+            id=post_id, position=(self.now_ms, post_id), time=self.now_ms / 1000, thread=thread or post_id,
+            author=author, text=text, kind=roster.kind_of(author, self._hint(room_id, username)),
+            mentions=mentions_in(text, known), controls=parse_controls(text), words=count_words(text),
+            author_id=f"u_{username}", attachments=tuple(attachments),
+        )
+        self.posts[room_id].append(post)
+        return post
+
+    async def human(self, room_id: str, username: str, text: str, thread: str | None = None, **more) -> Post:
+        """A person posts: every bot connection in the room delivers its copy."""
+        post = self.make_post(room_id, username, text, thread, **more)
+        await self._deliver(room_id, post)
+        return post
+
+    async def _deliver(self, room_id: str, post: Post) -> None:
+        if self.on_event is None:
+            return
+        for agent in self.bots:
+            if any(m.username == self.names.username_of(agent) for m in self.membership[room_id]):
+                await self.on_event(Posted(room_id, post, seen_by=agent))
+
+    async def join(self, room_id: str, agent: str) -> None:
+        self.membership[room_id].append(MemberInfo(self.names.username_of(agent), is_bot=True))
+        if self.on_event is not None and agent in self.bots:
+            await self.on_event(Membership(room_id, agent, joined=True))
+
+    async def leave(self, room_id: str, agent: str) -> None:
+        username = self.names.username_of(agent)
+        self.membership[room_id] = [m for m in self.membership[room_id] if m.username != username]
+        if self.on_event is not None and agent in self.bots:
+            await self.on_event(Membership(room_id, agent, joined=False))
+
+    # Connector
+    async def start(self) -> None:
+        self.started = True
+
+    async def stop(self) -> None:
+        self.started = False
+
+    def configure(self, server) -> None:
+        """The usernames from the configuration, as the real connectors do."""
+        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
+
+    async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
+        self.bots[agent] = token
+        username = self.names.username_of(agent)
+        return [info for rid, info in self.rooms.items() if any(m.username == username for m in self.membership[rid])]
+
+    async def remove_bot(self, agent: str) -> None:
+        self.bots.pop(agent, None)
+
+    def watch(self, room_id: str, roster: Roster) -> None:
+        self.rosters[room_id] = roster
+
+    def unwatch(self, room_id: str) -> None:
+        self.rosters.pop(room_id, None)
+
+    async def room(self, room_id: str) -> RoomInfo:
+        return self.rooms[room_id]
+
+    async def members(self, room_id: str) -> list[MemberInfo]:
+        return list(self.membership[room_id])
+
+    async def history(self, room_id: str, after=None, before=None, limit: int = 60) -> list[Post]:
+        posts = [p for p in self.posts[room_id]
+                 if (after is None or p.position > after) and (before is None or p.position < before)]
+        return posts[-limit:]
+
+    async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
+        if agent not in self.bots:
+            raise PermissionError(agent)
+        if thread in self.refusing:
+            raise RefusedPost(thread)
+        post = self.make_post(room_id, self.names.username_of(agent), self.names.outbound(text), thread)
+        await self._deliver(room_id, post)  # the echo, like the platform's
+        return post
+
+    async def fetch_file(self, agent: str, file_id: str) -> bytes:
+        return self.files[file_id]
+
+    async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
+        self.typed.append((agent, room_id, thread))

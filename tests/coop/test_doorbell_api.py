@@ -332,3 +332,64 @@ async def test_the_packaged_rules_are_served_by_default(sb):
         async with httpx.AsyncClient(base_url=doorbell.url) as client:
             text = (await client.get("/v1/rules", headers=as_("a"))).json()["text"]
     assert text.startswith("# Room rules") and "your own posts included" in text and "coop done" in text
+
+
+async def test_a_wakes_send_with_a_room_and_no_thread_is_a_new_top_level_post(api, sb):
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": None, "to": ["H"], "text": "x", "wake_id": wake["wake_id"], "room": "team"})
+    assert r.status_code == 200, r.text
+    post = r.json()["post"]
+    assert post["thread"] == post["id"] != "t1"  # not filled with the wake's starting thread
+
+
+async def test_a_control_with_no_thread_is_400(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": None, "wake_id": None, "room": "team", "control": {"mute": ["b"]}})
+    assert r.status_code == 400 and "names the thread" in r.json()["error"]
+
+
+async def test_a_room_read_after_a_post_id_starts_there_and_an_unknown_id_is_404(api, sb):
+    first = await sb.human("one")
+    await sb.human("two")
+    r = await api.get("/v1/agents/me/posts", params={"room": "team", "after": first.id}, headers=as_("a"))
+    assert r.status_code == 200 and [p["text"] for p in r.json()["posts"]] == ["two"]
+    r = await api.get("/v1/agents/me/posts", params={"room": "team"}, headers=as_("a"))
+    assert [p["text"] for p in r.json()["posts"]] == ["one", "two"]  # from the cursor: everything
+    r = await api.get("/v1/agents/me/posts", params={"room": "team", "after": "nope"}, headers=as_("a"))
+    assert r.status_code == 404 and "no post 'nope'" in r.json()["error"]
+
+
+async def test_a_platform_that_does_not_answer_is_504_and_a_turn_still_ends(api, sb, monkeypatch):
+    from coop.room.platform import PlatformError
+
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+
+    async def down(*a, **kw):
+        raise PlatformError("mm: down")
+    monkeypatch.setattr(sb.room, "post", down)
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"thread": "t1", "to": ["H"], "text": "x", "wake_id": wake["wake_id"]})
+    assert r.status_code == 504 and r.json()["thread"] == "t1" and "did not answer" in r.json()["error"]
+    assert sb.gw.status()["threads"]["t1"]["recent_posts"] == 0  # not counted as posted
+    r = await api.post("/v1/agents/me/done", headers=as_("a"), json={"wake_id": wake["wake_id"], "failed": "x"})
+    assert r.status_code == 200 and r.json()["done"] is True  # the failure notice could not post; the turn ended
+    assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure" and not sb.gateway.holds_lease("a")
+    monkeypatch.undo()
+    monkeypatch.setattr(sb.room, "fetch_attachment", down)
+    post = await sb.human("see", attachments=(("a.txt", "text/plain", b"x"),))
+    await sb.human("@a look", "t1")
+    wake = await wake_for(api, "a")
+    r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
+    handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
+    r = await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+    assert r.status_code == 504 and "did not answer" in r.json()["error"]
+
+
+async def test_a_room_send_without_the_thread_key_is_a_new_top_level_post_not_500(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                       json={"room": "team", "to": ["H"], "text": "hand-written client", "wake_id": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["post"]["thread"] == r.json()["post"]["id"]

@@ -33,7 +33,7 @@ from ..errors import (
     NoLiveLease,
     RefusedSend,
 )
-from ..room.model import ALL, MAIN_THREAD, Attachment, Post, Reply, Wake
+from ..room.model import ALL, Attachment, Post, Reply, Wake
 from ..room.platform import RefusedPost
 from ..room.prompt import one_line, render_hint
 from .client import HttpDoorbell
@@ -53,6 +53,7 @@ def parser() -> argparse.ArgumentParser:
     where = read.add_mutually_exclusive_group(required=True)
     where.add_argument("--wake", metavar="W")
     where.add_argument("--room", metavar="R")
+    read.add_argument("--after", metavar="ID", help="with --room: start after this post instead of the cursor")
 
     send = sub.add_parser("send", help="one reply, as the bot")
     mode = send.add_mutually_exclusive_group(required=True)
@@ -111,6 +112,8 @@ def plain_http(address: str) -> bool:
 
 async def cmd_read(doorbell: HttpDoorbell, args) -> int:
     trigger = None
+    if args.wake is not None and args.after is not None:
+        parser().error("read --after goes with --room")
     if args.wake is not None:
         wake, posts = await doorbell.read(args.wake)
         trigger = wake.trigger.post_id if wake.trigger is not None else None
@@ -118,7 +121,7 @@ async def cmd_read(doorbell: HttpDoorbell, args) -> int:
         print(render_hint(wake.hint))
         print()
     else:
-        posts = await doorbell.read_room(args.room)
+        posts = await doorbell.read_room(args.room, args.after)
     for post in posts:
         print(post_line(post, trigger))
         for found in post.attachments:
@@ -136,10 +139,9 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
         parser().error("send: text needs --to")
     if args.unsolicited and args.room is None and args.thread is None:
         parser().error("send --unsolicited: --room or --thread")
-    # --room is a top-level post there; --thread a reply; a wake's send with neither goes
-    # to the wake's starting thread, which the gateway fills in
-    thread = args.thread if args.thread is not None else (MAIN_THREAD if args.room else None)
-    reply = Reply(thread=thread, to=names(args.to) if args.to else None, text=text, control=control,
+    # --room is a new top-level post there (its own thread); --thread a reply; a wake's
+    # send with neither goes to the wake's starting thread, which the gateway fills in
+    reply = Reply(thread=args.thread, to=names(args.to) if args.to else None, text=text, control=control,
                   wake_id=None if args.unsolicited else args.wake)
     post = await doorbell.send(reply, room=args.room)
     if post is not None:

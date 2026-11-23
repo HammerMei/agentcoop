@@ -18,7 +18,9 @@ Errors answer ``{"error": "..."}``: 401 for a missing or unknown token, 403 for 
 whose roster does not list the agent, 404 for a room the gateway does not watch, 409
 for a wake id with no live lease, 400 for a reply with nothing postable, 422 for a
 send the gateway refused (``reasons`` beside ``error``), 502 for a post the platform
-refused. The token is compared in constant time and never logged.
+refused, 504 when the platform did not answer and the outcome is unknown (the client
+treats it as a lost response, design §3.3). The token is compared in constant time and
+never logged.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from aiohttp import web
 from ..errors import InvalidReply, NoLiveLease, RefusedSend, RoomUnresolved
 from ..room.gateway import Gateway
 from ..room.model import Post, Wake
-from ..room.platform import RefusedPost
+from ..room.platform import PlatformError, RefusedPost
 from ..wire import decode_reply, encode_post, encode_wake
 
 DEFAULT_WAIT = 30.0
@@ -78,9 +80,11 @@ RULES = Path(__file__).resolve().parent.parent / "rules.md"
 
 
 def build_app(gateway: Gateway, tokens: dict[str, str], rules_text: str | None = None) -> web.Application:
-    """``tokens`` maps each bearer token to the agent it names. ``rules_text`` is the
-    room-rules document (design §3.3); the package's ``rules.md`` unless given."""
-    doorbell = _Doorbell(gateway, dict(tokens), RULES.read_text() if rules_text is None else rules_text)
+    """``tokens`` maps each bearer token to the agent it names, and is held by
+    reference: the daemon edits it on a reload and the next request sees the change.
+    ``rules_text`` is the room-rules document (design §3.3); the package's
+    ``rules.md`` unless given."""
+    doorbell = _Doorbell(gateway, tokens, RULES.read_text() if rules_text is None else rules_text)
     app = web.Application(middlewares=[_authenticate])
     app[DOORBELL] = doorbell
     app.router.add_get("/v1/agents/me/wake", wake)
@@ -108,8 +112,8 @@ def _error(status: int, message: str, **more) -> web.Response:
     return web.json_response({"error": message, **more}, status=status)
 
 
-def _posts(gateway: Gateway, room: str, posts: list[Post]) -> list[dict]:
-    return [encode_post(gateway.deliverable(room, p)) for p in posts]
+def _posts(gateway: Gateway, agent: str, room: str, posts: list[Post]) -> list[dict]:
+    return [encode_post(gateway.deliverable(agent, room, p)) for p in posts]
 
 
 # ── handlers ────────────────────────────────────────────────────────────────
@@ -156,11 +160,16 @@ async def read(request: web.Request) -> web.Response:
             found, posts = gateway.read(agent, wake_id)
         except NoLiveLease as exc:
             return _error(409, str(exc))
-        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, found.room, posts)})
+        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, agent, found.room, posts)})
     refused = _room_refusal(gateway, agent, room)
     if refused is not None:
         return refused
-    return web.json_response({"posts": _posts(gateway, room, gateway.read_room(agent, room))})
+    after = request.query.get("after")
+    try:
+        posts = gateway.read_room(agent, room, after)
+    except KeyError:
+        return _error(404, f"no post {after!r} in room {room!r}")
+    return web.json_response({"posts": _posts(gateway, agent, room, posts)})
 
 
 async def send(request: web.Request) -> web.Response:
@@ -183,13 +192,16 @@ async def send(request: web.Request) -> web.Response:
         post = await core.send(agent, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
-    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(core.room, post))})
+    except PlatformError as exc:
+        return _error(504, f"the platform did not answer: {exc}", thread=reply.thread)
+    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post))})
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:
-    """A wake's send with no thread goes to the wake's starting thread; once the lease
-    is gone the gateway no longer knows it, so a late send names its thread."""
-    if body.get("thread") is not None:
+    """A wake's send with neither thread nor room goes to the wake's starting thread;
+    once the lease is gone the gateway no longer knows it, so a late send names its
+    thread. With a room and no thread the send is a new top-level post there."""
+    if body.get("thread") is not None or body.get("room") is not None:
         return None
     if not isinstance(body.get("wake_id"), str):
         return _error(400, "send: an unsolicited send names its room or thread")
@@ -222,7 +234,10 @@ async def done(request: web.Request) -> web.Response:
         return _error(400, f"done: {problem}")
     answered = tuple(body.get("answered") or ())
     failed = body.get("failed")
-    ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
+    try:
+        ok = await doorbell.gateway.done(request[AGENT], body["wake_id"], answered, failed)
+    except PlatformError as exc:
+        return _error(504, f"the platform did not answer: {exc}")
     return web.json_response({"done": ok})
 
 
@@ -248,6 +263,8 @@ async def attachment(request: web.Request) -> web.Response:
         return _error(404, f"no attachment {handle!r}: fetch by the handle a read printed")
     except PermissionError as exc:
         return _error(403, str(exc))
+    except PlatformError as exc:
+        return _error(504, f"the platform did not answer: {exc}")
     name = _HEADER_UNSAFE.sub("", found.name)  # a control character or a quote would break the header
     return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})

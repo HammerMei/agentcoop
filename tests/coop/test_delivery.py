@@ -181,7 +181,9 @@ async def test_settings_persist_expire_and_reject_replayed_older_controls():
     await sb.human("mute: @a")
     assert sb.gw.status()["threads"]["main"]["muted"] == ["a"]
     await sb.run(3700)  # the thread goes silent past the TTL
-    assert sb.gw.status()["threads"]["main"]["muted"] == []
+    assert not sb.gw.is_muted("a", "main")
+    sb.gw.prune_threads()  # holding nothing now, the entry goes; the next lookup makes it again
+    assert "main" not in sb.gw.status()["threads"] and not sb.gw.is_muted("a", "main")
 
 
 async def test_ttl_expiry_keeps_unfinished_state_and_archive_removes_both():

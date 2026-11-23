@@ -57,8 +57,9 @@ from .model import (
     Wake,
     after,
 )
-from .platform import Platform, RefusedPost
+from .platform import Platform, PlatformError, RefusedPost
 from .replies import Problem, ValidationContext, canonical_text, check_reply, resolve_control
+from .roster import Roster
 from .trace import Trace
 from .words import count_words
 
@@ -86,11 +87,22 @@ class ThreadSettings:
     last_activity: float = 0.0
     unknown_mutes: list[str] = field(default_factory=list)
 
+    @property
+    def is_default(self) -> bool:
+        """No control has ever applied here: nothing but ``last_activity``, which a
+        fresh entry gets again on its next lookup."""
+        return (self.orchestrator is None and not self.muted and not self.unmuted_at and self.limit_posts is None
+                and self.limit_words is None and not self.unknown_mutes)
+
 
 @dataclass
 class ThreadVolatile:
     recent: list[tuple[float, str, int]] = field(default_factory=list)  # (time, author, words)
     held_by_rate: set[str] = field(default_factory=set)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.recent and not self.held_by_rate
 
 
 @dataclass
@@ -100,6 +112,8 @@ class BotPersisted:
     # ``coop pause``: held for every thread like a muted bot, no wake of any source,
     # the cursor stays, the backlog waits for ``resume`` (design §3.1, 5.5 row).
     paused: bool = False
+    # ``coop reset``: the next wake tells the agent to start a fresh session.
+    reset_pending: bool = False
 
 
 @dataclass
@@ -218,11 +232,12 @@ class RoomCore:
         clock: Clock,
         trace: Trace,
         hosted: list[str],
-        agents: list[str],
+        roster: Roster,
         params: Params,
         classifier: Classifier | None = None,
         name: str = "g1",
         rules_version: int = 0,
+        wake_seed: int = 0,
     ) -> None:
         self.room = room
         self.platform = platform
@@ -230,7 +245,8 @@ class RoomCore:
         self.trace = trace
         self.name = name
         self.hosted = list(hosted)
-        self.agents = list(agents)
+        self.roster = roster
+        self.agents = list(roster.bots)
         self.params = params
         self.classifier = classifier
         self.rules_version = rules_version
@@ -238,6 +254,7 @@ class RoomCore:
         # classifier reads a member's bio in place of the platform profile.
         self.bios: dict[str, str] = {}
         self.online = True
+        self.started = False
         self.settings: dict[str, ThreadSettings] = {}
         self.thread_state: dict[str, ThreadVolatile] = {}
         self.persisted: dict[str, BotPersisted] = {b: BotPersisted() for b in hosted}
@@ -246,7 +263,12 @@ class RoomCore:
         self.replaying = False
         self.rules: dict[str, RuleCount] = {}
         self.on_wake: Callable[[Wake], Awaitable[None]] | None = None
-        self._wake_seq = 0
+        # Told after every change to the persisted state (a commit, a control, pause,
+        # resume, reset): the daemon saves the room then.
+        self.on_change: Callable[[], None] | None = None
+        # Wake ids count up from the seed, so a daemon seeding it from its start time
+        # never reissues an id a previous run gave out.
+        self._wake_seq = wake_seed
         # Every entry runs under this lock (design: one serialised event queue per room);
         # the classifier call itself runs outside it.
         self._lock = _RoomLock()
@@ -254,6 +276,7 @@ class RoomCore:
     # ── lifecycle ───────────────────────────────────────────────────────────
 
     def start(self) -> None:
+        self.started = True
         for bot in self.hosted:
             self.volatile[bot].idle_since = self.now()
             self._schedule_periodic_sweep(bot)
@@ -263,10 +286,67 @@ class RoomCore:
             self.clock.at(self.params.sweep_interval_seconds, self._periodic_sweep, bot)
 
     async def _periodic_sweep(self, bot: str) -> None:
+        if bot not in self.hosted:
+            return  # removed in place: its timer ends here
         try:
             await self.sweep(bot, "periodic")
         finally:
             self._schedule_periodic_sweep(bot)  # a sweep that raised must not end the timer
+
+    # ── changes in place (a reload, a bot joining or leaving) ───────────────
+
+    def add_hosted(self, bot: str, cursor: Position | None) -> None:
+        """Host ``bot`` here from now on, its cursor at ``cursor`` (the room's latest
+        post for a bot new to the room, design §3.6 step 4). Everything about the
+        other bots stays as it is."""
+        if bot in self.hosted:
+            return
+        if bot not in self.agents:
+            raise ValueError(f"{bot} is not in the roster of room {self.room!r}")
+        self.hosted.append(bot)
+        self.persisted[bot] = BotPersisted(cursor=cursor)
+        self.volatile[bot] = BotVolatile(idle_since=self.now())
+        if self.started:  # before ``start`` the room's own start schedules it, once
+            self._schedule_periodic_sweep(bot)
+        self.trace.add(self.now(), "hosted_added", gateway=self.name, bot=bot)
+
+    async def remove_hosted(self, bot: str) -> None:
+        """Stop hosting ``bot`` here. An outstanding wake ends as a failure; its state is
+        dropped, the file the daemon keeps included (the caller's). Other bots' leases,
+        backoff and rate windows are untouched."""
+        async with self._lock:
+            if bot not in self.hosted:
+                return
+            run = self.volatile[bot].turn
+            if run is not None:
+                if run.expiry is not None:
+                    run.expiry.cancel()
+                self._finish(run, "removed")
+            self.hosted.remove(bot)
+            self.persisted.pop(bot, None)
+            self.volatile.pop(bot, None)
+            self.trace.add(self.now(), "hosted_removed", gateway=self.name, bot=bot)
+
+    def update(self, roster: Roster, params: Params, classifier: Classifier | None = None) -> None:
+        """A reload's new roster, parameters and classifier, applied in place. A sweep
+        interval that was off starts its timers now."""
+        was_off = self.params.sweep_interval_seconds <= 0
+        self.roster = roster
+        self.agents = list(roster.bots)
+        self.params = params
+        self.classifier = classifier
+        if was_off and params.sweep_interval_seconds > 0:
+            for bot in self.hosted:
+                self._schedule_periodic_sweep(bot)
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
+
+    @property
+    def wake_seq(self) -> int:
+        """The last wake number minted: what a core opened later on this handle counts from."""
+        return self._wake_seq
 
     def set_offline(self) -> None:
         self.online = False
@@ -340,6 +420,8 @@ class RoomCore:
             self.clock.at(0, self._requested_sweep, bot, reason)
 
     async def _requested_sweep(self, bot: str, reason: str) -> None:
+        if bot not in self.volatile:
+            return  # removed in place before the sweep ran
         self.volatile[bot].sweep_requested = False
         await self.sweep(bot, reason)
 
@@ -359,11 +441,20 @@ class RoomCore:
             self.trace.add(self.now(), "turn_end", gateway=self.name, bot=bot, wake=run.wake.wake_id,
                            outcome="withdrawn", posts=0)
         self.trace.add(self.now(), "paused", gateway=self.name, bot=bot)
+        self._changed()
 
     def resume(self, bot: str) -> None:
         self.persisted[bot].paused = False
         self.trace.add(self.now(), "resumed", gateway=self.name, bot=bot)
+        self._changed()
         self._request_sweep(bot, "resume")
+
+    def reset(self, bot: str) -> None:
+        """The next wake for ``bot`` carries ``reset``: the agent starts a fresh session
+        for this room (design §3.4)."""
+        self.persisted[bot].reset_pending = True
+        self.trace.add(self.now(), "reset_requested", gateway=self.name, bot=bot)
+        self._changed()
 
     # ── section 4: a post arrives ───────────────────────────────────────────
 
@@ -383,6 +474,7 @@ class RoomCore:
         self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)
         if not copies:
             return  # the gateway's own post: counted (on replay) but no trigger
+        self._warn_if_late(post, copies)
         if self._apply_controls(post):
             return
         addressed = tuple(b for b in copies if self._addresses(post, b) and after(post.position, self._cursor(b)))
@@ -397,12 +489,12 @@ class RoomCore:
         if controls is None:
             return False
         settings = self._thread(post.thread)
-        role = self.platform.role_of(post.author)
-        if role != "owner" and post.author != settings.orchestrator:
+        moderator = self.roster.is_moderator(post.author)
+        if not moderator and post.author != settings.orchestrator:
             self.trace.add(self.now(), "control_ignored", gateway=self.name, thread=post.thread,
                            by=post.author, reason="not authorised")
             return False
-        if controls.orchestrator is not None and role == "owner" and after(post.position, settings.orchestrator_at):
+        if controls.orchestrator is not None and moderator and after(post.position, settings.orchestrator_at):
             name = None if controls.orchestrator == "none" else controls.orchestrator
             if name is None or name in self._bots_in_room():  # the orchestrator is a bot in the room (5.12)
                 settings.orchestrator = name
@@ -415,7 +507,7 @@ class RoomCore:
             self._apply_mute(post, settings, controls.mute)
         if controls.unmute is not None:
             self._apply_unmute(post, settings, controls.unmute)
-        if controls.limit is not None and role == "owner" and after(post.position, settings.limit_at):
+        if controls.limit is not None and moderator and after(post.position, settings.limit_at):
             settings.limit_posts = controls.limit.get("posts", settings.limit_posts)
             settings.limit_words = controls.limit.get("words", settings.limit_words)
             settings.limit_at = post.position
@@ -426,6 +518,7 @@ class RoomCore:
         self.trace.add(self.now(), "control_applied", gateway=self.name, thread=post.thread,
                        by=post.author, control=control, value=value, post=post.id,
                        age=self.now() - post.time)  # > control TTL only in a replay (5.4)
+        self._changed()
 
     def _resolve_names(self, names, settings: ThreadSettings, muted_only: bool) -> list[str]:
         bots = self._bots_in_room()
@@ -812,20 +905,32 @@ class RoomCore:
         return (max(posts - len(recent), 0) if posts else None,
                 max(words - sum(r[2] for r in recent), 0) if words else None)
 
-    def _trigger(self, post: Post | None) -> Trigger | None:
+    def _warn_if_late(self, post: Post, copies: list[str]) -> None:
+        """A post that arrives below a bot's cursor, or below the mark of a wake already
+        issued, is never in a read: the cursor passes it. The paths that produce one (a
+        resync interleaving with live frames, the bot's own post admitted ahead of a
+        human's in flight) are rare and unbounded in the code, so they are made visible
+        here and fixed in the core when the rate says so."""
+        for bot in copies:
+            run = self.volatile[bot].turn
+            if not after(post.position, self._cursor(bot)):
+                logger.warning("%s: post %s arrived below %s's cursor; it will not be in a read", self.room, post.id, bot)
+            elif run is not None and run.hwm is not None and not after(post.position, run.hwm):
+                logger.warning("%s: post %s arrived below the mark of %s's wake %s; it will not be in that read",
+                               self.room, post.id, bot, run.wake.wake_id)
+
+    def _trigger(self, bot: str, post: Post | None) -> Trigger | None:
         if post is None:
             return None
         return Trigger(post_id=post.id, author=post.author, author_id=post.author_id,
-                       author_role=self.role_label(post.author), thread_root=post.thread)
+                       author_role=self.role_label(bot, post.author), thread_root=post.thread)
 
-    def role_label(self, author: str) -> str:
+    def role_label(self, bot: str, author: str) -> str:
         """The three labels of design §2, on a wake's trigger and on every post ``read``
-        delivers: ``agent`` is a bot in the room's roster, ``owner`` is what the platform
-        calls an owner, and an author the configuration does not list is a ``guest``,
-        whatever the platform calls it."""
-        if author in self.agents:
-            return "agent"
-        return "owner" if self.platform.role_of(author) == "owner" else "guest"
+        delivers to ``bot``: ``agent`` is a bot in the room's roster, ``owner`` is a
+        person the configuration lists as this bot's owner, and any other author is a
+        ``guest``, whatever the platform calls them."""
+        return self.roster.label(bot, author)
 
     async def _start_turn(self, bot: str, source: TurnSource, thread: str, trigger: Post | None,
                           hwm: Position | None, held_by: tuple[str, ...]) -> None:
@@ -836,8 +941,14 @@ class RoomCore:
         hint = self._build_hint(bot, source, thread, delivered, held_by)
         self._wake_seq += 1
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
-                    trigger=self._trigger(trigger), rules_version=self.rules_version)
+                    trigger=self._trigger(bot, trigger), rules_version=self.rules_version,
+                    reset=self.persisted[bot].reset_pending)
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
+        if wake.reset:
+            # a fresh session holds none of its unfinished threads: their posts come again (design §3.4)
+            again = {p.id: p for t in self.persisted[bot].unfinished for p in self.platform.thread_posts(t)}
+            again.update({p.id: p for p in payload})
+            payload = tuple(sorted(again.values(), key=lambda p: p.position))
         run = TurnRun(wake, through, tuple(delivered), payload, read_complete=not payload)
         self.volatile[bot].turn = run
         if bot not in self.platform.members():  # configured here, not in the room: loud, until the roster owns it
@@ -864,6 +975,10 @@ class RoomCore:
         if run is None or run.leased or self.persisted[bot].paused:
             return None
         run.leased = True
+        if run.wake.reset:
+            # the agent has the flag now; a wake lost to a restart before this carried it again
+            self.persisted[bot].reset_pending = False
+            self._changed()
         if self.params.lease_seconds:  # 0: a lease never expires (3.1: zero disables a limit)
             run.expires_at = self.now() + self.params.lease_seconds
             run.wake = replace(run.wake, lease_expires_at=run.expires_at)
@@ -889,10 +1004,18 @@ class RoomCore:
                        own=[p.id for p in run.payload if p.author == bot])
         return run.wake, list(run.payload)
 
-    def read_room(self, bot: str) -> list[Post]:
-        """A read outside a wake: the posts after the cursor through the latest, how an
-        agent checks whether its own reply landed. Records nothing."""
-        return [p for p in self.platform.posts_after(self._cursor(bot))]
+    def read_room(self, bot: str, after: str | None = None) -> list[Post]:
+        """A read outside a wake: the posts after the cursor, or after the post ``after``
+        names, through the latest; how an agent checks whether its own reply landed, and
+        what an agent's own heartbeat reads. Records nothing. ``KeyError`` for a post id
+        the room does not hold."""
+        if after is None:
+            start = self._cursor(bot)
+        else:
+            start = self.platform.position_of(after)
+            if start is None:
+                raise KeyError(after)
+        return list(self.platform.posts_after(start))
 
     async def send(self, bot: str, reply: Reply) -> Post | None:
         """One reply posted on the bot's behalf (design §3.5). A wake's send is checked
@@ -934,7 +1057,7 @@ class RoomCore:
         try:
             post = await self._post_reply(bot, reply, run)
         finally:
-            if run is not None:
+            if run is not None and reply.thread is not None:
                 run.ledger.add(reply.thread)  # a reply the platform refused was still given (5.6, 5.9)
         self.trace.add(self.now(), "send", gateway=self.name, bot=bot, wake=reply.wake_id,
                        thread=reply.thread, post=post.id if post else None)
@@ -953,8 +1076,10 @@ class RoomCore:
             reply.wake_id = None
             return None
 
-    def _validation_context(self, bot: str, thread: str, run: TurnRun | None) -> ValidationContext:
-        if run is not None and (group := run.wake.hint.group_of(thread)) is not None:
+    def _validation_context(self, bot: str, thread: str | None, run: TurnRun | None) -> ValidationContext:
+        if thread is None:
+            closed_by = ()  # a new top-level post opens a thread nobody has closed yet
+        elif run is not None and (group := run.wake.hint.group_of(thread)) is not None:
             closed_by = group.closed_by  # fixed at turn start (5.3, 5.9)
         else:
             # unsolicited, or a wake's reply outside its hint: the thread's mute now; rate and
@@ -980,7 +1105,7 @@ class RoomCore:
     def _note_hinted(self, bot: str, reply: Reply, run: TurnRun | None) -> None:
         """Spec 5.9's "reply only in a delivered or hinted thread" is an instruction and a
         counter here, never a refusal (design §3.1, 5.9 row)."""
-        if run is None:
+        if run is None or reply.thread is None:  # a new thread is neither delivered nor hinted
             return
         inside = run.wake.hint.group_of(reply.thread) is not None
         self._count_rule(bot, reply.thread, HINTED_THREAD, "complied" if inside else "violated")
@@ -1002,16 +1127,29 @@ class RoomCore:
             if not reply.control and reply.text is None:
                 return None  # ``all`` resolved to nobody and nothing else remains: post nothing (8.3)
         text = canonical_text(reply)
-        previous_last = self.volatile[bot].last_post.get(reply.thread)
-        entry = self._count_own_post(bot, reply.thread, self.now(), count_words(text))
+        words = count_words(text)
+        # a new top-level post has no thread to count in until the platform names it;
+        # the count after is still ahead of the echo, which never counts a hosted bot
+        new_thread = reply.thread is None
+        previous_last = None if new_thread else self.volatile[bot].last_post.get(reply.thread)
+        entry = None if new_thread else self._count_own_post(bot, reply.thread, self.now(), words)
         try:
             post = await self.platform.post(bot, text, reply.thread, kind="bot")
         except RefusedPost:
-            self._uncount_own_post(bot, reply.thread, entry, previous_last)
+            if not new_thread:
+                self._uncount_own_post(bot, reply.thread, entry, previous_last)
             self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
-            if run is not None:
+            if run is not None and reply.thread is not None:
                 run.refused.append(reply.thread)
             raise
+        except PlatformError:
+            # whether it landed is unknown; counted as not, the agent reads the room (design §3.3)
+            if not new_thread:
+                self._uncount_own_post(bot, reply.thread, entry, previous_last)
+            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
+            raise
+        if new_thread:
+            self._count_own_post(bot, post.thread, self.now(), words)
         if run is not None:
             run.posts += 1
         return post
@@ -1056,7 +1194,17 @@ class RoomCore:
             if self.volatile.get(bot) is not None and self.volatile[bot].turn is run and run.leased:
                 await self._backend_failure(run, "lease expired")
 
+    def prune_threads(self) -> None:
+        """Drop the per-thread entries that hold nothing: on a platform every top-level
+        post is a thread, and a lookup creates an entry, so the two dicts would otherwise
+        grow with the room. A dropped entry comes back on demand, the same."""
+        for thread in [t for t, s in self.settings.items() if s.is_default]:
+            del self.settings[thread]
+        for thread in [t for t, s in self.thread_state.items() if s.is_empty]:
+            del self.thread_state[thread]
+
     def _commit(self, run: TurnRun, covered: set[str]) -> None:
+        self.prune_threads()
         bot = run.wake.bot
         state = self.persisted[bot]
         if run.hwm is not None and after(run.hwm, state.cursor):
@@ -1071,6 +1219,7 @@ class RoomCore:
         for thread in covered & state.unfinished:
             state.unfinished.discard(thread)
             self.trace.add(self.now(), "unfinished_removed", gateway=self.name, bot=bot, thread=thread)
+        self._changed()
 
     def _finish(self, run: TurnRun, outcome: str, **more) -> None:
         bot = run.wake.bot
@@ -1127,6 +1276,9 @@ class RoomCore:
         try:
             post = await self.platform.post(bot, f"{NOTICE_PREFIX} {cause}", thread, kind="notice")
         except RefusedPost:
+            return
+        except PlatformError as exc:  # the notice is best effort; the turn's bookkeeping goes on
+            logger.warning("%s: notice not posted: %s", self.room, exc)
             return
         self.trace.add(self.now(), "notice", gateway=self.name, bot=bot, post=post.id, cause=cause)
 
@@ -1191,7 +1343,7 @@ class RoomCore:
         return {
             "gateway": self.name,
             "room": self.room,
-            "threads": {t: self._thread_status(t) for t in list(self.settings)},
+            "threads": {t: self._thread_status(t) for t in list(dict.fromkeys([*self.settings, *self.thread_state]))},
             "bots": {b: self._bot_status(b) for b in self.hosted},
             "agents": list(self.agents),
             "bot_like_members_missing": [m.username for m in members.values() if m.is_bot and m.username not in self.agents],

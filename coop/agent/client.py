@@ -95,8 +95,9 @@ class HttpDoorbell:
         doc = self._answer(r)
         return decode_wake(doc["wake"]), [decode_post(p) for p in doc["posts"]]
 
-    async def read_room(self, room: str) -> list[Post]:
-        r = await (await self._http()).get("/v1/agents/me/posts", params={"room": room})
+    async def read_room(self, room: str, after: str | None = None) -> list[Post]:
+        params = {"room": room} if after is None else {"room": room, "after": after}
+        r = await (await self._http()).get("/v1/agents/me/posts", params=params)
         return [decode_post(p) for p in self._answer(r)["posts"]]
 
     async def send(self, reply: Reply, room: str | None = None) -> Post | None:
@@ -111,6 +112,9 @@ class HttpDoorbell:
             raise LostResponse() from None
         if r.status_code == 422:
             raise RefusedSend(r.json().get("reasons", r.json().get("error", "")))
+        if r.status_code == 504:
+            # the gateway reached the platform and got no answer: the same unknown as a timeout
+            raise LostResponse()
         if r.status_code == 502:
             # the gateway filled in a wake's thread the reply left out (design §3.3)
             raise RefusedPost(r.json().get("thread") or reply.thread)
