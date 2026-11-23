@@ -309,6 +309,10 @@ class RoomCore:
         self.volatile[bot] = BotVolatile(idle_since=self.now())
         if self.started:  # before ``start`` the room's own start schedules it, once
             self._schedule_periodic_sweep(bot)
+            # what is undelivered above its cursor is its to catch up on now, not at the
+            # next periodic sweep (which an operator may have turned off): the posts of
+            # a room created around it, or those since a restored cursor
+            self._request_sweep(bot, "hosted")
         self.trace.add(self.now(), "hosted_added", gateway=self.name, bot=bot)
 
     async def remove_hosted(self, bot: str) -> None:

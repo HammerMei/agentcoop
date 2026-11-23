@@ -670,6 +670,32 @@ async def test_a_dm_opened_by_a_join_delivers_the_post_that_landed_while_it_open
         await svc.stop()
 
 
+async def test_a_group_created_around_two_bots_delivers_its_first_post_to_both_at_once(tmp_path):
+    """The first bot's join opens and starts the room and the replay at start reaches it
+    alone; the second is hosted after that with the post above its cursor, and its live
+    copy is a duplicate to the log. Its catch-up is requested on hosting, not left to the
+    periodic sweep, which this configuration has off."""
+    fc = SlowHistory()
+    fc.add_room("c1", "team", PEOPLE)
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:gdm:*"'))
+    await svc.start(listen=False)
+    try:
+        fc.add_room("g1", "H, a_bot, b_bot", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True), MemberInfo("b_bot", is_bot=True)], "group")
+        fc.gate.clear()
+        joins = [asyncio.create_task(fc.on_event(Membership("g1", bot, joined=True, created=True))) for bot in ("a_bot", "b_bot")]
+        await settle()
+        await fc.human("g1", "H", "@a_bot @b_bot hello both")
+        fc.gate.set()
+        await asyncio.gather(*joins)
+        await settle()
+        handle = next(h for h in svc.rooms if h.startswith("fake:gdm:"))
+        assert svc.rooms[handle].core.hosted == ["a_bot", "b_bot"]
+        wakes = {agent: svc.gateway.poll(agent) for agent in ("a", "b")}
+        assert all(w is not None and w.trigger.post_id == fc.posts["g1"][-1].id for w in wakes.values()), wakes
+    finally:
+        await svc.stop()
+
+
 async def test_a_join_to_a_room_the_platform_cannot_describe_is_an_error_line_not_a_crash(running):
     svc, fc = running
 
