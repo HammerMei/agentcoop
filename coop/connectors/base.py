@@ -16,24 +16,64 @@ in a room the daemon receives N copies and the room log keeps one.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from ..config import Server
 from ..room.model import Position, Post
 from ..room.roster import Roster
 
+RoomKind = Literal["channel", "dm", "group"]
+
+# the length of a group message's handle digest; the legacy gateway's choice, kept so a
+# room's handle reads the same under both
+_DIGEST_DIGITS = 16
+
 
 @dataclass(frozen=True)
 class RoomInfo:
-    """A room as the platform describes it. ``name`` is what ``rooms:`` patterns match,
-    after the server prefix; a DM's is the counterpart's username."""
+    """A room as the platform describes it. ``name`` is a channel's name, a 1:1 DM's
+    the counterpart's username, a group message's whatever the platform shows; the
+    room's handle is :func:`handle_for`."""
 
     id: str
     name: str
-    is_dm: bool = False
+    kind: RoomKind = "channel"
     archived: bool = False
+
+    @property
+    def is_dm(self) -> bool:
+        """A 1:1 DM, where a post addresses the bot by itself (§3.1). A group message
+        is a room: a post there addresses nobody until it mentions someone."""
+        return self.kind == "dm"
+
+
+def handle_for(server: str, info: RoomInfo, username: str) -> str:
+    """The room's handle: what ``rooms:`` patterns match, what ``coop list`` shows and
+    what ``pause / resume / reset`` take. Every segment is a platform name.
+
+    | kind | handle |
+    |---|---|
+    | channel | ``<server>:<channel name>`` |
+    | 1:1 DM | ``<server>:dm:<bot username>:<counterpart username>``: the bot's own DMs are
+      distinct rooms, so the bot ``username`` that lists the room is in the handle |
+    | group message | ``<server>:gdm:<16 hex of the room id's digest>``: the member list
+      moves, includes the bot and has no fixed order, so nobody's name is in it |
+
+    The ``dm:`` and ``gdm:`` prefixes cannot be forged by a channel: Mattermost and
+    Rocket.Chat channel names are slugs without ``:``.
+    """
+    if info.kind == "dm":
+        return f"{server}:dm:{username}:{info.name}"
+    if info.kind == "group":
+        return f"{server}:gdm:{_digest(info.id)}"
+    return f"{server}:{info.name}"
+
+
+def _digest(room_id: str) -> str:
+    return hashlib.sha256(room_id.encode()).hexdigest()[:_DIGEST_DIGITS]
 
 
 @dataclass(frozen=True)

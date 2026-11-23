@@ -220,7 +220,7 @@ async def connected(mm):
 
 async def test_add_bot_lists_the_teams_rooms_and_dms_with_the_counterparts_name(connected):
     connector, mm, seen, rooms = connected
-    assert [(r.id, r.name, r.is_dm) for r in rooms] == [("c01", "team", False), ("c03", "glin", True)]
+    assert [(r.id, r.name, r.kind) for r in rooms] == [("c01", "team", "channel"), ("c03", "glin", "dm")]
     with pytest.raises(ValueError, match="not 'wavebro_bot'"):
         await connector.add_bot("wavebro_bot", "tok-laomei")
     with pytest.raises(httpx.HTTPStatusError):
@@ -379,7 +379,7 @@ async def test_a_group_message_is_a_room_not_a_one_to_one_dm(mm):
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle), websocket=FakeSocket(mm))
     rooms = await connector.add_bot("laomei_bot", "tok-laomei")
     group = next(r for r in rooms if r.name == "glin, laomei_bot, wavebro_bot")
-    assert not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
+    assert group.kind == "group" and not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
         await connector.members("c01")

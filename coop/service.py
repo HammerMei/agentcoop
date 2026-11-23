@@ -32,7 +32,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .config import Config, ConfigError, RoomRule, Server
-from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo
+from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo, handle_for
 from .connectors.roomlog import RoomLog
 from .doorbell.api import build_app
 from .doorbell.tls import server_context
@@ -194,10 +194,13 @@ class Service:
 
     async def _host(self, server: str, info: RoomInfo, agent: str) -> None:
         """Host ``agent`` in ``info`` if a rule names it there."""
+        if info.kind == "dm" and self.config.servers[server].bot_by_username(info.name) is not None:
+            # nobody human is there and nobody but the platform's admin can see it: a
+            # bot-to-bot DM is not supported (design §4)
+            logger.info("%s: direct channel of %r with the bot %r; not hosted", server, agent, info.name)
+            return
         run = self._by_id.get((server, info.id))
-        # an open room keeps the handle it opened under: two bots may list one room by
-        # different names (a direct channel is named after the counterpart)
-        handle = run.handle if run is not None else f"{server}:{info.name}"
+        handle = run.handle if run is not None else handle_for(server, info, self._username(server, agent))
         rule = self.config.rule_for(handle)
         if rule is None or agent not in rule.agents:
             logger.info("%s: no rule hosts %r in %s", server, agent, handle)
@@ -207,7 +210,7 @@ class Service:
             return
         if run is None:
             try:
-                run = await self._open_room(server, info, rule)
+                run = await self._open_room(server, handle, info, rule)
             except (ConfigError, PlatformError) as exc:
                 self._note(f"[ERROR] {handle}: not opened: {exc}")
                 return
@@ -240,8 +243,7 @@ class Service:
         if not run.core.hosted:
             self._close_room(run)
 
-    async def _open_room(self, server: str, info: RoomInfo, rule: RoomRule) -> RoomRun:
-        handle = f"{server}:{info.name}"
+    async def _open_room(self, server: str, handle: str, info: RoomInfo, rule: RoomRule) -> RoomRun:
         if handle in self.rooms:
             raise ConfigError(f"{handle}: two rooms on {server} share this name; the second is not hosted")
         connector = self.connectors[server]

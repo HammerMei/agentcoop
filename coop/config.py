@@ -5,8 +5,10 @@ accounts the gateway posts as, keyed by agent name, each with its own ``owners``
 (the server's ``owners`` by default). A bot without a ``token_file`` is roster
 only (another gateway's, or nobody's, §3.1): the gateway knows it is a bot and
 never speaks for it. ``agents`` are the remote agents, each with the bearer token
-the doorbell authenticates. ``rooms`` are patterns over ``<server>:<room>``, first
-match wins, each naming the agents in that room and the room's parameters.
+the doorbell authenticates. ``rooms`` are patterns over the room's handle
+(:func:`~coop.connectors.base.handle_for`: ``<server>:<channel>``, ``<server>:dm:<bot
+username>:<person>``, ``<server>:gdm:<digest>``), first match wins, each naming the
+agents in that room and the room's parameters.
 ``gateway`` is the doorbell listener.
 
 Who is a bot, whose instructions a bot takes and who moderates a room all come from

@@ -5,6 +5,7 @@ and a reload applied in place."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import pytest
 import yaml
 
 from coop.config import ConfigError, parse
-from coop.connectors.base import MemberInfo, Membership, RoomInfo
+from coop.connectors.base import MemberInfo, Membership, RoomInfo, handle_for
 from coop.room.model import Reply
 from coop.room.platform import PlatformError
 from coop.service import Service
@@ -619,30 +620,71 @@ async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_relo
         await svc.stop()
 
 
-async def test_a_room_two_bots_list_under_different_names_is_one_room_under_the_first_handle(tmp_path):
-    """A direct channel between two bots: each names it after the other. The second bot
-    is bound under the handle the room opened with, not its own name for it."""
+def test_a_rooms_handle_is_platform_names_only_by_kind():
+    assert handle_for("fake", RoomInfo("c1", "team"), "a_bot") == "fake:team"
+    assert handle_for("fake", RoomInfo("d1", "H", "dm"), "a_bot") == "fake:dm:a_bot:H"
+    group = handle_for("fake", RoomInfo("g1", "H, a_bot, b_bot", "group"), "a_bot")
+    assert group == "fake:gdm:" + hashlib.sha256(b"g1").hexdigest()[:16]
+    assert handle_for("fake", RoomInfo("g1", "a_bot, H, b_bot", "group"), "b_bot") == group  # whoever lists it
+
+
+async def test_a_dm_is_hosted_under_the_bots_username_and_two_bots_dms_with_one_person_are_two_rooms(tmp_path):
+    fc = FakeConnector()
+    fc.add_room("c1", "team", PEOPLE)
+    fc.add_room("d1", "H", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)], "dm")
+    fc.add_room("d2", "H", [MemberInfo("H"), MemberInfo("b_bot", is_bot=True)], "dm")
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:dm:*:H"'))
+    await svc.start(listen=False)
+    try:
+        assert set(svc.rooms) == {"fake:dm:a_bot:H", "fake:dm:b_bot:H"}
+        assert svc.rooms["fake:dm:a_bot:H"].core.hosted == ["a_bot"] and svc.rooms["fake:dm:b_bot:H"].core.hosted == ["b_bot"]
+        assert svc.rooms["fake:dm:a_bot:H"].log.is_dm
+    finally:
+        await svc.stop()
+
+
+async def test_a_group_message_is_one_room_under_a_digest_whichever_bot_lists_it(tmp_path):
+    fc = FakeConnector()
+    fc.add_room("c1", "team", PEOPLE)
+    fc.add_room("g1", "H, a_bot, b_bot", PEOPLE, "group")
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:gdm:*"'))
+    await svc.start(listen=False)
+    try:
+        handle = "fake:gdm:" + hashlib.sha256(b"g1").hexdigest()[:16]
+        assert set(svc.rooms) == {handle}
+        run = svc.rooms[handle]
+        assert run.core.hosted == ["a_bot", "b_bot"] and not run.log.is_dm
+        assert svc.gateway.username_of(handle, "b") == "b_bot" and not any(n.startswith("[ERROR]") for n in svc.notes)
+    finally:
+        await svc.stop()
+
+
+async def test_a_direct_channel_between_two_bots_is_not_hosted(tmp_path):
+    """Each bot names the channel after the other. Nobody human is there and only the
+    platform's admin can see it: a bot-to-bot DM is not supported, at start or on a join."""
     fc = FakeConnector()
     fc.add_room("c1", "team", PEOPLE)
     seen_as = {"a_bot": "b_bot", "b_bot": "a_bot"}
 
-    async def room(room_id):
-        return fc.rooms[room_id]
-
     class Named(FakeConnector):
         async def add_bot(self, username, token):
             rooms = await super().add_bot(username, token)
-            return [RoomInfo(r.id, seen_as[username], True) if r.id == "d1" else r for r in rooms]
+            return [RoomInfo(r.id, seen_as[username], "dm") if r.id == "d1" else r for r in rooms]
+
+        async def room(self, room_id):
+            return RoomInfo("d1", "a_bot", "dm") if room_id == "d1" else await super().room(room_id)
     nc = Named()
     nc.rooms, nc.membership, nc.posts = fc.rooms, fc.membership, fc.posts
-    nc.add_room("d1", "dm", [MemberInfo("a_bot", is_bot=True), MemberInfo("b_bot", is_bot=True)], is_dm=True)
+    nc.add_room("d1", "dm", [MemberInfo("a_bot", is_bot=True), MemberInfo("x_bot", is_bot=True)], "dm")
+    nc.add_room("d2", "x_bot", [MemberInfo("a_bot", is_bot=True), MemberInfo("x_bot", is_bot=True)], "dm")  # a roster-only bot
     svc = service(tmp_path, nc, CONFIG.replace('"fake:team*"', '"fake:*"'))
     await svc.start(listen=False)
     try:
-        assert "fake:b_bot" in svc.rooms and "fake:a_bot" not in svc.rooms
-        run = svc.rooms["fake:b_bot"]
-        assert run.core.hosted == ["a_bot", "b_bot"]
-        assert svc.gateway.username_of("fake:b_bot", "b") == "b_bot" and not any(n.startswith("[ERROR]") for n in svc.notes)
+        assert set(svc.rooms) == {"fake:team"} and not any(n.startswith("[ERROR]") for n in svc.notes)
+        nc.membership["d1"].append(MemberInfo("b_bot", is_bot=True))
+        await nc.on_event(Membership("d1", "b_bot", joined=True))
+        await settle()
+        assert set(svc.rooms) == {"fake:team"}
     finally:
         await svc.stop()
 

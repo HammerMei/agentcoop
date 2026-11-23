@@ -132,13 +132,12 @@ class MattermostConnector:
         kind = channel.get("type")
         archived = bool(channel.get("delete_at"))
         if kind == "D":
-            # a direct channel's name is the two ids; the counterpart's username is the handle
+            # a direct channel's name is the two ids; the room is named for the counterpart
             others = [u for u in channel.get("name", "").split("__") if u and u != me]
             name = (await rest.user(others[0])).get("username", others[0]) if others else channel.get("name", "")
-            return RoomInfo(channel["id"], name, is_dm=True, archived=archived)
+            return RoomInfo(channel["id"], name, "dm", archived=archived)
         if kind == "G":
-            # a group message is a room, not a 1:1 DM: a post there addresses nobody by itself
-            return RoomInfo(channel["id"], channel.get("display_name") or channel.get("name", ""), archived=archived)
+            return RoomInfo(channel["id"], channel.get("display_name") or channel.get("name", ""), "group", archived=archived)
         return RoomInfo(channel["id"], channel.get("name", ""), archived=archived)
 
     async def members(self, room_id: str) -> list[MemberInfo]:

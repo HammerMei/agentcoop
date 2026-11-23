@@ -7,7 +7,7 @@ nothing with this one on purpose: the agent side stays small.
     coop stop
     coop status
     coop list
-    coop pause  AGENT ROOM        ROOM is the handle `list` shows: <server>:<room name>
+    coop pause  AGENT ROOM        ROOM is the handle `list` shows: <server>:<room name>, <server>:dm:<bot>:<person>, <server>:gdm:<digest>
     coop resume AGENT ROOM
     coop reset  AGENT ROOM
     coop reload                   the daemon re-reads the configuration and applies it in place

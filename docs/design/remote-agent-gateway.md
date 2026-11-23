@@ -506,7 +506,7 @@ gateway:
   tls: {cert: gateway/cert.pem, key: gateway/key.pem}   # required off loopback, unless a proxy terminates TLS
 classifier:
   command: [claude, -p, --output-format, text]   # one fresh process per call, the prompt on stdin
-rooms:                           # keys are patterns over <server>:<room name>;
+rooms:                           # keys are patterns over the room's handle (below);
   "mm-lab:team":                 # a discovered room takes the first entry that matches it
     agents: [a, b, c]
     enforce: false
@@ -525,6 +525,22 @@ one an agent uses. `owners` and `guests` are usernames, as everything in a room 
 (§2, *name*); the `bots` keys are agent names, which the gateway resolves to the
 `username` when it opens a room. Relative paths are relative to the directory the
 file is in, the runtime directory in a normal install.
+
+A room's handle is what the `rooms` keys match, what `coop list` shows and what
+`pause`, `resume` and `reset` take. Every segment of it is a platform name:
+
+| room | handle |
+|---|---|
+| channel, public or private | `<server>:<channel name>` |
+| 1:1 DM with a person | `<server>:dm:<bot username>:<person's username>` |
+| group message | `<server>:gdm:<16 hex of the room id's digest>` |
+
+A bot's DMs are rooms of their own, one per person, which is why the bot's username
+is in the handle; `lab-mm:dm:laomei_bot:*` is every DM that bot has. A group
+message's members are not in its handle: the list moves, includes the bot and has
+no fixed order. A direct channel between two bots is not hosted: nobody human is
+there, nobody but the platform's administrator can see it, and agent-to-agent
+traffic belongs on a channel of its own rather than in a chat room.
 
 `coop reload` (and `coop config add agent`, which asks for one) applies a changed
 file in place: agents and their tokens, bots connected or disconnected, room
