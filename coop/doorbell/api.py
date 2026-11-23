@@ -76,10 +76,7 @@ class _Doorbell:
         return event
 
 
-RULES = Path(__file__).resolve().parent.parent / "rules.md"
-# Bumped with every change to rules.md: an agent refetches the document when a wake
-# carries a newer version than the one it holds (design §3.3). A test pins the pair.
-RULES_VERSION = 2
+RULES = Path(__file__).resolve().parent.parent / "rules.md"  # its version: ``Gateway``'s ``RULES_VERSION``
 
 
 def build_app(gateway: Gateway, tokens: dict[str, str], rules_text: str | None = None) -> web.Application:

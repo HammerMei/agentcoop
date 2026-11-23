@@ -1930,3 +1930,19 @@ Increment: the room core works in the platform's namespace; the agent name is bo
 Test gaps the reviewer named: the bio path with agent ≠ username (added: `test_a_bio_reaches_each_room_under_the_bots_username_and_a_restart_restores_it_there`), the original bug's join path (added: `test_a_person_whose_username_is_an_agents_key_joining_a_room_hosts_nothing`), the `coop status` prefix match (tightened to `a (a_bot)`). Composition: 5 findings, 3 silent, all cheap; 4 fixed, 1 half dropped. Cost: one reviewer agent (~16 min), fixes ~40 minutes.
 
 **Status: closed** — Codex on `2c11882`: "Didn't find any major issues" (👍, no review, no threads). Whole PR: 5 internal findings, 4 fixed, 1 half dropped; no Codex finding. The reload-enumeration row `username: b_bot → b2_bot` and the rename restart test are the new fences.
+
+## 2026-11-23 — PR #212 round 1 (Codex on `e930f34`, `coop/service.py`, `coop/room/gateway.py`, `coop/doorbell/api.py`, `coop/connectors/base.py`)
+
+Chain-check: no chain (first Codex round with findings; the 👍 on `2c11882` is not a round). Blind rater 2 scored from the code without the author's verdicts; no control (no settled entry with an observed outcome yet): agreement uncorroborated.
+
+| # | finding | rater 1 | rater 2 | verdict | fix / test |
+|---|---|---|---|---|---|
+| K1 | a second join handler binds and starts a room still inside `_open_room`: the bot's cursor comes from the half-fetched log, its first read delivers the whole page (P1) | FIX (the start half is this PR's fix) | FILE: pre-existing on `9c02aab` (same pre-await registration, same `_ensure_started` from `_on_event`); room lifecycle, not namespace; silent; payback ~1.1 yr (0.15–6), P1 inflated (one `reset` recovers) | **FILE** — rater 1 conceded on the `git show 9c02aab` evidence; plan S3-2 entry carries the reversal observation (a `"cursor": null` in a room with posts; a first read older than the join). The race test's comment says it pins the binding only |
+| K2 | a reload renaming a roster-only bot leaves `members()` under the old name; the bot drops out of the classifier's offer (P2) | FIX, cheap, silent (the refresh I deleted) | FIX, cheap, silent; roster-driven not rename-driven (roles were read under the old roster) | **FIX** `_reload_room` refreshes members when the roster changed | `test_a_reload_renaming_a_roster_only_bot_refreshes_the_members`; the roster-only add test loses its hand-fed refresh |
+| K3 | `bind` of an already-bound agent under another username leaves the old side (P2) | FIX, cheap (reject) | FIX as a guard; unreachable today (the daemon unbinds first, `_connected` fixes the username); P2 → P3 | **FIX** `bind` refuses a rebind; the same-username rebind stays idempotent | `test_an_agent_already_bound_in_a_room_is_not_rebound_under_another_username` |
+| K4 | standalone `build_app` + default `Gateway` serves the v2 rules as v1 (P2) | FIX, cheap (constant to `coop/rules.py`) | FIX, cheap: the constant to `coop/room/gateway.py` as the `Gateway` default, no new module; no caller today, P2 → P3 | **FIX** rater 2's shape (the default lives where the default is) | the pin test imports it from the gateway |
+| K5 | `connectors/base.py` module docstring still describes the agent-name contract (P3) | FIX | FIX; outranks K3/K4 (a wrong rationale the next connector author reads first) | **FIX** docstring | — |
+
+**Convergence:** K2–K5 agreed on verdict and gate; K1 split on "the increment's job" and converged on checkable evidence (`git show 9c02aab:coop/service.py`), rater 1 conceding. **Ranking vs Codex:** K1's P1 inflated (recoverable, pre-existing); K5 above K3/K4. **Composition:** 5 findings, 2 silent (K1 filed, K2 fixed), 3 edge; not an all-edge round. Cost: rater 2 ~12 min, fixes ~25 min.
+
+**Status: open** — round 2 requested on the fixes.

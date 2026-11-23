@@ -35,7 +35,7 @@ async def test_read_prints_the_reminder_the_hint_and_the_posts(sb, coop, capsys)
     w = await wake_id(sb)
     assert await coop("read", "--wake", w) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0] == f"you are a in team, rules v1, reply with `send --wake {w}` or `done`"
+    assert out[0] == f"you are a in team, rules v2, reply with `send --wake {w}` or `done`"
     assert out[1] == "Turn source: addressed. Starting thread: t1."
     assert out[-2:] == ["[t1] #p1 b (agent): a bot speaks", "[t1] #p2 H (owner, trigger): @a hello"]
 

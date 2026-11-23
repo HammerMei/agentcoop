@@ -34,13 +34,13 @@ from aiohttp import web
 from .config import Config, ConfigError, RoomRule, Server
 from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo
 from .connectors.roomlog import RoomLog
-from .doorbell.api import RULES_VERSION, build_app
+from .doorbell.api import build_app
 from .doorbell.tls import server_context
 from .room.classifier import Classifier
 from .room.classifier_cli import SubprocessClassifier
 from .room.clock import AsyncioClock, Clock
 from .room.core import RoomCore
-from .room.gateway import Gateway
+from .room.gateway import RULES_VERSION, Gateway
 from .room.model import Position
 from .room.platform import PlatformError
 from .room.store import FORMAT, dump_agents, dump_room, load_agents, load_room
@@ -461,11 +461,14 @@ class Service:
             notes.append(f"{run.handle}: no rule matches now; closed")
             return
         roster = self.config.roster_for(run.server, rule)
+        changed = roster != run.log.roster
         run.rule = rule
         classifier = self._classifier_factory(self.config, run.handle) if rule.params.classifier_enabled else None
         run.core.update(roster, rule.params, classifier)
         run.log.roster = roster
         self.connectors[run.server].watch(run.info.id, roster)
+        if changed:  # the members' kinds and roles were read under the old roster
+            await self._refresh_members(run)
         for agent in self.hosted_agents(run):
             if agent not in rule.agents or not self._is_hosted(run.server, agent):
                 await self._unhost(run, agent)

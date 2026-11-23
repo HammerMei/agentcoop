@@ -29,6 +29,11 @@ from .trace import Trace
 
 Listener = Callable[[Wake], Awaitable[None]]
 
+# The version of the room-rules document (``coop/rules.md``) every wake carries
+# (design §3.3): an agent refetches the document when a wake carries a newer one.
+# Bumped with every change to the document; a test pins the pair.
+RULES_VERSION = 2
+
 
 @dataclass
 class AgentState:
@@ -39,7 +44,8 @@ class AgentState:
 
 
 class Gateway:
-    def __init__(self, clock: Clock, trace: Trace | None = None, name: str = "g1", rules_version: int = 1) -> None:
+    def __init__(self, clock: Clock, trace: Trace | None = None, name: str = "g1",
+                 rules_version: int = RULES_VERSION) -> None:
         self.clock = clock
         self.trace = trace if trace is not None else Trace()
         self.name = name
@@ -90,6 +96,9 @@ class Gateway:
         taken = self._agent.get((room, username))
         if taken is not None and taken != agent:
             raise ValueError(f"{username!r} in room {room!r} is {taken!r}'s bot, not {agent!r}'s")
+        bound = self._username.get((room, agent))
+        if bound is not None and bound != username:  # a rebind would leave the old username's side behind
+            raise ValueError(f"{agent!r} is already {bound!r} in room {room!r}; unbind first")
         self._username[(room, agent)] = username
         self._agent[(room, username)] = agent
         self.agents.setdefault(agent, AgentState())

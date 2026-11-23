@@ -456,7 +456,6 @@ async def test_a_leave_from_an_unhosted_room_is_forgotten_so_a_later_rule_does_n
 async def test_a_reload_that_adds_a_roster_only_bot_puts_it_in_the_room_under_its_username(running, tmp_path):
     svc, fc = running
     fc.membership["c1"].append(MemberInfo("y_bot", is_bot=True))
-    await svc._refresh_members(svc.rooms["fake:team"])  # the platform told the daemon of the join
     added = CONFIG.replace("      x: {username: x_bot}", "      x: {username: x_bot}\n      y: {username: y_bot}")
     added = added.replace("agents: [a, b, x]", "agents: [a, b, x, y]")
     await svc.reload(config(tmp_path, added))
@@ -604,7 +603,8 @@ async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_relo
         fc.gate.clear()
         fc.membership["c3"].append(MemberInfo("b_bot", is_bot=True))
         # the platform delivers the join on more than one connection: two _host calls, the
-        # second while the first is still fetching the room's history
+        # second while the first is still fetching the room's history. This pins the
+        # binding only; the second call's cursor comes from the half-fetched log (plan S3-2)
         first = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
         second = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
@@ -645,3 +645,11 @@ async def test_a_room_two_bots_list_under_different_names_is_one_room_under_the_
         assert svc.gateway.username_of("fake:b_bot", "b") == "b_bot" and not any(n.startswith("[ERROR]") for n in svc.notes)
     finally:
         await svc.stop()
+
+
+async def test_a_reload_renaming_a_roster_only_bot_refreshes_the_members(running, tmp_path):
+    svc, fc = running
+    fc.membership["c1"] = [m for m in fc.membership["c1"] if m.username != "x_bot"] + [MemberInfo("x2_bot", is_bot=True)]
+    await svc.reload(config(tmp_path, CONFIG.replace("x: {username: x_bot}", "x: {username: x2_bot}")))
+    core = svc.rooms["fake:team"].core
+    assert "x2_bot" in core._bots_in_room() and "x_bot" not in svc.rooms["fake:team"].log.members()

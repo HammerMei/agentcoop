@@ -3,10 +3,11 @@ holds the gateway's bot accounts there, delivers every post it sees as a normali
 :class:`~coop.room.model.Post`, and does the platform calls the room core needs.
 
 The daemon drives it through this protocol only, so a new platform is a new
-implementation of it and nothing else. The core never sees a platform username: a
-post's ``author`` is the agent name when the author is a bot the configuration
-knows, and the username otherwise. The connector maps in both directions, inbound
-on every post and outbound on every ``@name`` it posts.
+implementation of it and nothing else. A room has one namespace, the platform's
+(design §2): a post's ``author`` is its username, a bot is its account's username,
+and text goes in and out as written. A connector maps nothing; the agent an
+account belongs to is the gateway's binding, and the daemon names bots to the
+connector by username.
 
 Events reach the daemon through one callback, in the order the connector saw
 them. A ``Posted`` is one copy of one post, from one bot's connection: with N bots

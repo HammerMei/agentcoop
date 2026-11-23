@@ -204,3 +204,12 @@ async def test_the_binding_is_per_room_and_strict_an_unbound_bot_of_an_agents_na
     with pytest.raises(ValueError, match="is 'x'\\'s bot"):
         sb.gateway.bind("other", "a", "a")
     assert Roster(("a",)).kind_of("a") == "bot"  # the roster is in the room's namespace too
+
+
+async def test_an_agent_already_bound_in_a_room_is_not_rebound_under_another_username():
+    sb = Sandbox(bots=("a", "b"), attach_agent=False)
+    sb.gateway.bind("team", "a", "a")  # the same binding again: fine (a second _host for the same join)
+    sb.gateway.unbind("team", "b")
+    with pytest.raises(ValueError, match="already 'a'"):
+        sb.gateway.bind("team", "a", "b")
+    assert sb.gateway.username_of("team", "a") == "a" and sb.gateway.agent_of("team", "b") is None
