@@ -1945,4 +1945,4 @@ Chain-check: no chain (first Codex round with findings; the 👍 on `2c11882` is
 
 **Convergence:** K2–K5 agreed on verdict and gate; K1 split on "the increment's job" and converged on checkable evidence (`git show 9c02aab:coop/service.py`), rater 1 conceding. **Ranking vs Codex:** K1's P1 inflated (recoverable, pre-existing); K5 above K3/K4. **Composition:** 5 findings, 2 silent (K1 filed, K2 fixed), 3 edge; not an all-edge round. Cost: rater 2 ~12 min, fixes ~25 min.
 
-**Status: open** — round 2 requested on the fixes.
+**Status: closed** — Codex on `4f2b972`: "Didn't find any major issues" (👍, no new threads). Whole PR: internal 5 + Codex 5 = 10 findings; 8 fixed, 1 half dropped (the trace field), 1 filed (K1, room lifecycle, plan S3-2). No chain. Adoption 80%.
