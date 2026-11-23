@@ -592,3 +592,56 @@ async def test_a_person_whose_username_is_an_agents_key_joining_a_room_hosts_not
     await fc.on_event(Membership("c3", "a", joined=True))  # a person called "a": not agent a's bot (a_bot)
     await settle()
     assert "fake:team-2" not in svc.rooms
+
+
+async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_reload_still_works(tmp_path):
+    fc = SlowHistory()
+    fc.add_room("c1", "team", PEOPLE)
+    fc.add_room("c3", "team-2", [MemberInfo("H")])
+    svc = service(tmp_path, fc)
+    await svc.start(listen=False)
+    try:
+        fc.gate.clear()
+        fc.membership["c3"].append(MemberInfo("b_bot", is_bot=True))
+        # the platform delivers the join on more than one connection: two _host calls, the
+        # second while the first is still fetching the room's history
+        first = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
+        await settle()
+        second = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
+        await settle()
+        fc.gate.set()
+        await asyncio.gather(first, second)
+        run = svc.rooms["fake:team-2"]
+        assert run.core.hosted == ["b_bot"] and svc.gateway.username_of("fake:team-2", "b") == "b_bot"
+        notes = await svc.reload(svc.config)
+        assert "fake:team-2" in svc.rooms and not any(n.startswith("[ERROR]") for n in notes)
+    finally:
+        await svc.stop()
+
+
+async def test_a_room_two_bots_list_under_different_names_is_one_room_under_the_first_handle(tmp_path):
+    """A direct channel between two bots: each names it after the other. The second bot
+    is bound under the handle the room opened with, not its own name for it."""
+    fc = FakeConnector()
+    fc.add_room("c1", "team", PEOPLE)
+    seen_as = {"a_bot": "b_bot", "b_bot": "a_bot"}
+
+    async def room(room_id):
+        return fc.rooms[room_id]
+
+    class Named(FakeConnector):
+        async def add_bot(self, username, token):
+            rooms = await super().add_bot(username, token)
+            return [RoomInfo(r.id, seen_as[username], True) if r.id == "d1" else r for r in rooms]
+    nc = Named()
+    nc.rooms, nc.membership, nc.posts = fc.rooms, fc.membership, fc.posts
+    nc.add_room("d1", "dm", [MemberInfo("a_bot", is_bot=True), MemberInfo("b_bot", is_bot=True)], is_dm=True)
+    svc = service(tmp_path, nc, CONFIG.replace('"fake:team*"', '"fake:*"'))
+    await svc.start(listen=False)
+    try:
+        assert "fake:b_bot" in svc.rooms and "fake:a_bot" not in svc.rooms
+        run = svc.rooms["fake:b_bot"]
+        assert run.core.hosted == ["a_bot", "b_bot"]
+        assert svc.gateway.username_of("fake:b_bot", "b") == "b_bot" and not any(n.startswith("[ERROR]") for n in svc.notes)
+    finally:
+        await svc.stop()

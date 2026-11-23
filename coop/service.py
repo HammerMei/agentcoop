@@ -194,7 +194,10 @@ class Service:
 
     async def _host(self, server: str, info: RoomInfo, agent: str) -> None:
         """Host ``agent`` in ``info`` if a rule names it there."""
-        handle = f"{server}:{info.name}"
+        run = self._by_id.get((server, info.id))
+        # an open room keeps the handle it opened under: two bots may list one room by
+        # different names (a direct channel is named after the counterpart)
+        handle = run.handle if run is not None else f"{server}:{info.name}"
         rule = self.config.rule_for(handle)
         if rule is None or agent not in rule.agents:
             logger.info("%s: no rule hosts %r in %s", server, agent, handle)
@@ -202,7 +205,6 @@ class Service:
         if info.archived:  # Mattermost lists none at connect (probed on 11.x); a room() answer might
             logger.info("%s: archived; not hosted", handle)
             return
-        run = self._by_id.get((server, info.id))
         if run is None:
             try:
                 run = await self._open_room(server, info, rule)
