@@ -21,7 +21,7 @@ from aiohttp.test_utils import TestServer
 
 from coop.client import InProcessDoorbell
 from coop.connectors.base import MemberInfo, Membership, Posted, RoomInfo
-from coop.connectors.normalize import Names, mentions_in
+from coop.connectors.normalize import mentions_in
 from coop.doorbell.api import build_app
 from coop.room.clock import Clock
 from coop.room.controls import parse_controls
@@ -232,14 +232,13 @@ class FakeConnector:
 
     name = "fake"
 
-    def __init__(self, on_event=None, names: dict[str, str] | None = None) -> None:
+    def __init__(self, on_event=None) -> None:
         self.on_event = on_event
-        self.names = Names(names or {})
         self.rooms: dict[str, RoomInfo] = {}
         self.membership: dict[str, list[MemberInfo]] = {}
         self.posts: dict[str, list[Post]] = {}
         self.files: dict[str, bytes] = {}
-        self.bots: dict[str, str] = {}  # agent -> token
+        self.bots: dict[str, str] = {}  # username -> token
         self.rosters: dict[str, Roster] = {}
         self.refusing: set[str] = set()
         self.typed: list[tuple[str, str, str | None]] = []
@@ -272,12 +271,10 @@ class FakeConnector:
             self.files[file_id] = data
             attachments.append(Attachment(file_id, name, content_type, len(data)))
         roster = self.rosters.get(room_id) or Roster(())
-        author = self.names.agent_of(username)
-        text = self.names.inbound(text)
-        known = {self.names.agent_of(m.username) for m in self.membership.get(room_id, [])} | set(roster.bots)
+        known = {m.username for m in self.membership.get(room_id, [])} | set(roster.bots)
         post = Post(
             id=post_id, position=(self.now_ms, post_id), time=self.now_ms / 1000, thread=thread or post_id,
-            author=author, text=text, kind=roster.kind_of(author, self._hint(room_id, username)),
+            author=username, text=text, kind=roster.kind_of(username, self._hint(room_id, username)),
             mentions=mentions_in(text, known), controls=parse_controls(text), words=count_words(text),
             author_id=f"u_{username}", attachments=tuple(attachments),
         )
@@ -293,20 +290,19 @@ class FakeConnector:
     async def _deliver(self, room_id: str, post: Post) -> None:
         if self.on_event is None:
             return
-        for agent in self.bots:
-            if any(m.username == self.names.username_of(agent) for m in self.membership[room_id]):
-                await self.on_event(Posted(room_id, post, seen_by=agent))
+        for username in self.bots:
+            if any(m.username == username for m in self.membership[room_id]):
+                await self.on_event(Posted(room_id, post, seen_by=username))
 
-    async def join(self, room_id: str, agent: str) -> None:
-        self.membership[room_id].append(MemberInfo(self.names.username_of(agent), is_bot=True))
-        if self.on_event is not None and agent in self.bots:
-            await self.on_event(Membership(room_id, agent, joined=True))
+    async def join(self, room_id: str, username: str) -> None:
+        self.membership[room_id].append(MemberInfo(username, is_bot=True))
+        if self.on_event is not None and username in self.bots:
+            await self.on_event(Membership(room_id, username, joined=True))
 
-    async def leave(self, room_id: str, agent: str) -> None:
-        username = self.names.username_of(agent)
+    async def leave(self, room_id: str, username: str) -> None:
         self.membership[room_id] = [m for m in self.membership[room_id] if m.username != username]
-        if self.on_event is not None and agent in self.bots:
-            await self.on_event(Membership(room_id, agent, joined=False))
+        if self.on_event is not None and username in self.bots:
+            await self.on_event(Membership(room_id, username, joined=False))
 
     # Connector
     async def start(self) -> None:
@@ -316,16 +312,14 @@ class FakeConnector:
         self.started = False
 
     def configure(self, server) -> None:
-        """The usernames from the configuration, as the real connectors do."""
-        self.names = Names({agent: bot.username for agent, bot in server.bots.items()})
+        self.server = server
 
-    async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
-        self.bots[agent] = token
-        username = self.names.username_of(agent)
+    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
+        self.bots[username] = token
         return [info for rid, info in self.rooms.items() if any(m.username == username for m in self.membership[rid])]
 
-    async def remove_bot(self, agent: str) -> None:
-        self.bots.pop(agent, None)
+    async def remove_bot(self, username: str) -> None:
+        self.bots.pop(username, None)
 
     def watch(self, room_id: str, roster: Roster) -> None:
         self.rosters[room_id] = roster
@@ -344,17 +338,17 @@ class FakeConnector:
                  if (after is None or p.position > after) and (before is None or p.position < before)]
         return posts[-limit:]
 
-    async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
-        if agent not in self.bots:
-            raise PermissionError(agent)
+    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
+        if username not in self.bots:
+            raise PermissionError(username)
         if thread in self.refusing:
             raise RefusedPost(thread)
-        post = self.make_post(room_id, self.names.username_of(agent), self.names.outbound(text), thread)
+        post = self.make_post(room_id, username, text, thread)
         await self._deliver(room_id, post)  # the echo, like the platform's
         return post
 
-    async def fetch_file(self, agent: str, file_id: str) -> bytes:
+    async def fetch_file(self, username: str, file_id: str) -> bytes:
         return self.files[file_id]
 
-    async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
-        self.typed.append((agent, room_id, thread))
+    async def typing(self, username: str, room_id: str, thread: str | None) -> None:
+        self.typed.append((username, room_id, thread))

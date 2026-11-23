@@ -3,10 +3,11 @@ holds the gateway's bot accounts there, delivers every post it sees as a normali
 :class:`~coop.room.model.Post`, and does the platform calls the room core needs.
 
 The daemon drives it through this protocol only, so a new platform is a new
-implementation of it and nothing else. The core never sees a platform username: a
-post's ``author`` is the agent name when the author is a bot the configuration
-knows, and the username otherwise. The connector maps in both directions, inbound
-on every post and outbound on every ``@name`` it posts.
+implementation of it and nothing else. A room has one namespace, the platform's
+(design §2): a post's ``author`` is its username, a bot is its account's username,
+and text goes in and out as written. A connector maps nothing; the agent an
+account belongs to is the gateway's binding, and the daemon names bots to the
+connector by username.
 
 Events reach the daemon through one callback, in the order the connector saw
 them. A ``Posted`` is one copy of one post, from one bot's connection: with N bots
@@ -52,7 +53,7 @@ class Posted:
 
     room_id: str
     post: Post
-    seen_by: str  # agent name
+    seen_by: str  # the bot's username
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,7 @@ class Membership:
     """A hosted bot joined or left a room (design §3.6 step 4)."""
 
     room_id: str
-    agent: str
+    username: str
     joined: bool
 
 
@@ -83,16 +84,18 @@ class Connector(Protocol):
         before any bot the new configuration adds is connected."""
         ...
 
-    async def add_bot(self, agent: str, token: str) -> list[RoomInfo]:
-        """Connect ``agent``'s bot account with ``token`` and return the rooms it is a
-        member of. Opening a connection at runtime is the same call as at start."""
+    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
+        """Connect the bot account ``username`` with ``token`` and return the rooms it
+        is a member of. Opening a connection at runtime is the same call as at start.
+        A connector knows bots by their usernames; the agent an account belongs to is
+        the gateway's binding (design §2)."""
         ...
 
-    async def remove_bot(self, agent: str) -> None: ...
+    async def remove_bot(self, username: str) -> None: ...
 
     def watch(self, room_id: str, roster: Roster) -> None:
         """From now on, posts in the room are normalised with ``roster``: it decides each
-        author's kind and which usernames map to agent names."""
+        author's kind."""
         ...
 
     def unwatch(self, room_id: str) -> None: ...
@@ -110,17 +113,17 @@ class Connector(Protocol):
         page held only posts the core does not see (system posts)."""
         ...
 
-    async def post(self, agent: str, room_id: str, text: str, thread: str | None) -> Post:
-        """Post as ``agent``'s bot; ``thread`` ``None`` is a new top-level post. Raises
+    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
+        """Post as the bot ``username``; ``thread`` ``None`` is a new top-level post. Raises
         :class:`~coop.room.platform.RefusedPost` when the platform refuses it and
         :class:`~coop.room.platform.PlatformError` when it did not answer."""
         ...
 
-    async def fetch_file(self, agent: str, file_id: str) -> bytes:
+    async def fetch_file(self, username: str, file_id: str) -> bytes:
         """``KeyError`` for a file the platform does not have, ``PlatformError`` when it
         did not answer."""
         ...
 
-    async def typing(self, agent: str, room_id: str, thread: str | None) -> None:
+    async def typing(self, username: str, room_id: str, thread: str | None) -> None:
         """Best effort; never raises."""
         ...

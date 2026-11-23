@@ -98,7 +98,9 @@ class ControlServer:
         if cmd == "status":
             return _ok(service.status())
         if cmd == "list":
-            return _ok({handle: {"hosted": list(run.core.hosted), "agents": list(run.core.agents),
+            # ``hosted`` names agents, as ``pause``/``resume``/``reset`` do; ``bots`` are the
+            # room's bot usernames, the names in the room's text (design §2)
+            return _ok({handle: {"hosted": service.hosted_agents(run), "bots": list(run.core.agents),
                                  "room_id": run.info.id, "dm": run.info.is_dm}
                         for handle, run in sorted(service.rooms.items())})
         if cmd in ("pause", "resume", "reset"):

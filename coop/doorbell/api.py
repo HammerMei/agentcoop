@@ -76,7 +76,7 @@ class _Doorbell:
         return event
 
 
-RULES = Path(__file__).resolve().parent.parent / "rules.md"
+RULES = Path(__file__).resolve().parent.parent / "rules.md"  # its version: ``Gateway``'s ``RULES_VERSION``
 
 
 def build_app(gateway: Gateway, tokens: dict[str, str], rules_text: str | None = None) -> web.Application:
@@ -188,8 +188,8 @@ async def send(request: web.Request) -> web.Response:
         return refused
     reply, room = decode_reply(body), body.get("room")
     try:
-        core = gateway.room_for(agent, reply, room)
-        post = await core.send(agent, reply)
+        core, bot = gateway.room_for(agent, reply, room)
+        post = await core.send(bot, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
     except PlatformError as exc:

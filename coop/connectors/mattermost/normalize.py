@@ -11,22 +11,21 @@ from ...room.controls import parse_controls
 from ...room.model import Attachment, Post, PostKind
 from ...room.roster import Roster
 from ...room.words import count_words
-from ..normalize import Names, mentions_in
+from ..normalize import mentions_in
 
 
-def normalize(post: dict, author: dict, roster: Roster, names: Names, known: Iterable[str]) -> Post | None:
+def normalize(post: dict, author: dict, roster: Roster, known: Iterable[str]) -> Post | None:
     """``author`` is the user object for ``post["user_id"]``. ``None`` for a system post
     (a join, a header change: ``type`` is set), which is not a message."""
     if post.get("type"):
         return None
-    username = author.get("username", post.get("user_id", ""))
-    name = names.agent_of(username)
+    name = author.get("username", post.get("user_id", ""))
     hint: PostKind | None = None
     if (post.get("props") or {}).get("from_webhook") == "true":
         hint = "integration"
     elif author.get("is_bot"):
         hint = "bot"
-    text = names.inbound(post.get("message", ""))
+    text = post.get("message", "")
     create_at = int(post.get("create_at", 0))
     files = (post.get("metadata") or {}).get("files") or []
     return Post(

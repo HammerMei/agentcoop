@@ -45,9 +45,9 @@ async def test_status_list_and_holds_round_trip_through_the_socket(daemon):
     status = await send_command(control.socket_path, {"cmd": "status"})
     assert status["ok"] and status["data"]["servers"] == {"fake": ["a", "b"]}
     listed = await send_command(control.socket_path, {"cmd": "list"})
-    assert listed["data"] == {"fake:team": {"hosted": ["a", "b"], "agents": ["a", "b", "x"], "room_id": "c1", "dm": False}}
+    assert listed["data"] == {"fake:team": {"hosted": ["a", "b"], "bots": ["a_bot", "b_bot", "x_bot"], "room_id": "c1", "dm": False}}
     assert (await send_command(control.socket_path, {"cmd": "pause", "agent": "a", "room": "fake:team"}))["ok"]
-    assert svc.rooms["fake:team"].core.persisted["a"].paused
+    assert svc.rooms["fake:team"].core.persisted["a_bot"].paused
     refused = await send_command(control.socket_path, {"cmd": "pause", "agent": "a", "room": "fake:zzz"})
     assert not refused["ok"] and "no hosted room" in refused["error"]
     assert "unknown command" in (await send_command(control.socket_path, {"cmd": "dance"}))["error"]
@@ -57,10 +57,10 @@ async def test_reload_reads_the_file_and_a_bad_file_changes_nothing(daemon):
     svc, fc, control, _, base = daemon
     (base / "config.yaml").write_text(CONFIG.replace("agents: [a, b, x]", "agents: [a, x]"))
     reply = await send_command(control.socket_path, {"cmd": "reload"})
-    assert reply["ok"] and svc.rooms["fake:team"].core.hosted == ["a"]
+    assert reply["ok"] and svc.rooms["fake:team"].core.hosted == ["a_bot"]
     (base / "config.yaml").write_text("servers: {fake: {type: slack}}")
     reply = await send_command(control.socket_path, {"cmd": "reload"})
-    assert not reply["ok"] and "not applied" in reply["error"] and svc.rooms["fake:team"].core.hosted == ["a"]
+    assert not reply["ok"] and "not applied" in reply["error"] and svc.rooms["fake:team"].core.hosted == ["a_bot"]
 
 
 async def test_stop_fires_the_callback_and_a_live_socket_refuses_a_second_server(daemon):
@@ -90,11 +90,11 @@ async def test_the_cli_prints_status_list_and_holds(daemon, capsys):
     await settle()
     assert await asyncio.to_thread(cli.main, ["status"]) == 0
     out = capsys.readouterr().out
-    assert "server fake: bots a, b" in out and "agent a: offline, bio v0" in out and "room fake:team: a" in out
+    assert "server fake: bots a, b" in out and "agent a: offline, bio v0" in out and "room fake:team: a (a_bot)" in out
     assert await asyncio.to_thread(cli.main, ["list"]) == 0
-    assert "fake:team: hosted a, b; roster a, b, x" in capsys.readouterr().out
+    assert "fake:team: hosted a, b; bots a_bot, b_bot, x_bot" in capsys.readouterr().out
     assert await asyncio.to_thread(cli.main, ["pause", "a", "fake:team"]) == 0
-    assert svc.rooms["fake:team"].core.persisted["a"].paused
+    assert svc.rooms["fake:team"].core.persisted["a_bot"].paused
     assert await asyncio.to_thread(cli.main, ["resume", "a", "fake:team"]) == 0
     assert await asyncio.to_thread(cli.main, ["reset", "zz", "fake:team"]) == 1
     assert capsys.readouterr().err.startswith("[ERROR]")

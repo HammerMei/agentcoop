@@ -1,28 +1,27 @@
 """The per-room log behind the core's Platform calls: one entry per post however many
-copies arrive, ordered by position, bounded reads, members in the core's namespace,
-posting and fetching through the connector."""
+copies arrive, ordered by position, bounded reads, members by username with the
+roster's kinds, posting and fetching through the connector."""
 
 import pytest
 
 from coop.connectors.base import MemberInfo, RoomInfo
-from coop.connectors.normalize import Names
 from coop.connectors.roomlog import RoomLog
 from coop.room.platform import RefusedPost
 from coop.room.roster import Roster
 
 from .helpers import FakeConnector
 
-NAMES = {"a": "a_bot", "b": "b_bot"}
-ROSTER = Roster(("a", "b", "x"), {"a": frozenset({"H"}), "b": frozenset({"H", "K"}), "x": frozenset()}, frozenset({"G"}))
+ROSTER = Roster(("a_bot", "b_bot", "x"), {"a_bot": frozenset({"H"}), "b_bot": frozenset({"H", "K"}), "x": frozenset()},
+                frozenset({"G"}))
 PEOPLE = [MemberInfo("H"), MemberInfo("G"), MemberInfo("K"), MemberInfo("a_bot", is_bot=True),
           MemberInfo("b_bot", is_bot=True), MemberInfo("x", is_bot=True), MemberInfo("hook", is_bot=True)]
 
 
-def make_log(fc: FakeConnector | None = None, hosted=("a", "b")) -> tuple[FakeConnector, RoomLog]:
-    fc = fc or FakeConnector(names=NAMES)
+def make_log(fc: FakeConnector | None = None, hosted=("a_bot", "b_bot")) -> tuple[FakeConnector, RoomLog]:
+    fc = fc or FakeConnector()
     info = fc.add_room("c1", "team", PEOPLE)
     fc.watch("c1", ROSTER)
-    log = RoomLog(fc, info, ROSTER, list(hosted), Names(NAMES))
+    log = RoomLog(fc, info, ROSTER, list(hosted))
     return fc, log
 
 
@@ -50,34 +49,34 @@ async def test_reads_are_bounded_by_position_exclusive_below_inclusive_above():
     assert log.thread_posts(posts[0].id, newest_first=True) == [reply, posts[0]]
 
 
-async def test_members_are_in_the_cores_namespace_with_the_rosters_kinds():
+async def test_members_are_by_username_with_the_rosters_kinds():
     fc, log = make_log()
     log.set_members(await fc.members("c1"))
     members = log.members()
-    assert set(members) == {"H", "G", "K", "a", "b", "x", "hook"}
-    assert members["a"].is_bot and members["x"].is_bot and members["hook"].is_bot  # hook: the platform's hint
+    assert set(members) == {"H", "G", "K", "a_bot", "b_bot", "x", "hook"}
+    assert members["a_bot"].is_bot and members["x"].is_bot and members["hook"].is_bot  # hook: the platform's hint
     assert members["H"].role == "owner" and members["K"].role == "owner" and members["G"].role == "guest"
 
 
 async def test_a_post_goes_through_the_connector_as_the_bot_and_lands_in_the_log_once():
     fc, log = make_log()
-    await fc.add_bot("a", "tok")
-    post = await log.post("a", "@H done, @b next", None, kind="bot")
-    assert post.author == "a" and post.thread == post.id and post.text == "@H done, @b next"
-    assert fc.posts["c1"][-1].text == "@H done, @b next"  # inbound mapping undoes the outbound one
+    await fc.add_bot("a_bot", "tok")
+    post = await log.post("a_bot", "@H done, @b_bot next", None, kind="bot")
+    assert post.author == "a_bot" and post.thread == post.id and post.text == "@H done, @b_bot next"
+    assert fc.posts["c1"][-1].text == "@H done, @b_bot next"  # delivered as written
     assert log.posts == [post]
     assert log.ingest(post) is False  # the echo from the connection is a duplicate
 
 
 async def test_a_refused_or_archived_thread_raises_refused_post():
     fc, log = make_log()
-    await fc.add_bot("a", "tok")
+    await fc.add_bot("a_bot", "tok")
     fc.refusing.add("t1")
     with pytest.raises(RefusedPost):
-        await log.post("a", "x", "t1")
+        await log.post("a_bot", "x", "t1")
     log.archived.add("t2")
     with pytest.raises(RefusedPost):
-        await log.post("a", "x", "t2")
+        await log.post("a_bot", "x", "t2")
     assert log.is_archived("t2") and not log.is_archived("t1")
 
 
@@ -97,22 +96,22 @@ async def test_the_fake_connector_delivers_one_copy_per_bot_connection_in_the_ro
     async def on_event(event):
         seen.append(event)
 
-    fc = FakeConnector(on_event, names=NAMES)
+    fc = FakeConnector(on_event)
     fc.add_room("c1", "team", PEOPLE)
     fc.add_room("c2", "other", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)])
-    assert [r.id for r in await fc.add_bot("a", "t")] == ["c1", "c2"]
-    assert [r.id for r in await fc.add_bot("b", "t")] == ["c1"]
+    assert [r.id for r in await fc.add_bot("a_bot", "t")] == ["c1", "c2"]
+    assert [r.id for r in await fc.add_bot("b_bot", "t")] == ["c1"]
     await fc.human("c1", "H", "@a_bot hi")
     await fc.human("c2", "H", "only a")
-    assert [(e.room_id, e.seen_by) for e in seen] == [("c1", "a"), ("c1", "b"), ("c2", "a")]
-    assert seen[0].post.mentions == {"a"} and seen[0].post.text == "@a hi"
+    assert [(e.room_id, e.seen_by) for e in seen] == [("c1", "a_bot"), ("c1", "b_bot"), ("c2", "a_bot")]
+    assert seen[0].post.mentions == {"a_bot"} and seen[0].post.text == "@a_bot hi"
     assert (await fc.room("c2")).name == "other" and isinstance(await fc.room("c1"), RoomInfo)
 
 
-async def test_a_member_with_an_agents_name_is_warned_about(caplog):
-    import logging
-
+async def test_a_person_named_like_an_agent_is_a_person_the_bot_is_its_username():
     fc, log = make_log()
-    with caplog.at_level(logging.WARNING, logger="coop.connectors.roomlog"):
-        log.set_members([MemberInfo("a"), MemberInfo("a_bot", is_bot=True)])  # a person named like agent a
-    assert any("has an agent's name" in r.message for r in caplog.records)
+    log.set_members([MemberInfo("a"), MemberInfo("a_bot", is_bot=True)])  # a person named like agent a
+    members = log.members()
+    assert not members["a"].is_bot and members["a"].role == "guest" and members["a_bot"].is_bot
+    post = fc.make_post("c1", "a", "@a_bot hi")
+    assert post.kind == "human" and post.author == "a" and post.mentions == {"a_bot"}

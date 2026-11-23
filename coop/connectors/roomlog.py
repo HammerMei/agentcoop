@@ -12,29 +12,23 @@ range ``[cursor, hwm]`` a read needs is here before the wake is issued.
 from __future__ import annotations
 
 import bisect
-import logging
 from collections.abc import Awaitable, Callable
 
 from ..room.model import Member, Position, Post, PostKind, Role
 from ..room.platform import RefusedPost
 from ..room.roster import Roster
 from .base import Connector, MemberInfo, RoomInfo
-from .normalize import Names
-
-logger = logging.getLogger(__name__)
 
 
 class RoomLog:
-    """``hosted`` are the agents this gateway posts as in the room; a file is fetched
-    through the first of them, since any member's token can read it."""
+    """``hosted`` are the usernames of the bots this gateway posts as in the room; a
+    file is fetched through the first of them, since any member's token can read it."""
 
-    def __init__(self, connector: Connector, info: RoomInfo, roster: Roster, hosted: list[str],
-                 names: Names | None = None) -> None:
+    def __init__(self, connector: Connector, info: RoomInfo, roster: Roster, hosted: list[str]) -> None:
         self.connector = connector
         self.info = info
         self.roster = roster
         self.hosted = list(hosted)
-        self.names = names or Names({})
         self.is_dm = info.is_dm
         self.posts: list[Post] = []
         self._keys: list[Position] = []
@@ -75,15 +69,12 @@ class RoomLog:
         return sum(self.ingest(p) for p in posts)
 
     def set_members(self, members: list[MemberInfo]) -> None:
-        """The room's membership, in the core's namespace: a bot the roster knows is a
-        ``bot`` member under its agent name, a listed owner an ``owner``, anyone else a
-        ``guest``, and a platform-flagged account the roster does not list a ``bot``."""
+        """The room's membership by username: a bot the roster knows is a ``bot`` member,
+        a listed owner an ``owner``, anyone else a ``guest``, and a platform-flagged
+        account the roster does not list a ``bot``."""
         found: dict[str, Member] = {}
         for m in members:
-            if self.names.collides(m.username):
-                logger.warning("%s: member %r has an agent's name but is not its bot; the core will take the "
-                               "person for the bot until the account is renamed", self.info.name, m.username)
-            name = self.names.agent_of(m.username)
+            name = m.username
             kind: PostKind = self.roster.kind_of(name, "bot" if m.is_bot else None)
             role: Role = "bot" if kind == "bot" else ("owner" if any(
                 name in people for people in self.roster.owners.values()) else "guest")

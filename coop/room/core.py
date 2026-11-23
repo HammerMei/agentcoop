@@ -250,8 +250,9 @@ class RoomCore:
         self.params = params
         self.classifier = classifier
         self.rules_version = rules_version
-        # Bios the agents pushed (design §3.6 step 3), shared by the gateway; the
-        # classifier reads a member's bio in place of the platform profile.
+        # Bios the agents pushed (design §3.6 step 3), by the bot's username in this
+        # room, kept in step by the gateway; the classifier reads a member's bio in
+        # place of the platform profile.
         self.bios: dict[str, str] = {}
         self.online = True
         self.started = False
