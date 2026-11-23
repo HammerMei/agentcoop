@@ -265,6 +265,7 @@ class Gateway:
         try:
             core, bot = self._room_of_wake(agent, wake_id)
         except NoLiveLease:
+            # no room owns the wake, so there is no username to name: the agent's name is what is known
             self.trace.add(self.clock.now(), "done_stale", gateway=self.name, bot=agent, wake=wake_id)
             return False
         return await core.done(bot, wake_id, answered, failed)

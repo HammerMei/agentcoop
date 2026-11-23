@@ -106,7 +106,8 @@ def cmd_status(args) -> int:
     for handle, room in data["rooms"].items():
         for bot, state in room["bots"].items():
             flags = [f for f, on in (("paused", state["paused"]), ("wake", state["wake"] is not None)) if on]
-            print(f"room {handle}: {bot} cursor={state['cursor']} unfinished={state['unfinished']}"
+            who = f"{state['agent']} ({bot})" if state.get("agent") else bot
+            print(f"room {handle}: {who} cursor={state['cursor']} unfinished={state['unfinished']}"
                   f"{' ' + ' '.join(flags) if flags else ''}")
     for note in data["notes"]:
         print(note, file=sys.stderr if note.startswith("[ERROR]") else sys.stdout)

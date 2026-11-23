@@ -34,7 +34,7 @@ from aiohttp import web
 from .config import Config, ConfigError, RoomRule, Server
 from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo
 from .connectors.roomlog import RoomLog
-from .doorbell.api import build_app
+from .doorbell.api import RULES_VERSION, build_app
 from .doorbell.tls import server_context
 from .room.classifier import Classifier
 from .room.classifier_cli import SubprocessClassifier
@@ -94,7 +94,7 @@ class Service:
         classifiers: ClassifierFactory = default_classifier,
         trace: Trace | None = None,
         wake_seed: int | None = None,
-        rules_version: int = 1,
+        rules_version: int = RULES_VERSION,
     ) -> None:
         self.config = config
         self.state_dir = state_dir
@@ -214,7 +214,7 @@ class Service:
         if run.started:  # a bot joining a running room: the member list has changed
             await self._refresh_members(run)
         username = self._username(server, agent)
-        saved = run.saved.get("bots", {}).get(username)
+        saved = run.saved.get("bots", {}).get(agent)  # the file is keyed by agent: a renamed bot keeps its cursor
         run.core.add_hosted(username, run.log.last_position())
         self.gateway.bind(handle, agent, username)
         if saved is not None:
@@ -230,10 +230,10 @@ class Service:
             self._note(f"[WARNING] {run.handle}: members not refreshed: {exc}")
 
     async def _unhost(self, run: RoomRun, agent: str) -> None:
-        username = self._username(run.server, agent)
+        username = self.gateway.username_of(run.handle, agent) or self._username(run.server, agent)
         await run.core.remove_hosted(username)
         self.gateway.unbind(run.handle, agent)
-        run.saved.get("bots", {}).pop(username, None)  # a return starts at the latest post, not here
+        run.saved.get("bots", {}).pop(agent, None)  # a return starts at the latest post, not here
         self._save_room(run)
         if not run.core.hosted:
             self._close_room(run)
@@ -258,6 +258,7 @@ class Service:
         # history are fetched waits on the queue, which the worker drains once the room runs
         self.rooms[handle] = run
         self._by_id[(server, info.id)] = run
+        self.gateway.add_room(core)  # a second bot's join can host it here while the history is fetched
         connector.watch(info.id, roster)
         try:
             log.set_members(await connector.members(info.id))
@@ -267,7 +268,6 @@ class Service:
             raise
         if run.saved:
             self._restore(run, {"format": run.saved["format"], "threads": run.saved.get("threads", {})})
-        self.gateway.add_room(core)
         return run
 
     def _restore(self, run: RoomRun, document: dict) -> None:
@@ -303,12 +303,12 @@ class Service:
         or the pages run out. A cursor the pages never reached is moved up to the oldest
         post fetched, and the operator is told what that bot will not see."""
         saved = run.saved.get("bots", {})
-        bots = run.core.roster.bots  # the rule's agents that have a bot here, by username
-        cursors = [c for c in (self._saved_cursor(run, b) for b in bots) if c is not None]
+        agents = [a for a in run.rule.agents if a in self.config.servers[run.server].bots]
+        cursors = [c for c in (self._saved_cursor(run, a) for a in agents) if c is not None]
         floor = min(cursors) if cursors else None
         # a saved null cursor is a bot that never finished a turn: before every post, so
         # the pages go to the start of history (or the cap), not to the newest page
-        exhaust = any(b in saved and self._saved_cursor(run, b) is None for b in bots)
+        exhaust = any(a in saved and self._saved_cursor(run, a) is None for a in agents)
         before: Position | None = None
         oldest: Position | None = None
         for _ in range(MAX_BACKFILL_PAGES):
@@ -327,8 +327,8 @@ class Service:
                 if raw.get("cursor") is not None and tuple(raw["cursor"]) < oldest:
                     raw["cursor"] = list(oldest)
 
-    def _saved_cursor(self, run: RoomRun, username: str) -> Position | None:
-        raw = run.saved.get("bots", {}).get(username, {}).get("cursor")
+    def _saved_cursor(self, run: RoomRun, agent: str) -> Position | None:
+        raw = run.saved.get("bots", {}).get(agent, {}).get("cursor")
         return tuple(raw) if isinstance(raw, list) else raw
 
     async def _ensure_started(self, run: RoomRun) -> None:
@@ -497,7 +497,7 @@ class Service:
             "listening": None if self.listening is None else f"{self.listening[0]}:{self.listening[1]}",
             "servers": {name: sorted(agents_) for name, agents_ in self._connected.items()},
             "agents": agents,
-            "rooms": {handle: run.core.status() for handle, run in sorted(self.rooms.items())},
+            "rooms": {handle: self._room_status(run) for handle, run in sorted(self.rooms.items())},
             "notes": list(self.notes),
         }
 
@@ -506,6 +506,14 @@ class Service:
             return self.rooms[handle]
         except KeyError:
             raise KeyError(f"no hosted room {handle!r}; `list` shows them") from None
+
+    def _room_status(self, run: RoomRun) -> dict:
+        """The core's status with each hosted bot's agent named: the operator reads the
+        username in the room and types the agent name to ``pause`` it."""
+        status = run.core.status()
+        for username, state in status["bots"].items():
+            state["agent"] = self.gateway.agent_of(run.handle, username)
+        return status
 
     def pause(self, agent: str, handle: str) -> None:
         run, bot = self._hosted_in(agent, handle)
@@ -548,7 +556,12 @@ class Service:
         return doc
 
     def _save_room(self, run: RoomRun) -> None:
-        _write_json(self._room_file(run.server, run.info.id), dump_room(run.core))
+        """The core's document with its bots keyed by agent name: a bot's cursor, paused
+        flag and unfinished set are the agent's and survive a username change; the
+        thread controls stay by username, the names the room's text used."""
+        doc = dump_room(run.core)
+        doc["bots"] = {self.gateway.agent_of(run.handle, u) or u: state for u, state in doc["bots"].items()}
+        _write_json(self._room_file(run.server, run.info.id), doc)
 
     def _load_agents(self) -> None:
         path = self.state_dir / "agents.json"

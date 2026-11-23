@@ -15,7 +15,8 @@ from .core import BotPersisted, RoomCore, ThreadSettings
 from .gateway import AgentState, Gateway
 from .model import Position
 
-FORMAT = 2  # 2: bots and control targets keyed by the bot's platform username
+FORMAT = 2  # room documents; 2: thread control targets keyed by the bot's platform username
+AGENTS_FORMAT = 1  # the agents document, unchanged by the room's format
 
 
 def _position_out(position: Position | None) -> Any:
@@ -27,7 +28,8 @@ def _position_in(raw: Any) -> Position | None:
 
 
 def dump_room(core: RoomCore) -> dict:
-    """The room's persisted state."""
+    """The room's persisted state, in the core's namespace (bots by username); the
+    daemon re-keys ``bots`` by agent name before writing (``Service._save_room``)."""
     return {
         "format": FORMAT,
         "room": core.room,
@@ -94,7 +96,7 @@ def load_room(core: RoomCore, data: dict) -> None:
 def dump_agents(gateway: Gateway) -> dict:
     """The gateway's persisted agent state: every bio pushed so far, with its version."""
     return {
-        "format": FORMAT,
+        "format": AGENTS_FORMAT,
         "agents": {
             agent: {"bio": state.bio, "bio_version": state.bio_version}
             for agent, state in gateway.agents.items()
@@ -106,8 +108,8 @@ def dump_agents(gateway: Gateway) -> dict:
 def load_agents(gateway: Gateway, data: dict) -> None:
     """Restore the bios into ``gateway``: into every room already bound, and a later
     binding copies the agent's bio into its room's core under the bot's username."""
-    if data.get("format") != FORMAT:
-        raise ValueError(f"agent state format {data.get('format')!r} is not {FORMAT}")
+    if data.get("format") != AGENTS_FORMAT:
+        raise ValueError(f"agent state format {data.get('format')!r} is not {AGENTS_FORMAT}")
     for agent, raw in data.get("agents", {}).items():
         state = gateway.agents.setdefault(agent, AgentState())
         state.bio = raw.get("bio")

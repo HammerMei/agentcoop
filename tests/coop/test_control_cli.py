@@ -90,7 +90,7 @@ async def test_the_cli_prints_status_list_and_holds(daemon, capsys):
     await settle()
     assert await asyncio.to_thread(cli.main, ["status"]) == 0
     out = capsys.readouterr().out
-    assert "server fake: bots a, b" in out and "agent a: offline, bio v0" in out and "room fake:team: a" in out
+    assert "server fake: bots a, b" in out and "agent a: offline, bio v0" in out and "room fake:team: a (a_bot)" in out
     assert await asyncio.to_thread(cli.main, ["list"]) == 0
     assert "fake:team: hosted a, b; bots a_bot, b_bot, x_bot" in capsys.readouterr().out
     assert await asyncio.to_thread(cli.main, ["pause", "a", "fake:team"]) == 0
