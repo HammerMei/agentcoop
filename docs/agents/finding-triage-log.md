@@ -1929,4 +1929,4 @@ Increment: the room core works in the platform's namespace; the agent name is bo
 
 Test gaps the reviewer named: the bio path with agent ≠ username (added: `test_a_bio_reaches_each_room_under_the_bots_username_and_a_restart_restores_it_there`), the original bug's join path (added: `test_a_person_whose_username_is_an_agents_key_joining_a_room_hosts_nothing`), the `coop status` prefix match (tightened to `a (a_bot)`). Composition: 5 findings, 3 silent, all cheap; 4 fixed, 1 half dropped. Cost: one reviewer agent (~16 min), fixes ~40 minutes.
 
-**Status: open** — `@codex review` requested after the fixes.
+**Status: closed** — Codex on `2c11882`: "Didn't find any major issues" (👍, no review, no threads). Whole PR: 5 internal findings, 4 fixed, 1 half dropped; no Codex finding. The reload-enumeration row `username: b_bot → b2_bot` and the rename restart test are the new fences.
