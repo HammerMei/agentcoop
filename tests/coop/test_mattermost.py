@@ -295,21 +295,52 @@ async def test_membership_frames_name_the_username_and_track_the_bots_own_rooms(
     await connector.typing("nobody", "c01", None)  # best effort, never raises
 
 
-async def test_a_dm_a_bot_joins_after_connecting_is_described_from_that_bots_side(connected):
-    """``room()`` reads through a bot that is in the room; its own join is tracked before
-    the event is delivered, so a DM opened at runtime is named for the counterpart, not
-    read through the first bot and named for the joining bot. The join is fed as
-    ``user_added``, the one membership frame the connector handles; Mattermost announces
-    a new direct channel with ``direct_added``, which it does not (plan S3-2)."""
+async def test_a_new_direct_channel_is_the_bots_own_join_described_from_that_bots_side(connected):
+    """Mattermost announces a new direct channel with ``direct_added`` (frame as probed on
+    11.7: ``creator_id``/``teammate_id`` in data, the channel in broadcast, no user id), to
+    both members, so the member is this connection's bot. ``room()`` then reads through
+    the bot that joined, whose own join is tracked before the event is delivered, so the
+    DM is named for the counterpart, not read through the first bot and named for the
+    joining bot. The join is ``created``: the room was made around the bot."""
     connector, mm, seen, _ = connected
     await connector.add_bot("wavebro_bot", "tok-wavebro")
     glin, wavebro = mm.ids["glin"], mm.ids["wavebro"]
     dm = mm.channel(f"{wavebro}__{glin}", kind="D", members=[glin, wavebro])  # the joining bot's id first
-    await mm.sockets[1].feed({"event": "user_added", "data": {"user_id": wavebro, "team_id": "team1"},
+    await mm.sockets[1].feed({"event": "direct_added", "data": {"creator_id": glin, "teammate_id": wavebro},
                               "broadcast": {"channel_id": dm}})
-    assert seen[-1] == Membership(dm, "wavebro_bot", True)
+    assert seen[-1] == Membership(dm, "wavebro_bot", True, created=True) and dm in connector._bots["wavebro_bot"].rooms
     info = await connector.room(dm)
     assert (info.name, info.kind) == ("glin", "dm")
+
+
+async def test_a_new_group_message_is_the_members_own_join(connected):
+    """``group_added`` goes to each member with the member in ``broadcast`` (probed on 11.7);
+    a group's members cannot change afterwards, so this is its only join."""
+    connector, mm, seen, _ = connected
+    glin, laomei, wavebro = mm.ids["glin"], mm.ids["laomei"], mm.ids["wavebro"]
+    group = mm.channel("glin, laomei_bot, wavebro_bot", kind="G", members=[glin, laomei, wavebro])
+    await mm.sockets[0].feed({"event": "group_added", "data": {"teammate_ids": json.dumps([glin, wavebro])},
+                              "broadcast": {"user_id": laomei, "channel_id": group}})
+    assert seen[-1] == Membership(group, "laomei_bot", True, created=True) and group in connector._bots["laomei_bot"].rooms
+    assert (await connector.room(group)).kind == "group"
+
+
+async def test_a_post_in_a_room_the_bot_was_never_told_it_joined_is_a_warning(connected, caplog):
+    connector, mm, seen, _ = connected
+    glin, laomei = mm.ids["glin"], mm.ids["laomei"]
+    unknown = mm.channel("later", members=[glin, laomei])
+    with caplog.at_level("WARNING", logger="coop.connectors.mattermost.connector"):
+        await mm.deliver(mm.post(unknown, glin, "anyone?"))
+        await mm.deliver(mm.post("c03", glin, "unruled"))  # c03 is listed for the bot and hosted by no rule
+    assert [r.getMessage() for r in caplog.records] == [f"lab: 'laomei_bot' posted in {unknown}, a room it was not told it joined"]
+    assert not any(isinstance(e, Posted) for e in seen[-2:])
+
+
+async def test_room_wraps_a_platform_failure(connected):
+    connector, mm, _, _ = connected
+    mm.failure = httpx.ConnectError("down")
+    with pytest.raises(PlatformError):
+        await connector.room("c03")
 
 
 async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):

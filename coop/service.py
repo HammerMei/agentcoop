@@ -83,6 +83,7 @@ class RoomRun:
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     worker: asyncio.Task | None = None
     started: bool = False
+    ready: asyncio.Event = field(default_factory=asyncio.Event)  # set once the open is over, either way
 
 
 class Service:
@@ -193,12 +194,16 @@ class Service:
         self._connected[server].pop(agent, None)
         self._rooms_of.pop((server, agent), None)
 
-    async def _host(self, server: str, info: RoomInfo, agent: str) -> None:
-        """Host ``agent`` in ``info`` if a rule names it there."""
+    async def _host(self, server: str, info: RoomInfo, agent: str, created: bool = False) -> None:
+        """Host ``agent`` in ``info`` if a rule names it there. ``created`` is a join the
+        platform announced by creating the room (``Membership.created``)."""
         if self._bot_to_bot(server, info):
             logger.info("%s: direct channel of %r with the bot %r; not hosted", server, agent, info.name)
             return
         run = self._by_id.get((server, info.id))
+        if run is not None and not run.ready.is_set():  # another bot's join is opening it: its log is half filled
+            await run.ready.wait()
+            run = self._by_id.get((server, info.id))  # gone if that open failed; opened again below
         handle = run.handle if run is not None else handle_for(server, info, self._username(server, agent))
         rule = self.config.rule_for(handle)
         if rule is None or agent not in rule.agents:
@@ -219,7 +224,11 @@ class Service:
             await self._refresh_members(run)
         username = self._username(server, agent)
         saved = run.saved.get("bots", {}).get(agent)  # the file is keyed by agent: a renamed bot keeps its cursor
-        run.core.add_hosted(username, run.log.last_position())
+        # a bot new to a room starts after its latest post (design §3.6 step 4); in a room the
+        # platform created around it, every post, the ones the open fetched included, came
+        # after the join. A reopened direct channel announces itself the same way, but a
+        # hosted one returned above and an unhosted one has no rule, so it never gets here
+        run.core.add_hosted(username, None if created else run.log.last_position())
         self.gateway.bind(handle, agent, username)
         if saved is not None:
             self._restore(run, {"format": run.saved["format"], "bots": {username: saved}})
@@ -275,6 +284,8 @@ class Service:
         except Exception:
             self._close_room(run)
             raise
+        finally:
+            run.ready.set()
         if run.saved:
             self._restore(run, {"format": run.saved["format"], "threads": run.saved.get("threads", {})})
         return run
@@ -380,9 +391,13 @@ class Service:
             agent = None if bot is None else bot.agent
             hosted_here = agent is not None and self._is_hosted(server, agent)
             if hosted_here and event.joined:
-                info = await self.connectors[server].room(event.room_id)
+                try:
+                    info = await self.connectors[server].room(event.room_id)
+                except PlatformError as exc:
+                    self._note(f"[ERROR] {server}: room {event.room_id} that {agent!r} joined not described, not hosted: {exc}")
+                    return
                 self._rooms_of.setdefault((server, agent), []).append(info)
-                await self._host(server, info, agent)
+                await self._host(server, info, agent, created=event.created)
                 run = self._by_id.get((server, event.room_id))
                 if run is not None:
                     await self._ensure_started(run)

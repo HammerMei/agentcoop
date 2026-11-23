@@ -603,21 +603,66 @@ async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_relo
     try:
         fc.gate.clear()
         fc.membership["c3"].append(MemberInfo("b_bot", is_bot=True))
+        await fc.human("c3", "H", "before the join")
         # the platform delivers the join on more than one connection: two _host calls, the
-        # second while the first is still fetching the room's history. This pins the
-        # binding only; the second call's cursor comes from the half-fetched log (plan S3-2)
+        # second while the first is still fetching the room's history; it waits for the
+        # open, so its cursor is the full log's latest post, not the half-fetched log's
         first = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
         second = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
+        assert not svc.rooms["fake:team-2"].core.hosted
         fc.gate.set()
         await asyncio.gather(first, second)
         run = svc.rooms["fake:team-2"]
         assert run.core.hosted == ["b_bot"] and svc.gateway.username_of("fake:team-2", "b") == "b_bot"
+        assert run.core.persisted["b_bot"].cursor == run.log.last_position() is not None
         notes = await svc.reload(svc.config)
         assert "fake:team-2" in svc.rooms and not any(n.startswith("[ERROR]") for n in notes)
     finally:
         await svc.stop()
+
+
+async def test_a_dm_opened_by_a_join_delivers_the_post_that_landed_while_it_opened(tmp_path):
+    """A person opens a DM and types at once: the platform created the room around the
+    bot, the open's history fetch already holds the post, and the post's own frame comes
+    after the open on the same connection, so the log drops it as a copy. The bot's cursor
+    for a room created around it is before every post, so the replay at start delivers it."""
+    fc = SlowHistory()
+    fc.add_room("c1", "team", PEOPLE)
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:*"'))
+    await svc.start(listen=False)
+    try:
+        fc.add_room("d1", "H", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)], "dm")
+        fc.gate.clear()
+        joining = asyncio.create_task(fc.on_event(Membership("d1", "a_bot", joined=True, created=True)))
+        await settle()
+        await fc.human("d1", "H", "hi bot, new dm")  # in the fake's history and, later, a live copy
+        fc.gate.set()
+        await joining
+        await settle()
+        wake = svc.gateway.poll("a")
+        assert wake is not None and wake.room == "fake:dm:a_bot:H" and wake.trigger.post_id == fc.posts["d1"][-1].id
+        svc.gateway.read("a", wake.wake_id)
+        await svc.gateway.done("a", wake.wake_id)
+        cursor = svc.rooms["fake:dm:a_bot:H"].core.persisted["a_bot"].cursor
+        await fc.on_event(Membership("d1", "a_bot", joined=True, created=True))  # the person reopened the DM
+        await settle()
+        assert svc.rooms["fake:dm:a_bot:H"].core.persisted["a_bot"].cursor == cursor and svc.gateway.poll("a") is None
+    finally:
+        await svc.stop()
+
+
+async def test_a_join_to_a_room_the_platform_cannot_describe_is_an_error_line_not_a_crash(running):
+    svc, fc = running
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("c2", "a_bot", joined=True))
+    await settle()
+    assert "fake:other" not in svc.rooms and any(n.startswith("[ERROR] fake: room c2") for n in svc.notes)
+    assert fc.bots  # the connection is still up: the next event is handled
 
 
 def test_a_rooms_handle_is_platform_names_only_by_kind():

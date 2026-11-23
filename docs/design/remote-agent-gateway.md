@@ -469,8 +469,13 @@ above; this is the sequence.
    does, the classifier has nothing to match on, so only addressed posts and the
    periodic catch-up wake it.
 4. The agent's bot account is added to the room on the chat platform. The gateway
-   discovers the room (dynamic watchers, direction §4) and creates the cursor at
-   the room's latest post.
+   discovers the room from the platform's own announcement of the join (on
+   Mattermost `user_added` for a channel, `direct_added` for a new direct channel,
+   `group_added` for a new group message) and creates the cursor at the room's
+   latest post. A room the platform created around the bot (a new direct channel
+   or group message) gets a cursor before every post: a person who opens a DM and
+   types at once is answered, however the first post and the join interleave on
+   the way in.
 5. The first wake arrives with `rules_version`. The agent holds no version, so it
    fetches `/v1/rules` and stores the document: the utility writes it to the
    system-prompt file it passes to the CLI; an agent with its own harness stores
