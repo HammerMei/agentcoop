@@ -7,7 +7,7 @@ nothing with this one on purpose: the agent side stays small.
     coop stop
     coop status
     coop list
-    coop pause  AGENT ROOM        ROOM is the handle `list` shows: <server>:<room name>
+    coop pause  AGENT ROOM        ROOM is the handle `list` shows: <server>:<room name>, <server>:dm:<bot>:<person>, <server>:gdm:<digest>
     coop resume AGENT ROOM
     coop reset  AGENT ROOM
     coop reload                   the daemon re-reads the configuration and applies it in place
@@ -54,7 +54,8 @@ def parser() -> argparse.ArgumentParser:
                       ("reset", "the bot's next wake in the room starts a fresh session")):
         c = sub.add_parser(name, help=doc)
         c.add_argument("agent")
-        c.add_argument("room", help="<server>:<room name>, as `list` shows it")
+        c.add_argument("room", help="the room's handle as `list` shows it: <server>:<room name>, "
+                                    "<server>:dm:<bot>:<person> or <server>:gdm:<digest>")
         c.set_defaults(run=cmd_hold, hold=name)
     sub.add_parser("reload", help="re-read the configuration and apply it in place").set_defaults(run=cmd_reload)
 
@@ -121,8 +122,9 @@ def cmd_list(args) -> int:
     if not data:
         print("no hosted rooms")
     for handle, room in data.items():
+        name = "" if handle.endswith(":" + room["name"]) else f" ({room['name']})"  # a group message: its digest, then the platform's name
         print(f"{handle}: hosted {', '.join(room['hosted'])}; bots {', '.join(room['bots'])}"
-              f"{' (dm)' if room['dm'] else ''}")
+              f"{' (dm)' if room['dm'] else ''}{name}")
     return 0
 
 

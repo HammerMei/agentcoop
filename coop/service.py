@@ -2,8 +2,9 @@
 one gateway and the doorbell listener, with the persisted state on disk and a
 reload that applies a new configuration in place (design §3.1, §4, §5).
 
-One ``Service`` holds one ``Gateway``. A room is keyed by its handle,
-``<server>:<room name>``, the string the ``rooms:`` patterns match. The daemon
+One ``Service`` holds one ``Gateway``. A room is keyed by its handle (``handle_for``:
+``<server>:<channel>``, ``<server>:dm:<bot username>:<person>``, ``<server>:gdm:<digest>``),
+the string the ``rooms:`` patterns match. The daemon
 hosts a bot in a room when the bot's connection reports the room and the first
 matching rule names the agent.
 
@@ -32,7 +33,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .config import Config, ConfigError, RoomRule, Server
-from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo
+from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo, handle_for
 from .connectors.roomlog import RoomLog
 from .doorbell.api import build_app
 from .doorbell.tls import server_context
@@ -194,20 +195,21 @@ class Service:
 
     async def _host(self, server: str, info: RoomInfo, agent: str) -> None:
         """Host ``agent`` in ``info`` if a rule names it there."""
+        if self._bot_to_bot(server, info):
+            logger.info("%s: direct channel of %r with the bot %r; not hosted", server, agent, info.name)
+            return
         run = self._by_id.get((server, info.id))
-        # an open room keeps the handle it opened under: two bots may list one room by
-        # different names (a direct channel is named after the counterpart)
-        handle = run.handle if run is not None else f"{server}:{info.name}"
+        handle = run.handle if run is not None else handle_for(server, info, self._username(server, agent))
         rule = self.config.rule_for(handle)
         if rule is None or agent not in rule.agents:
-            logger.info("%s: no rule hosts %r in %s", server, agent, handle)
+            logger.info("%s: no rule hosts %r in %s (%s)", server, agent, handle, info.name)
             return
         if info.archived:  # Mattermost lists none at connect (probed on 11.x); a room() answer might
             logger.info("%s: archived; not hosted", handle)
             return
         if run is None:
             try:
-                run = await self._open_room(server, info, rule)
+                run = await self._open_room(server, handle, info, rule)
             except (ConfigError, PlatformError) as exc:
                 self._note(f"[ERROR] {handle}: not opened: {exc}")
                 return
@@ -223,6 +225,12 @@ class Service:
             self._restore(run, {"format": run.saved["format"], "bots": {username: saved}})
         self._save_room(run)  # the starting cursor is on disk before any turn: an unclean stop keeps it
         logger.info("%s: hosting %r as %r", handle, agent, username)
+
+    def _bot_to_bot(self, server: str, info: RoomInfo) -> bool:
+        """A direct channel with a bot the server's ``bots`` list: nobody human is there
+        and nobody but the platform's administrator can see it, so it is not hosted
+        (design §4), at open and again on a reload that lists the counterpart."""
+        return info.kind == "dm" and self.config.servers[server].bot_by_username(info.name) is not None
 
     async def _refresh_members(self, run: RoomRun) -> None:
         """The member list again; a platform that does not answer leaves the old one."""
@@ -240,8 +248,7 @@ class Service:
         if not run.core.hosted:
             self._close_room(run)
 
-    async def _open_room(self, server: str, info: RoomInfo, rule: RoomRule) -> RoomRun:
-        handle = f"{server}:{info.name}"
+    async def _open_room(self, server: str, handle: str, info: RoomInfo, rule: RoomRule) -> RoomRun:
         if handle in self.rooms:
             raise ConfigError(f"{handle}: two rooms on {server} share this name; the second is not hosted")
         connector = self.connectors[server]
@@ -453,8 +460,9 @@ class Service:
                            "the connection keeps the old ones until a restart")
 
     async def _reload_room(self, run: RoomRun, notes: list[str]) -> None:
-        """The rule the room matches now, applied in place; no rule closes it."""
-        rule = self.config.rule_for(run.handle)
+        """The rule the room matches now, applied in place; no rule closes it, as does
+        a counterpart the new configuration lists as a bot."""
+        rule = None if self._bot_to_bot(run.server, run.info) else self.config.rule_for(run.handle)
         if rule is None:
             for agent in self.hosted_agents(run):
                 await self._unhost(run, agent)

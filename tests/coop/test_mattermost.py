@@ -220,7 +220,7 @@ async def connected(mm):
 
 async def test_add_bot_lists_the_teams_rooms_and_dms_with_the_counterparts_name(connected):
     connector, mm, seen, rooms = connected
-    assert [(r.id, r.name, r.is_dm) for r in rooms] == [("c01", "team", False), ("c03", "glin", True)]
+    assert [(r.id, r.name, r.kind) for r in rooms] == [("c01", "team", "channel"), ("c03", "glin", "dm")]
     with pytest.raises(ValueError, match="not 'wavebro_bot'"):
         await connector.add_bot("wavebro_bot", "tok-laomei")
     with pytest.raises(httpx.HTTPStatusError):
@@ -293,6 +293,23 @@ async def test_membership_frames_name_the_username_and_track_the_bots_own_rooms(
     await connector.typing("laomei_bot", "c01", "p001")
     assert sock.typed == [("c01", "p001")]
     await connector.typing("nobody", "c01", None)  # best effort, never raises
+
+
+async def test_a_dm_a_bot_joins_after_connecting_is_described_from_that_bots_side(connected):
+    """``room()`` reads through a bot that is in the room; its own join is tracked before
+    the event is delivered, so a DM opened at runtime is named for the counterpart, not
+    read through the first bot and named for the joining bot. The join is fed as
+    ``user_added``, the one membership frame the connector handles; Mattermost announces
+    a new direct channel with ``direct_added``, which it does not (plan S3-2)."""
+    connector, mm, seen, _ = connected
+    await connector.add_bot("wavebro_bot", "tok-wavebro")
+    glin, wavebro = mm.ids["glin"], mm.ids["wavebro"]
+    dm = mm.channel(f"{wavebro}__{glin}", kind="D", members=[glin, wavebro])  # the joining bot's id first
+    await mm.sockets[1].feed({"event": "user_added", "data": {"user_id": wavebro, "team_id": "team1"},
+                              "broadcast": {"channel_id": dm}})
+    assert seen[-1] == Membership(dm, "wavebro_bot", True)
+    info = await connector.room(dm)
+    assert (info.name, info.kind) == ("glin", "dm")
 
 
 async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):
@@ -379,7 +396,7 @@ async def test_a_group_message_is_a_room_not_a_one_to_one_dm(mm):
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle), websocket=FakeSocket(mm))
     rooms = await connector.add_bot("laomei_bot", "tok-laomei")
     group = next(r for r in rooms if r.name == "glin, laomei_bot, wavebro_bot")
-    assert not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
+    assert group.kind == "group" and not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
         await connector.members("c01")

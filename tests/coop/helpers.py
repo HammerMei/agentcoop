@@ -20,7 +20,7 @@ from collections.abc import Callable
 from aiohttp.test_utils import TestServer
 
 from coop.client import InProcessDoorbell
-from coop.connectors.base import MemberInfo, Membership, Posted, RoomInfo
+from coop.connectors.base import MemberInfo, Membership, Posted, RoomInfo, RoomKind
 from coop.connectors.normalize import mentions_in
 from coop.doorbell.api import build_app
 from coop.room.clock import Clock
@@ -247,8 +247,8 @@ class FakeConnector:
         self.now_ms = 1_000_000
 
     # test-side setup
-    def add_room(self, room_id: str, name: str, members: list[MemberInfo], is_dm: bool = False) -> RoomInfo:
-        self.rooms[room_id] = RoomInfo(room_id, name, is_dm)
+    def add_room(self, room_id: str, name: str, members: list[MemberInfo], kind: RoomKind = "channel") -> RoomInfo:
+        self.rooms[room_id] = RoomInfo(room_id, name, kind)
         self.membership[room_id] = list(members)
         self.posts.setdefault(room_id, [])
         return self.rooms[room_id]
