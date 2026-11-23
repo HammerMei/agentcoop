@@ -538,9 +538,12 @@ A room's handle is what the `rooms` keys match, what `coop list` shows and what
 A bot's DMs are rooms of their own, one per person, which is why the bot's username
 is in the handle; `lab-mm:dm:laomei_bot:*` is every DM that bot has. A group
 message's members are not in its handle: the list moves, includes the bot and has
-no fixed order. A direct channel between two bots is not hosted: nobody human is
-there, nobody but the platform's administrator can see it, and agent-to-agent
-traffic belongs on a channel of its own rather than in a chat room.
+no fixed order. A direct channel with a bot listed under the server's `bots` (the
+gateway's own or roster only) is not hosted: nobody human is there and nobody but the
+platform's administrator can see it, so agent-to-agent traffic, if it is ever
+wanted, is a separate mechanism, not a chat room. A bot account the file does not
+list is a person to the gateway, there as everywhere. `<server>:*` matches every DM
+and group message too.
 
 `coop reload` (and `coop config add agent`, which asks for one) applies a changed
 file in place: agents and their tokens, bots connected or disconnected, room

@@ -295,6 +295,21 @@ async def test_membership_frames_name_the_username_and_track_the_bots_own_rooms(
     await connector.typing("nobody", "c01", None)  # best effort, never raises
 
 
+async def test_a_dm_a_bot_joins_after_connecting_is_described_from_that_bots_side(connected):
+    """``room()`` reads through a bot that is in the room; its own join is tracked before
+    the event is delivered, so a DM opened at runtime is named for the counterpart, not
+    read through the first bot and named for the joining bot."""
+    connector, mm, seen, _ = connected
+    await connector.add_bot("wavebro_bot", "tok-wavebro")
+    glin, wavebro = mm.ids["glin"], mm.ids["wavebro"]
+    dm = mm.channel(f"{wavebro}__{glin}", kind="D", members=[glin, wavebro])  # the joining bot's id first
+    await mm.sockets[1].feed({"event": "user_added", "data": {"user_id": wavebro, "team_id": "team1"},
+                              "broadcast": {"channel_id": dm}})
+    assert seen[-1] == Membership(dm, "wavebro_bot", True)
+    info = await connector.room(dm)
+    assert (info.name, info.kind) == ("glin", "dm")
+
+
 async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):
     connector, mm, seen, _ = connected
     mm.files["f1"] = b"hello"
