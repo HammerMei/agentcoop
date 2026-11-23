@@ -76,10 +76,10 @@ class MattermostConnector:
             if me.get("username") != username:
                 raise ValueError(f"the token is {me.get('username')!r}'s, not {username!r}'s")
             team_id = await self._team(rest)
-            channels = [c for c in await rest.my_channels(bot.user_id)
-                        if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
+            listed = await rest.my_channels(bot.user_id)  # every team's: what the account is in
+            bot.rooms = {c["id"] for c in listed if c.get("id")}
+            channels = [c for c in listed if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
             rooms = [await self._room_info(rest, c, bot.user_id) for c in channels]
-            bot.rooms = {r.id for r in rooms}
             bot.ws = self._websocket(self.server.url, token, self._frame_handler(bot), self._resync_handler(bot))
             await bot.ws.start()
         except Exception:
@@ -262,10 +262,13 @@ class MattermostConnector:
                 if not room_id or not user_id:
                     return
                 joined = event != "user_removed"
+                # created: the platform made the room around this bot now. A reopened direct
+                # channel is announced the same way, but the connection already knew the room
+                created = event in ("direct_added", "group_added") and room_id not in bot.rooms
                 if user_id == bot.user_id:
                     (bot.rooms.add if joined else bot.rooms.discard)(room_id)
                 username = bot.username if user_id == bot.user_id else (await bot.rest.user(user_id)).get("username", user_id)
-                await self.on_event(Membership(room_id, username, joined, created=event.endswith("_added") and event != "user_added"))
+                await self.on_event(Membership(room_id, username, joined, created))
         return handle
 
     def _resync_handler(self, bot: _Bot):

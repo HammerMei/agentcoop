@@ -231,12 +231,22 @@ async def test_the_doorbell_listens_with_the_configured_address(tmp_path):
 
 class SlowHistory(FakeConnector):
     """History that waits for the test's signal: the window in which a post can arrive
-    while a room is being opened."""
+    while a room is being opened. ``failing_members`` is how many ``members()`` calls
+    fail first, after the wait: an open that fails while others wait for it."""
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.gate = asyncio.Event()
         self.gate.set()
+        self.failing_members = 0
+
+    async def members(self, room_id):
+        await self.gate.wait()
+        if self.failing_members:
+            self.failing_members -= 1
+            self.gate.clear()  # the open that follows stalls too: its waiters have to wait again
+            raise PlatformError("members down")
+        return await super().members(room_id)
 
     async def history(self, room_id, after=None, before=None, limit=60):
         await self.gate.wait()
@@ -604,16 +614,23 @@ async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_relo
         fc.gate.clear()
         fc.membership["c3"].append(MemberInfo("b_bot", is_bot=True))
         await fc.human("c3", "H", "before the join")
-        # the platform delivers the join on more than one connection: two _host calls, the
-        # second while the first is still fetching the room's history; it waits for the
-        # open, so its cursor is the full log's latest post, not the half-fetched log's
+        # the platform delivers the join on every member's connection: three _host calls,
+        # the later ones while the first is still fetching the room's history; they wait
+        # for the open, so their cursor is the full log's latest post, not the half-fetched
+        # log's. The first open fails: the waiters find no run and the next one opens it
+        fc.failing_members = 1
         first = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
         second = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
+        third = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
-        assert not svc.rooms["fake:team-2"].core.hosted
+        assert "fake:team-2" in svc.rooms and not svc.rooms["fake:team-2"].core.hosted
+        fc.gate.set()  # the first open fails; the second starts and stalls on the gate
+        await settle()
+        assert any(n.startswith("[ERROR] fake:team-2: not opened") for n in svc.notes)
+        assert "fake:team-2" in svc.rooms and not svc.rooms["fake:team-2"].core.hosted  # the waiters wait again
         fc.gate.set()
-        await asyncio.gather(first, second)
+        await asyncio.gather(first, second, third)
         run = svc.rooms["fake:team-2"]
         assert run.core.hosted == ["b_bot"] and svc.gateway.username_of("fake:team-2", "b") == "b_bot"
         assert run.core.persisted["b_bot"].cursor == run.log.last_position() is not None

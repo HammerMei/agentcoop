@@ -311,6 +311,9 @@ async def test_a_new_direct_channel_is_the_bots_own_join_described_from_that_bot
     assert seen[-1] == Membership(dm, "wavebro_bot", True, created=True) and dm in connector._bots["wavebro_bot"].rooms
     info = await connector.room(dm)
     assert (info.name, info.kind) == ("glin", "dm")
+    await mm.sockets[1].feed({"event": "direct_added", "data": {"creator_id": glin, "teammate_id": wavebro},
+                              "broadcast": {"channel_id": dm}})  # reopened: the connection knew the room
+    assert seen[-1] == Membership(dm, "wavebro_bot", True, created=False)
 
 
 async def test_a_new_group_message_is_the_members_own_join(connected):
@@ -332,6 +335,7 @@ async def test_a_post_in_a_room_the_bot_was_never_told_it_joined_is_a_warning(co
     with caplog.at_level("WARNING", logger="coop.connectors.mattermost.connector"):
         await mm.deliver(mm.post(unknown, glin, "anyone?"))
         await mm.deliver(mm.post("c03", glin, "unruled"))  # c03 is listed for the bot and hosted by no rule
+        await mm.deliver(mm.post("c02", glin, "another team"))  # c02 is the bot's on team2: listed, not a room here
     assert [r.getMessage() for r in caplog.records] == [f"lab: 'laomei_bot' posted in {unknown}, a room it was not told it joined"]
     assert not any(isinstance(e, Posted) for e in seen[-2:])
 

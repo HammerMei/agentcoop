@@ -298,8 +298,8 @@ class RoomCore:
 
     def add_hosted(self, bot: str, cursor: Position | None) -> None:
         """Host ``bot`` here from now on, its cursor at ``cursor`` (the room's latest
-        post for a bot new to the room, design §3.6 step 4). Everything about the
-        other bots stays as it is."""
+        post for a bot new to the room, or ``None`` for a room created around it,
+        design §3.6 step 4). Everything about the other bots stays as it is."""
         if bot in self.hosted:
             return
         if bot not in self.agents:

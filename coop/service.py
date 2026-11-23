@@ -201,7 +201,9 @@ class Service:
             logger.info("%s: direct channel of %r with the bot %r; not hosted", server, agent, info.name)
             return
         run = self._by_id.get((server, info.id))
-        if run is not None and not run.ready.is_set():  # another bot's join is opening it: its log is half filled
+        # another bot's join is opening it: its log is half filled. The wait holds this
+        # bot's frame task, so its other rooms' posts queue on the socket meanwhile
+        while run is not None and not run.ready.is_set():
             await run.ready.wait()
             run = self._by_id.get((server, info.id))  # gone if that open failed; opened again below
         handle = run.handle if run is not None else handle_for(server, info, self._username(server, agent))
@@ -226,8 +228,7 @@ class Service:
         saved = run.saved.get("bots", {}).get(agent)  # the file is keyed by agent: a renamed bot keeps its cursor
         # a bot new to a room starts after its latest post (design §3.6 step 4); in a room the
         # platform created around it, every post, the ones the open fetched included, came
-        # after the join. A reopened direct channel announces itself the same way, but a
-        # hosted one returned above and an unhosted one has no rule, so it never gets here
+        # after the join (the connector says which: a reopened DM is not ``created``)
         run.core.add_hosted(username, None if created else run.log.last_position())
         self.gateway.bind(handle, agent, username)
         if saved is not None:
@@ -355,7 +356,8 @@ class Service:
         """A room runs once its first bots are hosted. The posts after the oldest hosted
         cursor go through the core's replay path first (spec §5.6): at startup that is
         what happened while the daemon was down; for a room opened later it is nothing,
-        since a new bot's cursor is the latest post."""
+        unless the platform created the room around the bot: its cursor is before every
+        post, so the posts the open fetched are delivered."""
         if run.started or not run.core.hosted:
             return
         run.started = True
@@ -394,9 +396,11 @@ class Service:
                 try:
                     info = await self.connectors[server].room(event.room_id)
                 except PlatformError as exc:
-                    self._note(f"[ERROR] {server}: room {event.room_id} that {agent!r} joined not described, not hosted: {exc}")
+                    self._note(f"[ERROR] {server}: room {event.room_id} that {agent!r} joined not described, "
+                               f"not hosted until a restart: {exc}")
                     return
-                self._rooms_of.setdefault((server, agent), []).append(info)
+                rooms = self._rooms_of.setdefault((server, agent), [])
+                rooms[:] = [r for r in rooms if r.id != info.id] + [info]  # a reopened DM is announced again
                 await self._host(server, info, agent, created=event.created)
                 run = self._by_id.get((server, event.room_id))
                 if run is not None:
