@@ -1961,4 +1961,4 @@ Increment: a room's handle is built in one place from its kind, every segment a 
 
 **Convergence:** M1/M4 agreed; M2(b) and M3 split on scope only (both raters: not a number call), M2(b) resolved by the author pulling it in, M3 by filing with the test made honest. Rater 2 corrected rater 1's M1 consequence (checkable: `roster.py` `kind_of`). **Composition:** 5 findings, 1 silent (M3, filed), none edge. Cost: reviewer ~10 min, rater 2 ~9 min, fixes ~20 min. Adoption 3.5/5.
 
-**Status: closed** — PR #213, Codex on `af5e972`: "Didn't find any major issues" (👍, no review, no threads). Whole PR: 5 internal findings, 3 fixed, 1 half (M2: log fixed, `list` pulled in), 1 filed (M3, runtime DM discovery, plan S3-2), 1 dropped (M5). No chain. Adoption 70%.
+**Status: closed** — PR #213, Codex on `af5e972`: "Didn't find any major issues" (👍, no review, no threads). Whole PR: 5 internal findings, 3 fixed (M1, M2 with `list` pulled in, M4), 1 filed (M3, runtime DM discovery, plan S3-2), 1 dropped (M5). No chain. Adoption 60%.

@@ -62,8 +62,9 @@ def handle_for(server: str, info: RoomInfo, username: str) -> str:
     | group message | ``<server>:gdm:<16 hex of the room id's digest>``: the member list
       moves, includes the bot and has no fixed order, so nobody's name is in it |
 
-    The ``dm:`` and ``gdm:`` prefixes cannot be forged by a channel: Mattermost and
-    Rocket.Chat channel names are slugs without ``:``.
+    The ``dm:`` and ``gdm:`` prefixes cannot be forged by a channel on Mattermost, whose
+    channel names are slugs without ``:``; a connector for a platform that allows one
+    in a name has to encode it (the legacy gateway percent-encodes).
     """
     if info.kind == "dm":
         return f"{server}:dm:{username}:{info.name}"
