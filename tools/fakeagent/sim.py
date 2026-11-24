@@ -93,6 +93,7 @@ class FakePlatform:
         self._seq = 0
         # Attachment bytes by platform file id (``f<n>``).
         self.files: dict[str, bytes] = {}
+        self.typed: list[tuple[str, str]] = []  # (author, thread) per typing indicator sent
 
     # membership
     def members(self) -> dict[str, Member]:
@@ -170,6 +171,9 @@ class FakePlatform:
         post = self.append(author, text, thread, kind, attachments)
         await self.deliver(post)
         return post
+
+    async def typing(self, author: str, thread: str) -> None:
+        self.typed.append((author, thread))
 
     async def fetch_attachment(self, file_id: str) -> bytes:
         return self.files[file_id]

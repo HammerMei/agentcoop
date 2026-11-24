@@ -261,8 +261,9 @@ A push transport (MCP Events, A2A) gives the gateway no periodic request, so
 liveness for those is decided with them.
 
 Typing: the gateway sends the platform's typing indicator from the bot's account
-when the agent's poll picks up an `addressed` wake, and clears it on `done` or
-expiry.
+when the agent's poll picks up an `addressed` wake, once. Mattermost shows it for a
+few seconds and clears it itself; a platform that keeps it until told clears it
+on `done` or expiry.
 
 ### 3.3 The agent CLI and skill
 

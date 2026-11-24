@@ -991,6 +991,9 @@ class RoomCore:
             run.expiry = self.clock.at(self.params.lease_seconds, self._lease_expired, bot, run)
         self.trace.add(self.now(), "lease_started", gateway=self.name, bot=bot, wake=run.wake.wake_id,
                        expires_at=run.expires_at)
+        if run.wake.source == "addressed":  # someone asked: the room sees the bot is on it (design §3.2)
+            self.trace.add(self.now(), "typing", gateway=self.name, bot=bot, thread=run.wake.starting_thread)
+            self.clock.at(0, self.platform.typing, bot, run.wake.starting_thread)
         return run.wake
 
     def _live(self, bot: str, wake_id: str) -> TurnRun:

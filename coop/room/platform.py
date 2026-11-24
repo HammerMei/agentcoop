@@ -51,6 +51,12 @@ class Platform(Protocol):
         """The position of the newest post, or ``None`` in an empty room."""
         ...
 
+    async def typing(self, author: str, thread: str) -> None:
+        """The platform's typing indicator from ``author``'s account in ``thread``, best
+        effort (design §3.2): sent when an agent's poll picks up an ``addressed`` wake.
+        Mattermost shows it for a few seconds and clears it itself."""
+        ...
+
     async def fetch_attachment(self, file_id: str) -> bytes:
         """The bytes of one attachment by its platform file id, fetched now with the
         bot's account (design §3.3: nothing is downloaded on receipt). Raises

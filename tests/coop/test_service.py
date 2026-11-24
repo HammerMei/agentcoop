@@ -89,6 +89,8 @@ async def test_startup_hosts_the_ruled_room_and_a_bots_reply_wakes_the_other(run
     await settle()
     wake = svc.gateway.poll("a")
     assert wake is not None and wake.trigger.author == "H" and wake.trigger.author_role == "owner"
+    await settle()
+    assert fc.typed == [("a_bot", "c1", wake.starting_thread)]  # the pick-up of an addressed wake
     _, posts = svc.gateway.read("a", wake.wake_id)
     assert [p.text for p in posts] == ["@a_bot hello"] and wake.bot == "a_bot"  # the room's names, as written
     reply = Reply(thread=wake.starting_thread, to=["b_bot"], text="your turn", wake_id=wake.wake_id)

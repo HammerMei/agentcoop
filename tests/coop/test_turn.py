@@ -10,8 +10,8 @@ import pytest
 
 from coop.client import InProcessDoorbell
 from coop.errors import InvalidReply, NoLiveLease, RefusedSend
-from coop.room.model import Member, Reply
-from tests.coop.helpers import FAST, Sandbox, Script, item, replies, reply
+from coop.room.model import Decision, Member, Reply
+from tests.coop.helpers import FAST, Sandbox, Script, ScriptedClassifier, item, replies, reply
 from tools.fakeagent.agent import Behaviour
 
 # ── the wake and its lease ───────────────────────────────────────────────────
@@ -29,8 +29,19 @@ async def test_a_wake_carries_metadata_and_no_text_and_the_lease_starts_at_the_p
     assert wake.lease_expires_at == 0.0 + FAST.lease_seconds  # polled at once, in process
     assert not hasattr(wake, "text") and [p.id for p in sb.bot.turns[-1].delivered] == ["p1", "p2"]
     assert sb.trace.last("lease_started", bot="a").wake == wake.wake_id
+    assert sb.room.typed == [("a", wake.starting_thread)]  # the room sees the bot is on it (design §3.2)
     await sb.run(2)
     assert sb.trace.last("turn_end", bot="a").outcome == "normal"
+
+
+async def test_only_an_addressed_wakes_pick_up_sends_typing():
+    """A picked or catch-up turn was nobody's question: no indicator (design §3.2)."""
+    classifier = ScriptedClassifier(decisions={"p1": Decision(add=("b",))})
+    sb = Sandbox(classifier=classifier, script=Script().on(reply(["H"], "sure"), bot="b"))
+    await sb.human("could someone look?")
+    await sb.run(2)
+    assert sb.trace.last("turn_end", bot="b").outcome == "normal"
+    assert sb.trace.last("turn_start", bot="b").source == "picked" and sb.room.typed == []
 
 
 async def test_one_outstanding_wake_per_bot_a_second_poll_gets_nothing():
