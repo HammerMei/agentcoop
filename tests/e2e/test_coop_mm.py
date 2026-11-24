@@ -91,3 +91,37 @@ async def test_a_mention_wakes_the_agent_over_the_doorbell_and_its_reply_threads
         assert state.exists()
     finally:
         await service.stop()
+
+
+async def test_a_person_who_opens_a_dm_with_the_bot_and_types_at_once_is_answered(
+    mm_setup, mm_admin_client: MMClient, mm_bot_client: MMClient, tmp_path
+):
+    """Runtime DM discovery: the join arrives as ``direct_added`` (no ``user_added``), the
+    first post lands while the room opens, and a guest's DM post wakes the agent."""
+    stamp = int(time.time())
+    person_name = f"e2e_dm_{stamp}"
+    person = mm_admin_client.create_user(person_name, "e2e_dm_2024")
+    mm_admin_client.add_team_member(mm_setup["team_id"], person["id"])
+    person_client = MMClient(mm_setup["mm_url"]).login(person_name, "e2e_dm_2024")
+    text = _config(tmp_path, mm_setup, mm_bot_client.token).read_text()
+    (tmp_path / "config.yaml").write_text(text.replace(f'"lab:{mm_setup["member_channel"]}":',
+                                                       f'"lab:dm:{mm_setup["bot_username"]}:*":'))
+    config = load(tmp_path / "config.yaml")
+    service = Service(config, tmp_path / "state", make_connector)
+    await service.start()
+    try:
+        handle = f"lab:dm:{mm_setup['bot_username']}:{person_name}"
+        assert handle not in service.rooms
+        async with HttpDoorbell(f"http://{service.listening[0]}:{service.listening[1]}", "e2e-agent-token") as agent:
+            poll = asyncio.create_task(agent.poll(wait=20))
+            await asyncio.sleep(0.5)
+            dm = person_client.get_dm_channel_id(mm_setup["bot_user_id"])
+            first = person_client.post_message(dm, f"hi bot, new dm {stamp}")  # no pause: the open is still running
+            wake = await asyncio.wait_for(poll, 30)
+            assert wake is not None and wake.room == handle and wake.trigger.post_id == first["id"]
+            assert wake.trigger.author == person_name and wake.trigger.author_role == "guest"
+            assert await agent.done(wake.wake_id)
+        assert service.rooms[handle].core.hosted == [mm_setup["bot_username"]]
+    finally:
+        await service.stop()
+        person_client.close()

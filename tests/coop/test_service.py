@@ -231,12 +231,22 @@ async def test_the_doorbell_listens_with_the_configured_address(tmp_path):
 
 class SlowHistory(FakeConnector):
     """History that waits for the test's signal: the window in which a post can arrive
-    while a room is being opened."""
+    while a room is being opened. ``failing_members`` is how many ``members()`` calls
+    fail first, after the wait: an open that fails while others wait for it."""
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.gate = asyncio.Event()
         self.gate.set()
+        self.failing_members = 0
+
+    async def members(self, room_id):
+        await self.gate.wait()
+        if self.failing_members:
+            self.failing_members -= 1
+            self.gate.clear()  # the open that follows stalls too: its waiters have to wait again
+            raise PlatformError("members down")
+        return await super().members(room_id)
 
     async def history(self, room_id, after=None, before=None, limit=60):
         await self.gate.wait()
@@ -603,21 +613,99 @@ async def test_a_second_bots_join_during_the_history_fetch_binds_once_and_a_relo
     try:
         fc.gate.clear()
         fc.membership["c3"].append(MemberInfo("b_bot", is_bot=True))
-        # the platform delivers the join on more than one connection: two _host calls, the
-        # second while the first is still fetching the room's history. This pins the
-        # binding only; the second call's cursor comes from the half-fetched log (plan S3-2)
+        await fc.human("c3", "H", "before the join")
+        # the platform delivers the join on every member's connection: three _host calls,
+        # the later ones while the first is still fetching the room's history; they wait
+        # for the open, so their cursor is the full log's latest post, not the half-fetched
+        # log's. The first open fails: the waiters find no run and the next one opens it
+        fc.failing_members = 1
         first = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
         second = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
+        third = asyncio.create_task(fc.on_event(Membership("c3", "b_bot", joined=True)))
         await settle()
+        assert "fake:team-2" in svc.rooms and not svc.rooms["fake:team-2"].core.hosted
+        fc.gate.set()  # the first open fails; the second starts and stalls on the gate
+        await settle()
+        assert any(n.startswith("[ERROR] fake:team-2: not opened") for n in svc.notes)
+        assert "fake:team-2" in svc.rooms and not svc.rooms["fake:team-2"].core.hosted  # the waiters wait again
         fc.gate.set()
-        await asyncio.gather(first, second)
+        await asyncio.gather(first, second, third)
         run = svc.rooms["fake:team-2"]
         assert run.core.hosted == ["b_bot"] and svc.gateway.username_of("fake:team-2", "b") == "b_bot"
+        assert run.core.persisted["b_bot"].cursor == run.log.last_position() is not None
         notes = await svc.reload(svc.config)
         assert "fake:team-2" in svc.rooms and not any(n.startswith("[ERROR]") for n in notes)
     finally:
         await svc.stop()
+
+
+async def test_a_dm_opened_by_a_join_delivers_the_post_that_landed_while_it_opened(tmp_path):
+    """A person opens a DM and types at once: the platform created the room around the
+    bot, the open's history fetch already holds the post, and the post's own frame comes
+    after the open on the same connection, so the log drops it as a copy. The bot's cursor
+    for a room created around it is before every post, so the replay at start delivers it."""
+    fc = SlowHistory()
+    fc.add_room("c1", "team", PEOPLE)
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:*"'))
+    await svc.start(listen=False)
+    try:
+        fc.add_room("d1", "H", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)], "dm")
+        fc.gate.clear()
+        joining = asyncio.create_task(fc.on_event(Membership("d1", "a_bot", joined=True, created=True)))
+        await settle()
+        await fc.human("d1", "H", "hi bot, new dm")  # in the fake's history and, later, a live copy
+        fc.gate.set()
+        await joining
+        await settle()
+        wake = svc.gateway.poll("a")
+        assert wake is not None and wake.room == "fake:dm:a_bot:H" and wake.trigger.post_id == fc.posts["d1"][-1].id
+        svc.gateway.read("a", wake.wake_id)
+        await svc.gateway.done("a", wake.wake_id)
+        cursor = svc.rooms["fake:dm:a_bot:H"].core.persisted["a_bot"].cursor
+        await fc.on_event(Membership("d1", "a_bot", joined=True, created=True))  # the person reopened the DM
+        await settle()
+        assert svc.rooms["fake:dm:a_bot:H"].core.persisted["a_bot"].cursor == cursor and svc.gateway.poll("a") is None
+    finally:
+        await svc.stop()
+
+
+async def test_a_group_created_around_two_bots_delivers_its_first_post_to_both_at_once(tmp_path):
+    """The first bot's join opens and starts the room and the replay at start reaches it
+    alone; the second is hosted after that with the post above its cursor, and its live
+    copy is a duplicate to the log. Its catch-up is requested on hosting, not left to the
+    periodic sweep, which this configuration has off."""
+    fc = SlowHistory()
+    fc.add_room("c1", "team", PEOPLE)
+    svc = service(tmp_path, fc, CONFIG.replace('"fake:team*"', '"fake:gdm:*"'))
+    await svc.start(listen=False)
+    try:
+        fc.add_room("g1", "H, a_bot, b_bot", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True), MemberInfo("b_bot", is_bot=True)], "group")
+        fc.gate.clear()
+        joins = [asyncio.create_task(fc.on_event(Membership("g1", bot, joined=True, created=True))) for bot in ("a_bot", "b_bot")]
+        await settle()
+        await fc.human("g1", "H", "@a_bot @b_bot hello both")
+        fc.gate.set()
+        await asyncio.gather(*joins)
+        await settle()
+        handle = next(h for h in svc.rooms if h.startswith("fake:gdm:"))
+        assert svc.rooms[handle].core.hosted == ["a_bot", "b_bot"]
+        wakes = {agent: svc.gateway.poll(agent) for agent in ("a", "b")}
+        assert all(w is not None and w.trigger.post_id == fc.posts["g1"][-1].id for w in wakes.values()), wakes
+    finally:
+        await svc.stop()
+
+
+async def test_a_join_to_a_room_the_platform_cannot_describe_is_an_error_line_not_a_crash(running):
+    svc, fc = running
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("c2", "a_bot", joined=True))
+    await settle()
+    assert "fake:other" not in svc.rooms and any(n.startswith("[ERROR] fake: room c2") for n in svc.notes)
+    assert fc.bots  # the connection is still up: the next event is handled
 
 
 def test_a_rooms_handle_is_platform_names_only_by_kind():

@@ -99,11 +99,14 @@ class Posted:
 
 @dataclass(frozen=True)
 class Membership:
-    """A hosted bot joined or left a room (design §3.6 step 4)."""
+    """A hosted bot joined or left a room (design §3.6 step 4). ``created`` is a join the
+    platform announced by creating the room around the bot (a new direct channel or group
+    message): every post the room will ever hold comes after this join."""
 
     room_id: str
     username: str
     joined: bool
+    created: bool = False
 
 
 Event = Posted | Membership

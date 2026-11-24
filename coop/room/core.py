@@ -298,8 +298,8 @@ class RoomCore:
 
     def add_hosted(self, bot: str, cursor: Position | None) -> None:
         """Host ``bot`` here from now on, its cursor at ``cursor`` (the room's latest
-        post for a bot new to the room, design §3.6 step 4). Everything about the
-        other bots stays as it is."""
+        post for a bot new to the room, or ``None`` for a room created around it,
+        design §3.6 step 4). Everything about the other bots stays as it is."""
         if bot in self.hosted:
             return
         if bot not in self.agents:
@@ -309,6 +309,10 @@ class RoomCore:
         self.volatile[bot] = BotVolatile(idle_since=self.now())
         if self.started:  # before ``start`` the room's own start schedules it, once
             self._schedule_periodic_sweep(bot)
+            # what is undelivered above its cursor is its to catch up on now, not at the
+            # next periodic sweep (which an operator may have turned off): the posts of
+            # a room created around it, or those since a restored cursor
+            self._request_sweep(bot, "hosted")
         self.trace.add(self.now(), "hosted_added", gateway=self.name, bot=bot)
 
     async def remove_hosted(self, bot: str) -> None:

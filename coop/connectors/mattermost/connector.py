@@ -76,10 +76,10 @@ class MattermostConnector:
             if me.get("username") != username:
                 raise ValueError(f"the token is {me.get('username')!r}'s, not {username!r}'s")
             team_id = await self._team(rest)
-            channels = [c for c in await rest.my_channels(bot.user_id)
-                        if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
+            listed = await rest.my_channels(bot.user_id)  # every team's: what the account is in
+            bot.rooms = {c["id"] for c in listed if c.get("id")}
+            channels = [c for c in listed if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
             rooms = [await self._room_info(rest, c, bot.user_id) for c in channels]
-            bot.rooms = {r.id for r in rooms}
             bot.ws = self._websocket(self.server.url, token, self._frame_handler(bot), self._resync_handler(bot))
             await bot.ws.start()
         except Exception:
@@ -126,7 +126,10 @@ class MattermostConnector:
 
     async def room(self, room_id: str) -> RoomInfo:
         bot = self._any_bot(room_id)
-        return await self._room_info(bot.rest, await bot.rest.channel(room_id), bot.user_id)
+        try:
+            return await self._room_info(bot.rest, await bot.rest.channel(room_id), bot.user_id)
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: room {room_id}: {exc}") from exc
 
     async def _room_info(self, rest: MattermostREST, channel: dict, me: str) -> RoomInfo:
         kind = channel.get("type")
@@ -241,22 +244,31 @@ class MattermostConnector:
                 raw = json.loads(data["post"])
                 room_id = raw.get("channel_id", "")
                 if room_id not in self._rosters:
+                    if room_id not in bot.rooms:  # a join this connection never saw: the resync will not walk it
+                        logger.warning("%s: %r posted in %s, a room it was not told it joined", self.name, bot.username, room_id)
                     return
                 post = await self._normalize(bot, room_id, raw)
                 if post is not None:
                     self._seen_live(room_id, post)
                     await self.on_event(Posted(room_id, post, seen_by=bot.username))
-            elif event in ("user_added", "user_removed"):
-                # the two carry their ids in mirrored places (frozen gateway §2.7)
+            elif event in ("user_added", "user_removed", "direct_added", "group_added"):
+                # ``user_added``/``user_removed`` carry their ids in mirrored places (frozen
+                # gateway §2.7). A new direct channel is ``direct_added`` to its two members
+                # with no user id at all, so the member is this connection's bot; a new group
+                # message is ``group_added`` per member with the member in ``broadcast``.
+                # Both are sent again when an existing one is reopened (probed on 11.7).
                 room_id = data.get("channel_id") or broadcast.get("channel_id") or ""
-                user_id = data.get("user_id") or broadcast.get("user_id") or ""
+                user_id = bot.user_id if event == "direct_added" else (data.get("user_id") or broadcast.get("user_id") or "")
                 if not room_id or not user_id:
                     return
-                joined = event == "user_added"
+                joined = event != "user_removed"
+                # created: the platform made the room around this bot now. A reopened direct
+                # channel is announced the same way, but the connection already knew the room
+                created = event in ("direct_added", "group_added") and room_id not in bot.rooms
                 if user_id == bot.user_id:
                     (bot.rooms.add if joined else bot.rooms.discard)(room_id)
-                username = (await bot.rest.user(user_id)).get("username", user_id)
-                await self.on_event(Membership(room_id, username, joined))
+                username = bot.username if user_id == bot.user_id else (await bot.rest.user(user_id)).get("username", user_id)
+                await self.on_event(Membership(room_id, username, joined, created))
         return handle
 
     def _resync_handler(self, bot: _Bot):
