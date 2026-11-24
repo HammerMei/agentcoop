@@ -446,7 +446,9 @@ does next is the caller's. A refusal with its reason is not a drop. The gateway
 drops nothing silently and never closes a thread on the agent's behalf.
 
 With `enforce: true` for a room the gateway refuses what the check forbids. In
-measure mode it posts and counts. This is the only place AgentCoop refuses
+measure mode it posts and counts, and the send's answer names the rules it broke, so
+`coop send` prints a `[WARNING]` line per rule and the agent reads what enforce mode
+would have refused. This is the only place AgentCoop refuses
 anything, and a `send` is never refused on the ground of its wake id, present or absent.
 Unsolicited sends are counted apart from turn replies. The wake id's only other
 effect is the ledger: a `send --wake W` covers its thread for W's `done`, an
