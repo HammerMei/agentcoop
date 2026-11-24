@@ -186,6 +186,21 @@ async def test_settings_persist_expire_and_reject_replayed_older_controls():
     assert "main" not in sb.gw.status()["threads"] and not sb.gw.is_muted("a", "main")
 
 
+async def test_a_control_replayed_from_history_older_than_the_ttl_is_not_applied_as_if_said_now():
+    """#208 r1 F5, reopened: a room with no saved state replays the history the daemon
+    backfilled (pages back to a cap), and a mute in it older than the TTL was applied with
+    ``last_activity`` of now, living another TTL. A thread is as old as its first post."""
+    sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24), script=Script().on(reply(["H"], "x"), bot="a"))
+    await sb.human("mute: @a", "t2")
+    await sb.run(3700)  # an hour of silence: the mute has expired
+    sb.gw.settings.clear()  # no saved state: the room starts fresh over the same history
+    await sb.gw.restart(replay_after=None)
+    assert sb.trace.last("control_applied", thread="t2").age > 3600 and not sb.gw.is_muted("a", "t2")
+    await sb.human("@a there?", "t2")
+    await sb.run(1)
+    assert sb.trace.last("turn_start", bot="a").thread == "t2"
+
+
 async def test_ttl_expiry_keeps_unfinished_state_and_archive_removes_both():
     sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24, catch_up_idle_seconds=10))
     await sb.human("mute: @a")

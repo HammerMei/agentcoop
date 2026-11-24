@@ -475,6 +475,9 @@ class RoomCore:
         if not self.online:
             return
         copies = [b for b in self.hosted if b != post.author]
+        # a thread first seen through this post is as old as the post, not as new as now: a
+        # control replayed from history older than the TTL does not live another TTL (5.4)
+        self.settings.setdefault(post.thread, ThreadSettings(last_activity=post.time))
         self._thread(post.thread).last_activity = max(self._thread(post.thread).last_activity, post.time)
         if post.kind == "notice":
             return  # recognised before eligibility: no turn, no classifier, not in the window
