@@ -174,6 +174,7 @@ class BotVolatile:
 class CachedDecision:
     decision: Decision | None = None  # None while in flight
     time: float = 0.0
+    position: Position | None = None  # the post's: evicted once every hosted cursor has passed it
 
 
 @dataclass
@@ -695,7 +696,7 @@ class RoomCore:
     def _classify(self, post: Post, addressed: tuple[str, ...]) -> None:
         if not self._classifier_applies(post):
             return
-        self.decisions[post.id] = CachedDecision()
+        self.decisions[post.id] = CachedDecision(position=post.position)
         self.trace.add(self.now(), "classifier_call", gateway=self.name, post=post.id)
         request = self._request(post, self._all_addressed(post))  # what the classifier sees is fixed now
         self.clock.at(0, self._classifier_attempt, request, 1)
@@ -765,7 +766,7 @@ class RoomCore:
         await self._decided(post, addressed, decision)
 
     async def _decided(self, post: Post, addressed: tuple[str, ...], decision: Decision) -> None:
-        self.decisions[post.id] = CachedDecision(decision, self.now())
+        self.decisions[post.id] = CachedDecision(decision, self.now(), post.position)
         self.trace.add(self.now(), "classifier_decision", gateway=self.name, post=post.id,
                        add=list(decision.add), remove=list(decision.remove), fallback=decision.fallback,
                        reasons=dict(decision.reasons))
@@ -1224,7 +1225,23 @@ class RoomCore:
         for thread in covered & state.unfinished:
             state.unfinished.discard(thread)
             self.trace.add(self.now(), "unfinished_removed", gateway=self.name, bot=bot, thread=thread)
+        self._evict_decisions()
         self._changed()
+
+    def _evict_decisions(self) -> None:
+        """Decided entries every hosted cursor has passed: no backlog holds their post, so
+        no sweep or start reads them again (a restart drops the whole cache). A bot whose
+        cursor is null, paused or away keeps them, as it keeps the backlog itself."""
+        cursors = [self.persisted[b].cursor for b in self.hosted]
+        if not cursors or any(c is None for c in cursors):
+            return
+        floor = min(cursors)
+        gone = [pid for pid, c in self.decisions.items()
+                if c.decision is not None and c.position is not None and not after(c.position, floor)]
+        for pid in gone:
+            del self.decisions[pid]
+            for state in self.volatile.values():
+                state.expired_decisions.discard(pid)
 
     def _finish(self, run: TurnRun, outcome: str, **more) -> None:
         bot = run.wake.bot
