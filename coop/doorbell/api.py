@@ -7,7 +7,7 @@ The endpoints and what each answers:
 GET  /v1/agents/me/wake?wait=S          {"wake": <wake> | null}; waits up to S seconds
 GET  /v1/agents/me/posts?wake=W         {"wake": <wake>, "posts": [<post>]}
 GET  /v1/agents/me/posts?room=R         {"posts": [<post>]}
-POST /v1/agents/me/posts                {"post": <post> | null}; body is a reply, plus "room"
+POST /v1/agents/me/posts                {"post": <post> | null, "warnings": [..]}; body is a reply, plus "room"
 POST /v1/agents/me/done                 {"done": true | false}; body {wake_id, answered, failed}
 POST /v1/agents/me/bio                  {"version": N}; body {text}
 GET  /v1/rules                          {"version": N, "text": "..."}
@@ -189,12 +189,15 @@ async def send(request: web.Request) -> web.Response:
     reply, room = decode_reply(body), body.get("room")
     try:
         core, bot = gateway.room_for(agent, reply, room)
-        post = await core.send(bot, reply)
+        sent = await core.send(bot, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
         return _send_refusal(exc)
     except PlatformError as exc:
         return _error(504, f"the platform did not answer: {exc}", thread=reply.thread)
-    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post))})
+    post = sent.post
+    # ``warnings``: the rules a room that does not enforce let the send break (design §3.5)
+    return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post)),
+                              "warnings": list(sent.warnings)})
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:

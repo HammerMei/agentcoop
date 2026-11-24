@@ -166,6 +166,18 @@ async def test_a_refused_send_is_422_with_the_reasons(api, sb):
     assert r.status_code == 422 and "mute" in r.json()["reasons"] and sb.posts_by("a") == []
 
 
+async def test_a_send_a_rule_would_refuse_is_200_with_warnings_where_the_room_does_not_enforce(sb):
+    sb.gw.params = replace(sb.gw.params, enforce=False)
+    async with Doorbell(sb.gateway, TOKENS) as doorbell:
+        async with httpx.AsyncClient(base_url=doorbell.url, timeout=10) as api:
+            await sb.human("mute: @a")
+            r = await api.post("/v1/agents/me/posts", headers=as_("a"),
+                               json={"thread": "main", "to": ["H"], "text": "still here", "wake_id": None, "room": "team"})
+    assert r.status_code == 200, r.text
+    assert r.json()["post"]["text"] == "@H still here" and [w.split(":")[0] for w in r.json()["warnings"]] == ["mute@main"]
+    assert [p.text for p in sb.posts_by("a")] == ["@H still here"]
+
+
 async def test_an_unsolicited_send_names_its_room_or_a_thread_in_it(api, sb):
     r = await api.post("/v1/agents/me/posts", headers=as_("a"), json={"text": "x", "wake_id": None})
     assert r.status_code == 400 and "room" in r.json()["error"]

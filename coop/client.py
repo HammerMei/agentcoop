@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .room.gateway import Gateway
-from .room.model import Post, Reply, Wake
+from .room.model import Post, Reply, Sent, Wake
 
 
 class Doorbell(Protocol):
@@ -33,9 +33,10 @@ class Doorbell(Protocol):
         latest, outside a wake (``coop read --room [--after ID]``)."""
         ...
 
-    async def send(self, reply: Reply, room: str | None = None) -> Post | None:
+    async def send(self, reply: Reply, room: str | None = None) -> Sent:
         """One reply. ``reply.wake_id`` names the wake it belongs to (its room follows);
-        an unsolicited send (``wake_id=None``) names its room."""
+        an unsolicited send (``wake_id=None``) names its room. The result carries the
+        post and, where the room does not enforce, the rules the send broke."""
         ...
 
     async def done(self, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool: ...
@@ -59,7 +60,7 @@ class InProcessDoorbell:
     async def read_room(self, room: str, after: str | None = None) -> list[Post]:
         return self.gateway.read_room(self.agent, room, after)
 
-    async def send(self, reply: Reply, room: str | None = None) -> Post | None:
+    async def send(self, reply: Reply, room: str | None = None) -> Sent:
         return await self.gateway.send(self.agent, reply, room)
 
     async def done(self, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool:

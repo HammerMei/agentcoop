@@ -94,7 +94,7 @@ async def test_startup_hosts_the_ruled_room_and_a_bots_reply_wakes_the_other(run
     _, posts = svc.gateway.read("a", wake.wake_id)
     assert [p.text for p in posts] == ["@a_bot hello"] and wake.bot == "a_bot"  # the room's names, as written
     reply = Reply(thread=wake.starting_thread, to=["b_bot"], text="your turn", wake_id=wake.wake_id)
-    post = await svc.gateway.send("a", reply)
+    post = (await svc.gateway.send("a", reply)).post
     assert fc.posts["c1"][-1].text == "@b_bot your turn" and post.author == "a_bot"
     await settle()
     wake_b = svc.gateway.poll("b")
@@ -549,7 +549,7 @@ async def test_crossed_usernames_wake_by_binding_not_by_name(tmp_path):
         wake = svc.gateway.poll("b")
         assert wake is not None and wake.bot == "a"
         _, posts = svc.gateway.read("b", wake.wake_id)
-        post = await svc.gateway.send("b", Reply(thread=wake.starting_thread, to=["H"], text="hi", wake_id=wake.wake_id))
+        post = (await svc.gateway.send("b", Reply(thread=wake.starting_thread, to=["H"], text="hi", wake_id=wake.wake_id))).post
         assert post.author == "a" and await svc.gateway.done("b", wake.wake_id)
         saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
         assert set(saved["bots"]) == {"a", "b"} and tuple(saved["bots"]["b"]["cursor"]) == wake.hwm  # by agent

@@ -51,6 +51,7 @@ from .model import (
     Position,
     Post,
     Reply,
+    Sent,
     ThreadGroup,
     Trigger,
     TurnSource,
@@ -1026,16 +1027,16 @@ class RoomCore:
                 raise KeyError(after)
         return list(self.platform.posts_after(start))
 
-    async def send(self, bot: str, reply: Reply) -> Post | None:
+    async def send(self, bot: str, reply: Reply) -> Sent:
         """One reply posted on the bot's behalf (design §3.5). A wake's send is checked
         against that wake's hint; an unsolicited send against the thread's current
         mute (rate and cooldown exempt). Enforce mode refuses with :class:`RefusedSend`;
-        measure mode posts and counts. Returns ``None`` when a control resolved to
-        nothing and there was no text."""
+        measure mode posts and counts, and the rules broken come back as the
+        warnings, worded as the refusal would have been."""
         async with self._lock:
             return await self._send(bot, reply)
 
-    async def _send(self, bot: str, reply: Reply) -> Post | None:
+    async def _send(self, bot: str, reply: Reply) -> Sent:
         run = self._attributed(bot, reply)
         ctx = self._validation_context(bot, reply.thread, run)
         structural, rules = check_reply(reply, ctx)
@@ -1051,8 +1052,9 @@ class RoomCore:
         if run is not None:
             run.problems.update((p.mechanism, p.thread) for p in rules)
             run.items_seen.update(self._items(reply))
+        broken = tuple(f"{p.mechanism}@{p.thread}: {p.reason}" for p in rules)
         if rules and self.params.enforce:
-            reasons = "; ".join(f"{p.mechanism}@{p.thread}: {p.reason}" for p in rules)
+            reasons = "; ".join(broken)
             self.trace.add(self.now(), "refused", gateway=self.name, bot=bot, wake=reply.wake_id,
                            thread=reply.thread, reason=reasons)
             if run is None:
@@ -1070,7 +1072,7 @@ class RoomCore:
                 run.ledger.add(reply.thread)  # a reply the platform refused was still given (5.6, 5.9)
         self.trace.add(self.now(), "send", gateway=self.name, bot=bot, wake=reply.wake_id,
                        thread=reply.thread, post=post.id if post else None)
-        return post
+        return Sent(post, broken)
 
     def _attributed(self, bot: str, reply: Reply) -> TurnRun | None:
         """The live turn a send belongs to. A wake id with no live lease (a late send

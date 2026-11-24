@@ -14,7 +14,7 @@ async def test_a_new_top_level_post_is_its_own_thread_and_no_mute_reaches_it():
     sb = Sandbox(bots=("a", "b"))
     await sb.human("mute: @a")  # in main, the simulator's one top level
     assert sb.gw.status()["threads"]["main"]["muted"] == ["a"]
-    post = await sb.gateway.send("a", Reply(thread=None, to=["H"], text="a fresh topic", wake_id=None), room="team")
+    post = (await sb.gateway.send("a", Reply(thread=None, to=["H"], text="a fresh topic", wake_id=None), room="team")).post
     assert post is not None and post.thread == post.id
     assert sb.trace.last("send", bot="a").thread is None
     assert sb.gw.status()["threads"][post.id]["muted"] == []
@@ -29,6 +29,6 @@ async def test_a_control_cannot_name_a_thread_that_does_not_exist_yet():
 
 async def test_a_new_thread_counts_toward_the_bots_cooldown_in_that_thread():
     sb = Sandbox(bots=("a", "b"))
-    post = await sb.gateway.send("a", Reply(thread=None, to=["H"], text="x", wake_id=None), room="team")
+    post = (await sb.gateway.send("a", Reply(thread=None, to=["H"], text="x", wake_id=None), room="team")).post
     assert sb.gw.volatile["a"].last_post[post.id] == sb.clock.now()
     assert "main" not in sb.gw.volatile["a"].last_post

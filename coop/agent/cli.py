@@ -11,7 +11,8 @@ coop attachment ID [--out PATH]
 Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
 The gateway address and the token come from ``--gateway`` / ``--token`` or the
 environment (``COOP_GATEWAY``, ``COOP_TOKEN``). A failure prints one ``[ERROR]`` line
-on stderr and exits 1; a usage error exits 2.
+on stderr and exits 1; a usage error exits 2. A ``send`` a room that does not enforce
+let through against a rule prints a ``[WARNING]`` line per rule and exits 0.
 """
 
 from __future__ import annotations
@@ -143,9 +144,12 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
     # send with neither goes to the wake's starting thread, which the gateway fills in
     reply = Reply(thread=args.thread, to=names(args.to) if args.to else None, text=text, control=control,
                   wake_id=None if args.unsolicited else args.wake)
-    post = await doorbell.send(reply, room=args.room)
-    if post is not None:
-        print(post_line(post))
+    sent = await doorbell.send(reply, room=args.room)
+    for broken in sent.warnings:
+        # the room does not enforce: posted, counted, and said (design §3.5)
+        print(f"[WARNING] posted, but it broke a rule this room does not enforce: {broken}", file=sys.stderr)
+    if sent.post is not None:
+        print(post_line(sent.post))
     return 0
 
 

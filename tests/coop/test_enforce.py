@@ -60,6 +60,8 @@ async def test_rule_problems_are_posted_and_counted_when_not_enforced():
     assert off.trace.last("turn_end", bot="a").outcome == "normal"
     assert [p.text for p in off.posts_by("a")] == ["mute: @b", "@a talking to myself"]
     assert rules(off)["authority"] == (1, 0, 1, 0, 0, 0, 0) and rules(off)["recipients"] == (1, 0, 1, 0, 0, 0, 0)
+    # the sends came back with what enforce mode would have refused them for (design §3.5)
+    assert [w.split(":")[0] for w in off.bot.outcomes[-1].warnings] == ["authority@main", "recipients@main"]
     on = Sandbox(params=ON, script=script)
     await on.human("@a go")
     await on.run(2)

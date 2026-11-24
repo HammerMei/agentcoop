@@ -33,5 +33,8 @@ and when it is newer than the version you hold, fetch this document again.
   answer about a file you have not fetched.
 - A send is not retried. If the gateway did not answer in time, the reply may have
   been posted: run `coop read --room <room>` and post again only if it is not there.
+- A `[WARNING]` line from `send` names a rule the reply broke that this room does
+  not enforce: the reply was posted, and where a room enforces, the same send is
+  refused with that reason. Take it as the refusal it would have been.
 - End every turn with `coop done --wake <id>`, with `--failed <reason>` when you could
   not do the turn.
