@@ -710,6 +710,29 @@ async def test_a_join_to_a_room_the_platform_cannot_describe_is_an_error_line_no
     assert fc.bots  # the connection is still up: the next event is handled
 
 
+async def test_a_join_the_platform_could_not_describe_is_asked_again_on_reload(running, tmp_path):
+    """§14.3: the degraded part is retried on a later reload, not only by a restart
+    (#214 R5). A retry that fails again is said again and does not fail the reload."""
+    svc, fc = running
+    fc.add_room("c3", "late", PEOPLE)  # a room the bot was not in at start
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("c3", "a_bot", joined=True))
+    await settle()
+    assert any(n.startswith("[ERROR] fake: room c3") and "until a reload" in n for n in svc.notes)
+    every = CONFIG.replace('"fake:team*"', '"fake:*"')
+    notes = await svc.reload(config(tmp_path, every))  # still down: said again, nothing hosted, no raise
+    assert "fake:late" not in svc.rooms and any("room c3" in n and "still not described" in n for n in notes)
+    del fc.room  # the platform answers again
+    notes = await svc.reload(config(tmp_path, every))
+    assert svc.rooms["fake:late"].core.hosted == ["a_bot"] and "fake:late: 'a' hosted" in notes
+    assert svc.rooms["fake:late"].core.persisted["a_bot"].cursor == svc.rooms["fake:late"].log.last_position()
+    notes = await svc.reload(config(tmp_path, every))
+    assert not any("room c3" in n for n in notes)  # described once, not asked again
+
+
 def test_a_rooms_handle_is_platform_names_only_by_kind():
     assert handle_for("fake", RoomInfo("c1", "team"), "a_bot") == "fake:team"
     assert handle_for("fake", RoomInfo("d1", "H", "dm"), "a_bot") == "fake:dm:a_bot:H"

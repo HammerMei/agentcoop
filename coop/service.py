@@ -113,6 +113,8 @@ class Service:
         self._by_id: dict[tuple[str, str], RoomRun] = {}
         self._connected: dict[str, dict[str, str]] = {}  # server -> connected agent -> its bot's username
         self._rooms_of: dict[tuple[str, str], list[RoomInfo]] = {}  # (server, agent) -> its rooms
+        # (server, agent) -> ids of rooms it joined that the platform could not describe: asked again on reload
+        self._undescribed: dict[tuple[str, str], set[str]] = {}
         self._runner: web.AppRunner | None = None
         self.listening: tuple[str, int] | None = None
         self.notes: list[str] = []  # startup notices for the operator, degraded parts included
@@ -193,6 +195,7 @@ class Service:
         await self.connectors[server].remove_bot(self._username(server, agent))
         self._connected[server].pop(agent, None)
         self._rooms_of.pop((server, agent), None)
+        self._undescribed.pop((server, agent), None)
 
     async def _host(self, server: str, info: RoomInfo, agent: str, created: bool = False) -> None:
         """Host ``agent`` in ``info`` if a rule names it there. ``created`` is a join the
@@ -396,8 +399,9 @@ class Service:
                 try:
                     info = await self.connectors[server].room(event.room_id)
                 except PlatformError as exc:
+                    self._undescribed.setdefault((server, agent), set()).add(event.room_id)
                     self._note(f"[ERROR] {server}: room {event.room_id} that {agent!r} joined not described, "
-                               f"not hosted until a restart: {exc}")
+                               f"not hosted until a reload describes it: {exc}")
                     return
                 rooms = self._rooms_of.setdefault((server, agent), [])
                 rooms[:] = [r for r in rooms if r.id != info.id] + [info]  # a reopened DM is announced again
@@ -408,6 +412,7 @@ class Service:
             elif hosted_here:  # a leave: forgotten whether or not a rule hosts the room now
                 self._rooms_of[(server, agent)] = [
                     r for r in self._rooms_of.get((server, agent), []) if r.id != event.room_id]
+                self._undescribed.get((server, agent), set()).discard(event.room_id)
                 if run is not None and self._hosted(run, agent):
                     await self._unhost(run, agent)
                     run = self._by_id.get((server, event.room_id))
@@ -436,6 +441,7 @@ class Service:
             await self._reload_room(run, notes)  # rosters first: a bot connected below is hosted by them
         for server in config.servers.values():
             await self._reload_bots(server, old.servers[server.name], notes)
+        await self._retry_undescribed()
         await self._host_newly_ruled(notes)
         for run in self.rooms.values():
             await self._ensure_started(run)
@@ -500,6 +506,24 @@ class Service:
             if agent not in rule.agents or not self._is_hosted(run.server, agent):
                 await self._unhost(run, agent)
                 notes.append(f"{run.handle}: {agent!r} no longer hosted")
+
+    async def _retry_undescribed(self) -> None:
+        """Joins whose room the platform could not describe (``_on_event``), asked again
+        (§14.3: a degraded part is retried on a later reload). A room described now is
+        among the bot's rooms, which ``_host_newly_ruled`` walks next; it is hosted as a
+        room that was there (cursor at its latest post), not as one created around the
+        bot. One still not described is said again and kept for the next reload."""
+        for (server, agent), ids in list(self._undescribed.items()):
+            for room_id in sorted(ids):
+                try:
+                    info = await self.connectors[server].room(room_id)
+                except PlatformError as exc:
+                    self._note(f"[ERROR] {server}: room {room_id} that {agent!r} joined still not described, "
+                               f"asked again at the next reload: {exc}")
+                    continue
+                ids.discard(room_id)
+                rooms = self._rooms_of.setdefault((server, agent), [])
+                rooms[:] = [r for r in rooms if r.id != info.id] + [info]
 
     async def _host_newly_ruled(self, notes: list[str]) -> None:
         """Rooms a connected bot is in that a rule names it for now."""
