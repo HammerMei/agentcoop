@@ -147,7 +147,7 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
     sent = await doorbell.send(reply, room=args.room)
     for broken in sent.warnings:
         # the room does not enforce: posted, counted, and said (design §3.5)
-        print(f"[WARNING] posted, but it broke a rule this room does not enforce: {broken}", file=sys.stderr)
+        print(f"[WARNING] the send broke a rule this room does not enforce: {broken}", file=sys.stderr)
     if sent.post is not None:
         print(post_line(sent.post))
     return 0

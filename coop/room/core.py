@@ -390,11 +390,26 @@ class RoomCore:
         return self.clock.now()
 
     def _thread(self, thread: str) -> ThreadSettings:
+        """The thread's settings now: controls older than the TTL since the thread's last
+        post are gone (5.4). During a replay the clock is the posts' (``_thread_seen``),
+        not now: a mute said before an outage, in a thread that kept going, is kept."""
         settings = self.settings.setdefault(thread, ThreadSettings(last_activity=self.now()))
-        if self.params.control_ttl_seconds and self.now() - settings.last_activity > self.params.control_ttl_seconds:
+        ttl = self.params.control_ttl_seconds
+        if ttl and not self.replaying and self.now() - settings.last_activity > ttl:
             fresh = ThreadSettings(last_activity=settings.last_activity)
             self.settings[thread] = fresh
             return fresh
+        return settings
+
+    def _thread_seen(self, thread: str, time: float) -> ThreadSettings:
+        """The thread's settings as of a post at ``time``. A thread first seen is as old as
+        the post, and the TTL is measured from the previous post to this one, so a control
+        replayed from history expires by the gap that followed it, not by its age now."""
+        settings = self.settings.setdefault(thread, ThreadSettings(last_activity=time))
+        ttl = self.params.control_ttl_seconds
+        if ttl and time - settings.last_activity > ttl:
+            settings = self.settings[thread] = ThreadSettings(last_activity=settings.last_activity)
+        settings.last_activity = max(settings.last_activity, time)
         return settings
 
     def _tstate(self, thread: str) -> ThreadVolatile:
@@ -475,10 +490,7 @@ class RoomCore:
         if not self.online:
             return
         copies = [b for b in self.hosted if b != post.author]
-        # a thread first seen through this post is as old as the post, not as new as now: a
-        # control replayed from history older than the TTL does not live another TTL (5.4)
-        self.settings.setdefault(post.thread, ThreadSettings(last_activity=post.time))
-        self._thread(post.thread).last_activity = max(self._thread(post.thread).last_activity, post.time)
+        self._thread_seen(post.thread, post.time)
         if post.kind == "notice":
             return  # recognised before eligibility: no turn, no classifier, not in the window
         self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)

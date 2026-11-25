@@ -403,6 +403,7 @@ class Service:
                     self._note(f"[ERROR] {server}: room {event.room_id} that {agent!r} joined not described, "
                                f"not hosted until a reload describes it: {exc}")
                     return
+                self._undescribed.get((server, agent), set()).discard(event.room_id)  # announced again, described now
                 rooms = self._rooms_of.setdefault((server, agent), [])
                 rooms[:] = [r for r in rooms if r.id != info.id] + [info]  # a reopened DM is announced again
                 await self._host(server, info, agent, created=event.created)
@@ -522,6 +523,8 @@ class Service:
                                f"asked again at the next reload: {exc}")
                     continue
                 ids.discard(room_id)
+                self._note(f"[WARNING] {server}: room {room_id} that {agent!r} joined is described now; hosted from "
+                           "its latest post, so what was posted there since the join is not delivered")
                 rooms = self._rooms_of.setdefault((server, agent), [])
                 rooms[:] = [r for r in rooms if r.id != info.id] + [info]
 

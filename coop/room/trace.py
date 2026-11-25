@@ -12,6 +12,7 @@ Kinds and their fields:
 - ``classifier_retry`` — gateway, post, attempt, error; ``classifier_expired`` — gateway, post, bot
 - ``turn_start``      — gateway, bot, source, thread, exempt, delivered, wake (the wake is issued)
 - ``lease_started``   — gateway, bot, wake, expires_at (an agent's poll picked the wake up)
+- ``typing``          — gateway, bot, thread (an addressed wake's pick-up sends the indicator)
 - ``turn_held``       — gateway, bot, source, thread, gate
 - ``turn_end``        — gateway, bot, wake, outcome (normal | backend_failure | invalid), posts
 - ``invalid``         — gateway, bot, wake, reason

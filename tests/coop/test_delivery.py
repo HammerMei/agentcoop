@@ -201,6 +201,21 @@ async def test_a_control_replayed_from_history_older_than_the_ttl_is_not_applied
     assert sb.trace.last("turn_start", bot="a").thread == "t2"
 
 
+async def test_a_replayed_control_whose_thread_kept_going_is_kept_through_an_outage_longer_than_the_ttl():
+    """The TTL is the gap between thread posts (5.4), not the control's age at replay: a
+    mute said before a long outage holds if the thread posted within the TTL since."""
+    sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24), script=Script().on(reply(["H"], "x"), bot="a"))
+    await sb.human("mute: @a", "t2")
+    await sb.run(1000)
+    await sb.human("still talking here", "t2")  # within the TTL of the mute
+    await sb.run(2000)
+    await sb.human("and here", "t2")  # within the TTL of the previous post
+    await sb.run(2000)  # the mute and the first post are older than the TTL now; the last post is not
+    sb.gw.settings.clear()  # no saved state for the thread: the mute was said while the daemon was down
+    await sb.gw.restart(replay_after=None)
+    assert sb.gw.is_muted("a", "t2") and sb.gw.status()["threads"]["t2"]["muted"] == ["a"]
+
+
 async def test_ttl_expiry_keeps_unfinished_state_and_archive_removes_both():
     sb = Sandbox(params=replace(FAST, control_ttl_days=1 / 24, catch_up_idle_seconds=10))
     await sb.human("mute: @a")

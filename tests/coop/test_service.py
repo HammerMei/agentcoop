@@ -728,9 +728,29 @@ async def test_a_join_the_platform_could_not_describe_is_asked_again_on_reload(r
     del fc.room  # the platform answers again
     notes = await svc.reload(config(tmp_path, every))
     assert svc.rooms["fake:late"].core.hosted == ["a_bot"] and "fake:late: 'a' hosted" in notes
+    assert any(n.startswith("[WARNING] fake: room c3") and "not delivered" in n for n in notes)  # said, not silent
     assert svc.rooms["fake:late"].core.persisted["a_bot"].cursor == svc.rooms["fake:late"].log.last_position()
     notes = await svc.reload(config(tmp_path, every))
     assert not any("room c3" in n for n in notes)  # described once, not asked again
+
+
+async def test_a_join_announced_again_and_described_now_is_not_asked_about_on_reload(running, tmp_path):
+    """A reopened DM is announced again (Mattermost): the second announcement, described,
+    clears the first's failure, so a reload says nothing about a room that is hosted."""
+    svc, fc = running
+    fc.add_room("d1", "H", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)], "dm")
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("d1", "a_bot", joined=True, created=True))
+    await settle()
+    del fc.room
+    await fc.on_event(Membership("d1", "a_bot", joined=True))
+    await settle()
+    fc.room = room  # flaky again at reload time
+    notes = await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:*"')))
+    assert "fake:dm:a_bot:H" in svc.rooms and not any("room d1" in n for n in notes)
 
 
 def test_a_rooms_handle_is_platform_names_only_by_kind():

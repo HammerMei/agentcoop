@@ -24,7 +24,10 @@ class MattermostREST:
     async def _json(self, method: str, path: str, **kw) -> Any:
         r = await self._client.request(method, path, **kw)
         r.raise_for_status()
-        return r.json() if r.content else {}
+        try:
+            return r.json() if r.content else {}
+        except ValueError as exc:  # a 200 that is not JSON (a proxy's page): the platform did not answer
+            raise httpx.DecodingError(f"{method} {path}: not JSON: {exc}", request=r.request) from exc
 
     # ── identity ────────────────────────────────────────────────────────────
 

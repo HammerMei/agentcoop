@@ -15,6 +15,7 @@ The simulated environment (clock, room, scripted classifier) is the fake agent's
 from __future__ import annotations
 
 import ssl
+import time
 from collections.abc import Callable
 
 from aiohttp.test_utils import TestServer
@@ -244,7 +245,7 @@ class FakeConnector:
         self.typed: list[tuple[str, str, str | None]] = []
         self.started = False
         self._seq = 0
-        self.now_ms = 1_000_000
+        self.now_ms = int(time.time() * 1000)  # posts are as old as they would be on the platform
 
     # test-side setup
     def add_room(self, room_id: str, name: str, members: list[MemberInfo], kind: RoomKind = "channel") -> RoomInfo:

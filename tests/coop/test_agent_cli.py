@@ -104,7 +104,7 @@ async def test_a_send_a_rule_would_refuse_is_a_warning_line_where_the_room_does_
     assert await coop("send", "--unsolicited", "--thread", "t1", "--to", "H", "still here") == 0
     out, err = capsys.readouterr()
     assert out.splitlines()[-1] == "[t1] #p2 a (agent): @H still here" and len(sb.posts_by("a")) == 1
-    assert err.splitlines()[-1].startswith("[WARNING] posted, but it broke a rule this room does not enforce: mute@t1")
+    assert err.splitlines()[-1].startswith("[WARNING] the send broke a rule this room does not enforce: mute@t1")
 
 
 async def test_a_late_send_on_an_expired_wake_needs_the_thread(sb, coop, capsys):
