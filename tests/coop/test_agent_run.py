@@ -322,6 +322,8 @@ async def test_a_reset_wake_starts_a_new_session_and_a_newer_rules_version_refet
     assert stub.rules_calls == 1
     await runner._refresh_rules(a_wake(rules_version=8))
     assert runner.rules.read_text() == "rules v2"
+    await runner._refresh_rules(a_wake(rules_version=3))  # a restored gateway's older version is fetched too
+    assert runner.rules.read_text() == "rules v3"
     again = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
     assert again.sessions["team"] == chosen and again.rules_version == 7  # the state file survives a restart
 
@@ -367,6 +369,12 @@ def test_the_connection_defaults_come_from_agent_toml_under_the_environment(tmp_
     (tmp_path / "agent.toml").write_text("[connection\nbroken")
     with pytest.raises(SystemExit):
         cli.defaults()  # a malformed file is an [ERROR], not a traceback and not silence
+    (tmp_path / "agent.toml").write_text('connection = "oops"\n')
+    with pytest.raises(SystemExit):
+        cli.defaults()  # so is a [connection] that is not a table
+    for bad in ("0", "-1", "inf", "x"):
+        with pytest.raises(SystemExit):
+            cli.parser().parse_args(["agent", "run", "--kind", "claude", "--wait", bad])
     (tmp_path / "agent.toml").write_text('[connection]\ngateway = "http://g:1"\ntoken = "t"\ntransfer_timeout = 300\n')
     assert cli.defaults() == {"gateway": "http://g:1", "token": "t", "transfer_timeout": "300"}
     monkeypatch.setenv("COOP_TOKEN", "from-env")

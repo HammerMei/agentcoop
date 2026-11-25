@@ -68,6 +68,9 @@ def defaults() -> dict[str, str]:
     except tomllib.TOMLDecodeError as exc:  # a malformed one is an error, said as the CLI says errors
         print(f"[ERROR] {AGENT_TOML}: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
+    if not isinstance(section, dict):
+        print(f"[ERROR] {AGENT_TOML}: [connection] must be a table", file=sys.stderr)
+        raise SystemExit(1)
     for key in ("gateway", "token", "fingerprint", "transfer_timeout"):
         value = os.environ.get(f"COOP_{key.upper()}")
         if value is None and isinstance(section.get(key), (str, int, float)):
@@ -128,7 +131,7 @@ def parser() -> argparse.ArgumentParser:
     run_.add_argument("--workdir", type=Path, default=Path.cwd(), help="the command's working directory (default: here)")
     run_.add_argument("--state", type=Path, help="where the sessions and the rules are kept "
                       "(default: ~/.coop/agents/<id>, the id derived from the connection, so two agents on one host do not share)")
-    run_.add_argument("--wait", type=float, default=30.0, metavar="S", help="the long-poll wait (default 30)")
+    run_.add_argument("--wait", type=positive_seconds, default=30.0, metavar="S", help="the long-poll wait (default 30)")
     return top
 
 
@@ -252,6 +255,17 @@ def upload_of(path: Path) -> Upload:
     return Upload(path.name, content_type or "application/octet-stream", path.stat().st_size, chunks())
 
 
+def positive_seconds(text: str) -> float:
+    """A long-poll wait: positive and finite, or the utility would poll in a tight loop."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds") from None
+    if not (value > 0) or value == float("inf"):
+        raise argparse.ArgumentTypeError("the wait must be a positive number of seconds")
+    return value
+
+
 def default_state(kind: str, gateway: str, token: str) -> Path:
     """``~/.coop/agents/<id>``, the id from the CLI kind and the connection: two agents
     on one host, or one agent switched to another CLI, never share a session file."""
@@ -267,10 +281,13 @@ async def cmd_agent(doorbell: HttpDoorbell, args) -> int:
     adapter = ADAPTERS[args.kind](args.program or DEFAULT_PROGRAM[args.kind])
     env = {"COOP_GATEWAY": args.gateway, "COOP_TOKEN": args.token, "COOP_TRANSFER_TIMEOUT": str(args.transfer_timeout),
            "PATH": os.environ.get("PATH", "")}
-    if shutil.which("coop") is None:  # the child runs a bare ``coop``: this interpreter's scripts directory has it
-        env["PATH"] = f"{Path(sys.executable).resolve().parent}{os.pathsep}{env['PATH']}"
-        if shutil.which("coop", path=env["PATH"]) is None:
-            print("[WARNING] no `coop` on PATH: the agent's `coop read` will not run", file=sys.stderr)
+    # the child runs a bare ``coop``: this interpreter's own, when its scripts directory has
+    # one, ahead of any other installation's on PATH
+    scripts = Path(sys.executable).resolve().parent
+    if (scripts / "coop").exists():
+        env["PATH"] = f"{scripts}{os.pathsep}{env['PATH']}"
+    elif shutil.which("coop") is None:
+        print("[WARNING] no `coop` on PATH: the agent's `coop read` will not run", file=sys.stderr)
     if args.fingerprint:
         env["COOP_FINGERPRINT"] = args.fingerprint
     state = args.state or default_state(args.kind, args.gateway, args.token)

@@ -137,8 +137,8 @@ class Runner:
     # ── the parts ───────────────────────────────────────────────────────────
 
     async def _refresh_rules(self, wake: Wake) -> None:
-        if wake.rules_version <= self.rules_version and self.rules.exists():
-            return
+        if wake.rules_version == self.rules_version and self.rules.exists():
+            return  # any other version, newer or (a restored gateway) older, is fetched
         version, text = await self.doorbell.rules()
         _atomic_write(self.rules, text)
         _atomic_write(self.state_dir / "rules.version", f"{version}\n")
