@@ -116,6 +116,9 @@ async def test_a_send_with_a_file_uploads_it_to_mattermost_and_a_read_fetches_it
             assert found.id.startswith("a") and "-" in found.id  # the handle, never the platform's file id
             name, data = await agent.attachment(found.id)
             assert name == "notes.txt" and data == payload
+            alone = await agent.send(Reply(thread=sent.post.thread, files=(Upload.of("alone.txt", b"no caption"),)),
+                                     room=room)  # a file alone: an empty message with a file, which the server takes
+            assert alone.post.text == "" and [a.name for a in alone.post.attachments] == ["alone.txt"]
         posted = mm_test_client.poll_for_message(mm_setup["member_channel_id"], 0,
                                                  lambda p: marker in p.get("message", ""), timeout=20)
         assert posted["user_id"] == mm_setup["bot_user_id"]

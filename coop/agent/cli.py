@@ -21,8 +21,8 @@ import argparse
 import asyncio
 import mimetypes
 import os
+import secrets
 import sys
-import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -179,11 +179,11 @@ async def cmd_attachment(doorbell: HttpDoorbell, args) -> int:
     # streamed into a file under a temporary name, renamed when complete: a transfer that
     # broke leaves nothing at the name the agent will read (design §3.3)
     out = args.out if args.out is not None else Path(args.id)
-    # a fresh exclusive file (never a name already there, never through a symlink)
-    fd, temp = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".part")
-    part = Path(temp)
+    # a fresh file under a random name, created exclusively (never a name already there,
+    # never through a symlink), with the permissions a new file gets here
+    part = out.with_name(f".{out.name}.{secrets.token_hex(4)}.part")
     try:
-        with os.fdopen(fd, "wb") as sink:
+        with part.open("xb") as sink:
             name = await doorbell.download(args.id, sink.write)
         if args.out is None:
             out = Path(Path(name).name or args.id)

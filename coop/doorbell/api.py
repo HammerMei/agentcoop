@@ -366,7 +366,7 @@ async def attachment(request: web.Request) -> web.StreamResponse:
         # the headers are out: the body ends short of its length (or of the chunked
         # terminator) and the client discards it; closing the transport here, rather
         # than raising, keeps aiohttp from logging a traceback for an ordinary break
-        logger.warning("attachment %s: the transfer broke: %s", handle, exc or type(exc).__name__)
+        logger.warning("attachment %s: the transfer broke: %s", handle, str(exc) or type(exc).__name__)
         response.force_close()
         if request.transport is not None:
             request.transport.close()

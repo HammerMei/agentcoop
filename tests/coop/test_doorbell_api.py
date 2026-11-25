@@ -396,23 +396,36 @@ async def test_a_download_is_streamed_with_its_length_and_a_broken_one_ends_shor
     assert r.status_code == 413 and "over the 0.0001 MB limit" in r.json()["error"]
 
 
-async def test_a_download_that_runs_past_the_transfer_timeout_ends_short(api, sb, monkeypatch):
+async def test_a_download_to_a_client_that_stops_reading_ends_at_the_transfer_timeout(api, sb, monkeypatch):
+    """The writes to the agent are under the deadline too: a client that holds the
+    socket open and reads nothing fills the buffers, the write blocks, and the deadline
+    cuts it (real time, 0.3 s) — without it the handler would wait on the client."""
     from coop.room.attachments import Limits
 
-    post = await sb.human("@a see", "t1", attachments=(("slow.bin", "application/octet-stream", b"0123456789"),))
+    size = 64 * 1024 * 1024  # more than any loopback socket buffers hold
+    post = await sb.human("@a see", "t1", attachments=(("big.bin", "application/octet-stream", b""),))
+    post = replace(post, attachments=(replace(post.attachments[0], size=size),))
+    sb.room.posts[-1] = post
     wake = await wake_for(api, "a")
     r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
     handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
 
-    async def slow(file_id):
-        yield b"0123"
-        await asyncio.sleep(0.5)  # the whole fetch, the writes included, is under one deadline (real time)
-        yield b"456789"
+    released = asyncio.Event()  # the platform's stream is closed when the handler ends
 
-    monkeypatch.setattr(sb.room, "fetch_attachment", slow)
-    sb.gateway.limits = Limits(transfer_timeout_seconds=0.2)
-    with pytest.raises(httpx.RemoteProtocolError):
-        await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+    async def big(file_id):
+        try:
+            for _ in range(64):
+                yield b"x" * (1024 * 1024)
+        finally:
+            released.set()
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", big)
+    sb.gateway.limits = Limits(transfer_timeout_seconds=0.3)
+    async with api.stream("GET", f"/v1/agents/me/attachments/{handle}", headers=as_("a")) as f:
+        assert f.status_code == 200
+        await asyncio.wait_for(released.wait(), 2)  # the deadline ended the handler while nothing was read
+        with pytest.raises(httpx.RemoteProtocolError):
+            await f.aread()
 
 
 # ── done, bio, rules ────────────────────────────────────────────────────────

@@ -128,7 +128,7 @@ class RoomRule:
 class Listen:
     address: str = "127.0.0.1:7474"
     tls: tuple[Path, Path] | None = None  # (cert, key)
-    attachments: Limits = Limits()  # applied on reload; the address and tls need a restart
+    attachments: Limits = Limits()  # applied on reload, but the drain of a refused send's body is sized at start
 
 
 @dataclass(frozen=True)
