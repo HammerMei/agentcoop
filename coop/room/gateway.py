@@ -262,6 +262,9 @@ class Gateway:
         core = self.rooms.get(entry.room)
         if core is None:
             raise KeyError(handle)  # the room closed under it (``remove_room`` drops them; a race)
+        self._evict_handles(core)  # a quiet room's handles expire on a fetch too, not only on a read
+        if handle not in self._handles:
+            raise KeyError(handle)
         bot = self._bot(core, agent)
         if bot is None or bot not in core.hosted:
             raise PermissionError(f"{agent} is not in the roster of room {entry.room!r}")

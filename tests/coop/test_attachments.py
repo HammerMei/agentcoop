@@ -371,3 +371,27 @@ async def test_a_platform_error_during_the_upload_is_said_with_its_message(monke
     assert sb.trace.last("platform_error", bot="a").error == "fake: upload x.bin: 503 Service Unavailable"
     assert any("failed at the platform (fake: upload x.bin: 503" in r.message and "counts as answered" in r.message
                for r in caplog.records)
+
+
+async def test_an_in_process_read_names_attachments_by_handle_and_counts_them():
+    from coop.client import InProcessDoorbell
+
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"x"),))
+    doorbell = InProcessDoorbell(sb.gateway, "a")
+    wake = await doorbell.poll()
+    _, posts = await doorbell.read(wake.wake_id)
+    assert [a.id for p in posts for a in p.attachments] == ["a1"] and sb.room.posts[0].attachments[0].id == "f1"
+    assert [a.id for p in await doorbell.read_room("team") for a in p.attachments] == ["a1"]
+    await doorbell.done(wake.wake_id, answered=("t1",))
+    assert sb.trace.last("turn_end", bot="a").attachments == 1
+
+
+async def test_a_quiet_rooms_old_handle_expires_on_a_fetch():
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"x"),))
+    _, delivered = await read_and_done(sb, "a")
+    handle = delivered[0].attachments[0].id
+    await sb.run(3601)  # every cursor passed the post, the hour went by, nobody read since
+    with pytest.raises(KeyError):
+        sb.gateway.fetch_attachment("a", handle)

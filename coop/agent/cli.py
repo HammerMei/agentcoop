@@ -10,7 +10,8 @@ coop attachment ID [--out PATH]
 
 Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
 The gateway address and the token come from ``--gateway`` / ``--token`` or the
-environment (``COOP_GATEWAY``, ``COOP_TOKEN``). A failure prints one ``[ERROR]`` line
+environment (``COOP_GATEWAY``, ``COOP_TOKEN``; ``COOP_TRANSFER_TIMEOUT`` matches the gateway's
+``transfer_timeout_seconds`` when it is raised above 120). A failure prints one ``[ERROR]`` line
 on stderr and exits 1; a usage error exits 2. A ``send`` a room that does not enforce
 let through against a rule prints a ``[WARNING]`` line per rule and exits 0.
 """
@@ -50,6 +51,9 @@ def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog=PROG, description="the agent's side of the room")
     top.add_argument("--gateway", default=os.environ.get("COOP_GATEWAY"), help="doorbell address (COOP_GATEWAY)")
     top.add_argument("--token", default=os.environ.get("COOP_TOKEN"), help="bearer token (COOP_TOKEN)")
+    top.add_argument("--transfer-timeout", type=float, default=float(os.environ.get("COOP_TRANSFER_TIMEOUT", "120")),
+                     metavar="S", help="how long a file transfer may take, the gateway's transfer_timeout_seconds "
+                     "(COOP_TRANSFER_TIMEOUT, default 120)")
     top.add_argument("--fingerprint", default=os.environ.get("COOP_FINGERPRINT"),
                      help="the gateway certificate's SHA-256 fingerprint to pin (COOP_FINGERPRINT)")
     sub = top.add_subparsers(dest="command", required=True)
@@ -100,7 +104,8 @@ async def run(argv: list[str] | None = None) -> int:
         if plain_http(args.gateway):
             print(f"[WARNING] {args.gateway} is plain http: the token travels in clear; keep it on loopback "
                   "or a tunnel to loopback", file=sys.stderr)
-        async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint) as doorbell:
+        async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint,
+                                transfer_timeout=args.transfer_timeout) as doorbell:
             return await COMMANDS[args.command](doorbell, args)
     except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, RefusedAttachment, AttachmentRefused,
             LostResponse, CertificateMismatch, httpx.HTTPError, OSError, ValueError) as exc:  # ValueError: a malformed address

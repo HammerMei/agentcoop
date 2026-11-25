@@ -55,10 +55,12 @@ class InProcessDoorbell:
         return self.gateway.poll(self.agent)
 
     async def read(self, wake_id: str) -> tuple[Wake, list[Post]]:
-        return self.gateway.read(self.agent, wake_id)
+        # as the doorbell delivers them: roles as this agent sees them, attachments by handle
+        wake, posts = self.gateway.read(self.agent, wake_id)
+        return wake, [self.gateway.deliverable(self.agent, wake.room, p, wake_id) for p in posts]
 
     async def read_room(self, room: str, after: str | None = None) -> list[Post]:
-        return self.gateway.read_room(self.agent, room, after)
+        return [self.gateway.deliverable(self.agent, room, p) for p in self.gateway.read_room(self.agent, room, after)]
 
     async def send(self, reply: Reply, room: str | None = None) -> Sent:
         return await self.gateway.send(self.agent, reply, room)
