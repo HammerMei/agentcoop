@@ -1,5 +1,11 @@
 # Supported Features & Roadmap
 
+> **`coop legacy`** — the commands in this document are the current gateway's and
+> are run as `coop legacy <command>` (`coop legacy start`, `coop legacy send …`):
+> the `coop` binary now serves the remote-agent daemon and its agent commands
+> (`docs/design/remote-agent-gateway.md`), and the bare `coop start` / `coop send`
+> are that daemon's. The prefix goes with the old package (design §7 step 6).
+
 This document clearly communicates what AgentCoop supports today, what is known to be limited, and what is planned for future releases.
 
 ---
