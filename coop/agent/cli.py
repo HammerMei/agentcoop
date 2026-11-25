@@ -2,7 +2,7 @@
 
 ```
 coop read  (--wake W | --room R)
-coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [--attach PATH]... [TEXT]
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
 coop attachment ID [--out PATH]
@@ -10,7 +10,8 @@ coop attachment ID [--out PATH]
 
 Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
 The gateway address and the token come from ``--gateway`` / ``--token`` or the
-environment (``COOP_GATEWAY``, ``COOP_TOKEN``). A failure prints one ``[ERROR]`` line
+environment (``COOP_GATEWAY``, ``COOP_TOKEN``; ``COOP_TRANSFER_TIMEOUT`` matches the gateway's
+``transfer_timeout_seconds`` when it is raised above 120). A failure prints one ``[ERROR]`` line
 on stderr and exits 1; a usage error exits 2. A ``send`` a room that does not enforce
 let through against a rule prints a ``[WARNING]`` line per rule and exits 0.
 """
@@ -19,8 +20,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import mimetypes
 import os
+import secrets
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -34,8 +38,9 @@ from ..errors import (
     NoLiveLease,
     RefusedSend,
 )
-from ..room.model import ALL, Attachment, Post, Reply, Wake
-from ..room.platform import RefusedPost
+from ..room.attachments import AttachmentRefused
+from ..room.model import ALL, Attachment, Post, Reply, Upload, Wake
+from ..room.platform import RefusedAttachment, RefusedPost
 from ..room.prompt import one_line, render_hint
 from .client import HttpDoorbell
 
@@ -46,6 +51,9 @@ def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog=PROG, description="the agent's side of the room")
     top.add_argument("--gateway", default=os.environ.get("COOP_GATEWAY"), help="doorbell address (COOP_GATEWAY)")
     top.add_argument("--token", default=os.environ.get("COOP_TOKEN"), help="bearer token (COOP_TOKEN)")
+    top.add_argument("--transfer-timeout", type=float, default=float(os.environ.get("COOP_TRANSFER_TIMEOUT", "120")),
+                     metavar="S", help="how long a file transfer may take, the gateway's transfer_timeout_seconds "
+                     "(COOP_TRANSFER_TIMEOUT, default 120)")
     top.add_argument("--fingerprint", default=os.environ.get("COOP_FINGERPRINT"),
                      help="the gateway certificate's SHA-256 fingerprint to pin (COOP_FINGERPRINT)")
     sub = top.add_subparsers(dest="command", required=True)
@@ -64,6 +72,8 @@ def parser() -> argparse.ArgumentParser:
     place.add_argument("--room", metavar="R", help="a new top-level post in room R")
     place.add_argument("--thread", metavar="T", help="a reply in thread T")
     send.add_argument("--to", metavar="a,b", help="who the reply is for")
+    send.add_argument("--attach", action="append", default=[], type=Path, metavar="PATH",
+                      help="post this file, the text as its caption; repeat for several")
     send.add_argument("--control", action="append", default=[], metavar="mute=a,b",
                       help="a control word (mute, unmute); repeatable")
     send.add_argument("text", nargs="?", help="the reply text; `-` reads it from stdin")
@@ -94,10 +104,11 @@ async def run(argv: list[str] | None = None) -> int:
         if plain_http(args.gateway):
             print(f"[WARNING] {args.gateway} is plain http: the token travels in clear; keep it on loopback "
                   "or a tunnel to loopback", file=sys.stderr)
-        async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint) as doorbell:
+        async with HttpDoorbell(args.gateway, args.token, fingerprint=args.fingerprint,
+                                transfer_timeout=args.transfer_timeout) as doorbell:
             return await COMMANDS[args.command](doorbell, args)
-    except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, LostResponse,
-            CertificateMismatch, httpx.HTTPError, OSError, ValueError) as exc:  # ValueError: a malformed address
+    except (DoorbellError, NoLiveLease, InvalidReply, RefusedSend, RefusedPost, RefusedAttachment, AttachmentRefused,
+            LostResponse, CertificateMismatch, httpx.HTTPError, OSError, ValueError) as exc:  # ValueError: a malformed address
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
@@ -134,8 +145,11 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
     text = sys.stdin.read() if args.text == "-" else args.text
     text = text.strip() if text else None
     control = parse_controls(args.control) if args.control else None
-    if text is None and control is None:
-        parser().error("send: text or --control")
+    if text is None and control is None and not args.attach:
+        parser().error("send: text, --control or --attach")
+    for path in args.attach:
+        if not path.is_file():
+            parser().error(f"send --attach: no file {path}")
     if text is not None and not args.to:
         parser().error("send: text needs --to")
     if args.unsolicited and args.room is None and args.thread is None:
@@ -143,7 +157,7 @@ async def cmd_send(doorbell: HttpDoorbell, args) -> int:
     # --room is a new top-level post there (its own thread); --thread a reply; a wake's
     # send with neither goes to the wake's starting thread, which the gateway fills in
     reply = Reply(thread=args.thread, to=names(args.to) if args.to else None, text=text, control=control,
-                  wake_id=None if args.unsolicited else args.wake)
+                  wake_id=None if args.unsolicited else args.wake, files=tuple(upload_of(p) for p in args.attach))
     sent = await doorbell.send(reply, room=args.room)
     for broken in sent.warnings:
         # the room does not enforce: posted, counted, and said (design §3.5)
@@ -167,11 +181,35 @@ async def cmd_bio(doorbell: HttpDoorbell, args) -> int:
 
 
 async def cmd_attachment(doorbell: HttpDoorbell, args) -> int:
-    name, data = await doorbell.attachment(args.id)
-    out = args.out if args.out is not None else Path(Path(name).name or args.id)
-    out.write_bytes(data)
+    # streamed into a file under a temporary name, renamed when complete: a transfer that
+    # broke leaves nothing at the name the agent will read (design §3.3)
+    out = args.out if args.out is not None else Path(args.id)
+    # a fresh file under a random name, created exclusively (never a name already there,
+    # never through a symlink), with the permissions a new file gets here
+    part = out.with_name(f".{out.name}.{secrets.token_hex(4)}.part")
+    try:
+        with part.open("xb") as sink:
+            name = await doorbell.download(args.id, sink.write)
+        if args.out is None:
+            out = Path(Path(name).name or args.id)
+        part.replace(out)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     print(out)
     return 0
+
+
+def upload_of(path: Path) -> Upload:
+    """A file from disk as a send posts it: read in chunks while the gateway takes them."""
+    content_type, _ = mimetypes.guess_type(path.name)
+
+    async def chunks() -> AsyncIterator[bytes]:
+        with path.open("rb") as source:
+            while chunk := source.read(64 * 1024):
+                yield chunk
+
+    return Upload(path.name, content_type or "application/octet-stream", path.stat().st_size, chunks())
 
 
 COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio, "attachment": cmd_attachment}

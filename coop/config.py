@@ -9,7 +9,7 @@ the doorbell authenticates. ``rooms`` are patterns over the room's handle
 (:func:`~coop.connectors.base.handle_for`: ``<server>:<channel>``, ``<server>:dm:<bot
 username>:<person>``, ``<server>:gdm:<digest>``), first match wins, each naming the
 agents in that room and the room's parameters.
-``gateway`` is the doorbell listener.
+``gateway`` is the doorbell listener and the attachment limits (design §3.3).
 
 Who is a bot, whose instructions a bot takes and who moderates a room all come from
 here, through :class:`~coop.room.roster.Roster`, never from the platform alone.
@@ -32,6 +32,7 @@ agents:
 gateway:
   listen: 127.0.0.1:7474
   tls: {cert: gateway/cert.pem, key: gateway/key.pem}
+  attachments: {max_size_mb: 0, max_per_post: 0, transfer_timeout_seconds: 120}
 classifier:
   command: [claude, -p, --output-format, text]
 rooms:
@@ -46,6 +47,7 @@ in a normal install is the runtime directory (``coop/paths.py``).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -53,6 +55,7 @@ from typing import Any, get_type_hints
 import yaml
 
 from .paths import RUNTIME_DIR
+from .room.attachments import Limits
 from .room.classifier_cli import DEFAULT_COMMAND as DEFAULT_CLASSIFIER_COMMAND
 from .room.model import Params
 from .room.roster import Roster
@@ -125,6 +128,7 @@ class RoomRule:
 class Listen:
     address: str = "127.0.0.1:7474"
     tls: tuple[Path, Path] | None = None  # (cert, key)
+    attachments: Limits = Limits()  # applied on reload, but the drain of a refused send's body is sized at start
 
 
 @dataclass(frozen=True)
@@ -281,7 +285,8 @@ def _room(pattern: str, entry: Any) -> RoomRule:
 def _listen(entry: Any, base: Path) -> Listen:
     where = "gateway"
     entry = _is_mapping(entry, where)
-    _only_keys(entry, ("listen", "tls"), where)
+    _only_keys(entry, ("listen", "tls", "attachments"), where)
+    limits = _attachments(entry.get("attachments"), f"{where}.attachments")
     address = entry.get("listen", Listen.address)
     if not isinstance(address, str) or ":" not in address:
         raise ConfigError(f"{where}.listen: a `host:port` address")
@@ -290,11 +295,31 @@ def _listen(entry: Any, base: Path) -> Listen:
         raise ConfigError(f"{where}.listen: {port!r} is not a port (0-65535)")
     tls = entry.get("tls")
     if tls is None:
-        return Listen(address, None)
+        return Listen(address, None, limits)
     tls = _is_mapping(tls, f"{where}.tls")
     _only_keys(tls, ("cert", "key"), f"{where}.tls")
     return Listen(address, (_path(_string(tls, "cert", f"{where}.tls"), base),
-                            _path(_string(tls, "key", f"{where}.tls"), base)))
+                            _path(_string(tls, "key", f"{where}.tls"), base)), limits)
+
+
+def _attachments(entry: Any, where: str) -> Limits:
+    """``gateway.attachments`` (design §3.3): sizes and counts ``0`` leave the platform's
+    own limits in force."""
+    if entry is None:
+        return Limits()
+    entry = _is_mapping(entry, where)
+    _only_keys(entry, ("max_size_mb", "max_per_post", "transfer_timeout_seconds"), where)
+    values = {}
+    for key, kind, least in (("max_size_mb", float, 0), ("max_per_post", int, 0), ("transfer_timeout_seconds", float, 1)):
+        value = entry.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < least:
+            raise ConfigError(f"{where}.{key}: a number of at least {least}")
+        if kind is int and int(value) != value:
+            raise ConfigError(f"{where}.{key}: a whole number")
+        values[key] = kind(value)
+    return Limits(**values)
 
 
 def _classifier(entry: Any, base: Path) -> ClassifierConfig:

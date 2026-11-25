@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -105,7 +106,9 @@ class Service:
         self.clock = clock or AsyncioClock()
         self.trace = trace or Trace()
         self.wake_seed = int(time.time() * 1000) if wake_seed is None else wake_seed
-        self.gateway = Gateway(self.clock, self.trace, name="coop", rules_version=rules_version)
+        # the handle prefix is this run's: a handle from before a restart names nothing (design §3.3)
+        self.gateway = Gateway(self.clock, self.trace, name="coop", rules_version=rules_version,
+                               handle_prefix=f"a{secrets.token_hex(4)}-", limits=self.config.gateway.attachments)
         self.gateway.on_bio = self._save_agents
         self.tokens: dict[str, str] = {}  # bearer token -> agent, shared with the doorbell app
         self.connectors: dict[str, Connector] = {}
@@ -127,6 +130,7 @@ class Service:
         self._set_tokens(self.config)
         for server in self.config.servers.values():
             connector = self._connector_factory(server, self._event_handler(server.name))
+            connector.transfer_timeout = self.config.gateway.attachments.transfer_timeout_seconds
             self.connectors[server.name] = connector
             self._connected[server.name] = {}
             await connector.start()
@@ -152,7 +156,11 @@ class Service:
     async def _listen(self) -> None:
         host, _, port = self.config.gateway.address.rpartition(":")
         tls = self.config.gateway.tls
-        self._runner = web.AppRunner(build_app(self.gateway, self.tokens))
+        # a refused multipart send is answered before its file parts are read: aiohttp
+        # drains the rest of the body for ``lingering_time`` so the refusal reaches a
+        # client still streaming it, bounded as a transfer is (design §3.3)
+        lingering = max(10.0, self.config.gateway.attachments.transfer_timeout_seconds)
+        self._runner = web.AppRunner(build_app(self.gateway, self.tokens), lingering_time=lingering)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, int(port),
                            ssl_context=None if tls is None else server_context(*tls))
@@ -435,6 +443,9 @@ class Service:
         notes: list[str] = []
         self.notes = notes
         self._note_listener_changes(config, notes)
+        self.gateway.limits = config.gateway.attachments  # applied: the next transfer runs under them
+        for connector in self.connectors.values():
+            connector.transfer_timeout = config.gateway.attachments.transfer_timeout_seconds
         old, self.config = self.config, config
         for server in config.servers.values():
             self.connectors[server.name].configure(server)  # the bots and usernames it holds now
@@ -453,6 +464,11 @@ class Service:
         if (config.gateway.address, config.gateway.tls) != (self.config.gateway.address, self.config.gateway.tls):
             self._note("[WARNING] gateway.listen/tls changed in the configuration; the listener keeps the old "
                        "ones until a restart")
+        if (config.gateway.attachments.transfer_timeout_seconds
+                != self.config.gateway.attachments.transfer_timeout_seconds):
+            # the drain of a refused send's body (``_listen``) is sized once, with the listener
+            self._note("[WARNING] gateway.attachments.transfer_timeout_seconds changed; transfers run under the new "
+                       "value, but a refused send's body is drained for the old one until a restart")
 
     def _refuse_server_changes(self, config: Config) -> None:
         for name, server in config.servers.items():

@@ -26,7 +26,7 @@ class SlowPlatform(FakePlatform):
         self.inside = 0
         self.overlaps = 0
 
-    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind=None) -> Post:
+    async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind=None, files=()) -> Post:
         mine = self.role_of(author) == "bot"  # the core's own posts; a human's post is the platform's business
         if mine:
             self.inside += 1

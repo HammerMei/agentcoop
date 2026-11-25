@@ -5,6 +5,7 @@ frozen gateway's client and cut to what the room core needs. Errors are httpx's.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -89,13 +90,42 @@ class MattermostREST:
             params["after"] = after
         return await self._json("GET", f"/channels/{channel_id}/posts", params=params)
 
-    async def create_post(self, channel_id: str, message: str, root_id: str | None = None) -> dict:
+    async def create_post(self, channel_id: str, message: str, root_id: str | None = None,
+                          file_ids: tuple[str, ...] = ()) -> dict:
         payload: dict[str, Any] = {"channel_id": channel_id, "message": message}
         if root_id:
             payload["root_id"] = root_id
+        if file_ids:
+            payload["file_ids"] = list(file_ids)
         return await self._json("POST", "/posts", json=payload)
 
-    async def file(self, file_id: str) -> bytes:
-        r = await self._client.get(f"/files/{file_id}", timeout=120.0)
+    async def upload(self, channel_id: str, name: str, content_type: str, size: int,
+                     chunks: AsyncIterator[bytes], timeout: float | None = None) -> dict:
+        """One file as the request body, streamed (``channel_id`` and ``filename`` as
+        query parameters, the simple form of ``POST /files``); the ``file_infos`` entry
+        the server answers with, whose ``id`` a post then carries. ``timeout`` is how
+        long to wait for the server between two chunks and for its answer after the
+        last; the client's default otherwise."""
+        headers = {"Content-Type": content_type or "application/octet-stream", "Content-Length": str(size)}
+        r = await self._client.post("/files", params={"channel_id": channel_id, "filename": name},
+                                    content=chunks, headers=headers, timeout=self._transfer(timeout))
         r.raise_for_status()
-        return r.content
+        try:
+            infos = r.json().get("file_infos") or []
+        except ValueError as exc:  # a 2xx that is not JSON (a proxy's page), as ``_json`` treats it
+            raise httpx.DecodingError(f"POST /files: not JSON: {exc}", request=r.request) from exc
+        if not infos:
+            raise httpx.DecodingError("POST /files: no file_infos in the answer", request=r.request)
+        return infos[0]
+
+    def stream_file(self, file_id: str, timeout: float | None = None):
+        """``async with`` for the file's response, its body read as a stream; ``timeout``
+        as for :meth:`upload`."""
+        return self._client.stream("GET", f"/files/{file_id}", timeout=self._transfer(timeout))
+
+    def _transfer(self, timeout: float | None) -> httpx.Timeout | httpx.USE_CLIENT_DEFAULT.__class__:
+        """The client's connect and pool timeouts, with the read and write ones a file
+        transfer needs."""
+        if timeout is None:
+            return httpx.USE_CLIENT_DEFAULT
+        return httpx.Timeout(self._client.timeout.connect, read=timeout, write=timeout, pool=self._client.timeout.pool)

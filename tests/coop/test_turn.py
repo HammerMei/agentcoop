@@ -25,7 +25,7 @@ async def test_a_wake_carries_metadata_and_no_text_and_the_lease_starts_at_the_p
     wake = sb.bot.turns[-1].wake
     assert wake.source == "addressed" and wake.room == "team" and wake.bot == "a"
     assert wake.trigger.post_id == post.id and wake.trigger.author_role == "owner" and wake.trigger.relayed is False
-    assert wake.hwm == post.position and wake.rules_version == sb.gateway.rules_version == 3
+    assert wake.hwm == post.position and wake.rules_version == sb.gateway.rules_version == 4
     assert wake.lease_expires_at == 0.0 + FAST.lease_seconds  # polled at once, in process
     assert not hasattr(wake, "text") and [p.id for p in sb.bot.turns[-1].delivered] == ["p1", "p2"]
     assert sb.trace.last("lease_started", bot="a").wake == wake.wake_id

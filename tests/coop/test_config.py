@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from coop.config import ConfigError, load, parse
+from coop.room.attachments import Limits
 
 BASE = Path("/srv/coop")
 
@@ -45,6 +46,13 @@ rooms:
 
 def parsed(text: str = FULL):
     return parse(yaml.safe_load(text), BASE)
+
+
+def test_the_attachment_limits_default_to_the_platforms_and_parse_under_gateway():
+    assert parsed().gateway.attachments == Limits(max_size_mb=0, max_per_post=0, transfer_timeout_seconds=120)
+    config = parsed("gateway: {attachments: {max_size_mb: 10.5, max_per_post: 3, transfer_timeout_seconds: 30}}")
+    assert config.gateway.attachments == Limits(max_size_mb=10.5, max_per_post=3, transfer_timeout_seconds=30)
+    assert config.gateway.attachments.max_bytes == int(10.5 * 1024 * 1024)
 
 
 def test_the_full_document_parses_with_relative_paths_under_the_base():
@@ -113,6 +121,13 @@ def test_load_reads_yaml_and_an_empty_file_is_an_empty_config(tmp_path):
     ("rooms: {'x:[': {agents: [a]}}", "rooms.'x:\\['"),
     ("gateway: {listen: 7474}", "host:port"),
     ("gateway: {tls: {cert: c}}", "gateway.tls.key"),
+    ("gateway: {attachments: {max_size_mb: -1}}", "gateway.attachments.max_size_mb: a number of at least 0"),
+    ("gateway: {attachments: {max_per_post: 1.5}}", "gateway.attachments.max_per_post: a whole number"),
+    ("gateway: {attachments: {max_per_post: true}}", "gateway.attachments.max_per_post: a number"),
+    ("gateway: {attachments: {transfer_timeout_seconds: 0}}", "transfer_timeout_seconds: a number of at least 1"),
+    ("gateway: {attachments: {cache_dir: x}}", "gateway.attachments: unknown keys \\['cache_dir'\\]"),
+    ("gateway: {attachments: {max_size_mb: .nan}}", "gateway.attachments.max_size_mb: a number of at least 0"),
+    ("gateway: {attachments: {max_per_post: .inf}}", "gateway.attachments.max_per_post: a number of at least 0"),
 ])
 def test_what_the_loader_refuses_and_where_it_points(text, message):
     doc = yaml.safe_load(text)

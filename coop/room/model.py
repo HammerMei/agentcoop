@@ -3,6 +3,7 @@ section 3.1, and the structures the mechanisms exchange with the doorbell."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
@@ -228,17 +229,37 @@ class Wake:
 
 
 @dataclass
+class Upload:
+    """One file a ``send --attach`` posts (design §3.3): its name, type and declared
+    size, and its bytes as a stream read once, while the platform takes them."""
+
+    name: str
+    content_type: str
+    size: int
+    chunks: AsyncIterator[bytes] = field(repr=False, compare=False)
+
+    @classmethod
+    def of(cls, name: str, data: bytes, content_type: str = "application/octet-stream") -> Upload:
+        async def one() -> AsyncIterator[bytes]:
+            yield data
+
+        return cls(name, content_type, len(data), one())
+
+
+@dataclass
 class Reply:
     """One ``send``: a reply item of section 5.9 as the CLI states it. ``wake_id`` is
     attribution only (design §3.5): ``None`` is an unsolicited send. ``thread`` is
     ``None`` for a new top-level post, which opens a thread of its own (design §3.3:
-    a top-level post is its own thread root)."""
+    a top-level post is its own thread root). ``files`` are posted with the text as
+    their caption."""
 
     thread: str | None
     to: list[str] | None = None
     text: str | None = None
     control: dict | None = None
     wake_id: str | None = None
+    files: tuple[Upload, ...] = ()
 
 
 @dataclass(frozen=True)

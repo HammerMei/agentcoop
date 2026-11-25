@@ -12,9 +12,9 @@ range ``[cursor, hwm]`` a read needs is here before the wake is issued.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
-from ..room.model import Member, Position, Post, PostKind, Role
+from ..room.model import Member, Position, Post, PostKind, Role, Upload
 from ..room.platform import RefusedPost
 from ..room.roster import Roster
 from .base import Connector, MemberInfo, RoomInfo
@@ -115,14 +115,16 @@ class RoomLog:
     async def typing(self, author: str, thread: str) -> None:
         await self.connector.typing(author, self.id, thread)
 
-    async def fetch_attachment(self, file_id: str) -> bytes:
+    async def fetch_attachment(self, file_id: str) -> AsyncIterator[bytes]:
         if not self.hosted:
             raise KeyError(file_id)
-        return await self.connector.fetch_file(self.hosted[0], file_id)
+        async for chunk in self.connector.fetch_file(self.hosted[0], file_id):
+            yield chunk
 
-    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None) -> Post:
+    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None,
+                   files: tuple[Upload, ...] = ()) -> Post:
         if thread is not None and thread in self.archived:
             raise RefusedPost(thread)
-        post = await self.connector.post(author, self.id, text, thread)
+        post = await self.connector.post(author, self.id, text, thread, files)
         await self.admit(post)  # the core sees it now, as every other post; the echo is then a duplicate
         return post
