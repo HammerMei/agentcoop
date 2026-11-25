@@ -34,6 +34,20 @@ def test_an_agent_command_goes_to_the_agent_cli_with_its_arguments():
     assert set(AGENT_COMMANDS) == {"read", "send", "done", "bio", "attachment"}
 
 
+def test_an_agent_command_after_its_connection_options_is_still_the_agents(capsys):
+    """The agent CLI's options come before its command (`coop --gateway U --token T
+    read …`): the command word is found past them, flags and `--opt=value` included."""
+    from coop.entry import command_word
+
+    argv = ["--gateway", "http://x", "--token=t", "--transfer-timeout", "7", "read", "--room", "team"]
+    assert command_word(argv) == "read"
+    with patch("coop.agent.cli.main", return_value=0) as agent_main:
+        assert main(argv) == 0
+    agent_main.assert_called_once_with(argv)
+    assert command_word(["--gateway", "http://x"]) is None and command_word(["--gateway", "x", "--help"]) == "--help"
+    assert main(["--gateway", "http://x"]) == 2 and "coop legacy" in capsys.readouterr().err
+
+
 def test_an_operator_command_goes_to_the_operator_cli():
     with patch("coop.cli.main", return_value=3) as operator_main:
         assert main(["status"]) == 3

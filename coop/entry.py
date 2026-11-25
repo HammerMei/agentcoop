@@ -6,8 +6,11 @@ coop read | send | done | bio | attachment …                                  
 coop legacy <command> …                                                          the current gateway's whole CLI (gateway.cli)
 ```
 
-The first word routes, before any parser runs, so each family keeps its own
-options and help; the agent's side imports nothing of the daemon's. ``legacy`` is
+The command word routes, before any parser runs, so each family keeps its own
+options and help; the agent's side imports nothing of the daemon's. The agent
+CLI's connection options come before its command (``coop --gateway U --token T
+read …``), so the command word is the first that is not an option or an option's
+value; the operator CLI has no options before its command. ``legacy`` is
 the migration's name for the frozen ``gateway`` package's commands (design §7:
 the old daemon keeps its rooms until each agent has moved) and goes with that
 package at step 6.
@@ -31,18 +34,36 @@ usage: coop <command> ...
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("-h", "--help"):
-        print(USAGE, end="", file=sys.stdout if argv else sys.stderr)
-        return 0 if argv else 2
-    if argv[0] in AGENT_COMMANDS:
+    word = command_word(argv)
+    if word in ("-h", "--help"):
+        print(USAGE, end="")
+        return 0
+    if word is None:  # nothing, or options with no command: a usage error
+        print(USAGE, end="", file=sys.stderr)
+        return 2
+    if word in AGENT_COMMANDS:
         from .agent.cli import main as agent_main
 
         return agent_main(argv)
-    if argv[0] == LEGACY:
+    if word == LEGACY and argv[0] == LEGACY:
         return legacy(argv[1:])
     from .cli import main as operator_main
 
     return operator_main(argv)
+
+
+def command_word(argv: list[str]) -> str | None:
+    """The first word that is not an option or an option's value: ``--opt value``
+    takes two, ``--opt=value`` and a flag one; ``-h``/``--help`` is the word itself."""
+    i = 0
+    while i < len(argv):
+        word = argv[i]
+        if word in ("-h", "--help"):
+            return word
+        if not word.startswith("-"):
+            return word
+        i += 1 if "=" in word else 2
+    return None
 
 
 def legacy(argv: list[str]) -> int:
