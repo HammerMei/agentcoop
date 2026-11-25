@@ -108,7 +108,7 @@ class Service:
         self.wake_seed = int(time.time() * 1000) if wake_seed is None else wake_seed
         # the handle prefix is this run's: a handle from before a restart names nothing (design §3.3)
         self.gateway = Gateway(self.clock, self.trace, name="coop", rules_version=rules_version,
-                               handle_prefix=f"a{secrets.token_hex(2)}-", limits=self.config.gateway.attachments)
+                               handle_prefix=f"a{secrets.token_hex(4)}-", limits=self.config.gateway.attachments)
         self.gateway.on_bio = self._save_agents
         self.tokens: dict[str, str] = {}  # bearer token -> agent, shared with the doorbell app
         self.connectors: dict[str, Connector] = {}
@@ -461,6 +461,11 @@ class Service:
         if (config.gateway.address, config.gateway.tls) != (self.config.gateway.address, self.config.gateway.tls):
             self._note("[WARNING] gateway.listen/tls changed in the configuration; the listener keeps the old "
                        "ones until a restart")
+        if (config.gateway.attachments.transfer_timeout_seconds
+                != self.config.gateway.attachments.transfer_timeout_seconds):
+            # the drain of a refused send's body (``_listen``) is sized once, with the listener
+            self._note("[WARNING] gateway.attachments.transfer_timeout_seconds changed; transfers run under the new "
+                       "value, but a refused send's body is drained for the old one until a restart")
 
     def _refuse_server_changes(self, config: Config) -> None:
         for name, server in config.servers.items():

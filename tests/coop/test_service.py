@@ -347,7 +347,7 @@ async def test_an_attachment_is_fetched_through_a_hosted_bot(running):
     _, posts = svc.gateway.read("a", wake.wake_id)
     delivered = svc.gateway.deliverable("a", "fake:team", next(p for p in posts if p.id == post.id))
     handle = delivered.attachments[0].id  # the handle a read over the doorbell prints
-    assert re.fullmatch(r"a[0-9a-f]{4}-1", handle)  # this daemon run's prefix: a restart's handles never collide
+    assert re.fullmatch(r"a[0-9a-f]{8}-1", handle)  # this daemon run's prefix: a restart's handles never collide
     found, chunks = svc.gateway.fetch_attachment("a", handle)
     assert found.name == "a.txt" and b"".join([c async for c in chunks]) == b"hello"
 
@@ -489,6 +489,8 @@ RELOAD_CASES = [
     ("rooms:", "gateway: {listen: 127.0.0.1:1}\nrooms:", "warned", lambda svc, fc, notes: any("gateway.listen/tls" in n for n in notes)),
     ("rooms:", "classifier: {command: [echo]}\nrooms:", "applied", lambda svc, fc, notes: svc.config.classifier.command == ("echo",)),
     ("rooms:", "gateway: {attachments: {max_size_mb: 1}}\nrooms:", "applied", lambda svc, fc, notes: svc.gateway.limits.max_size_mb == 1),
+    ("rooms:", "gateway: {attachments: {transfer_timeout_seconds: 9}}\nrooms:", "warned",
+     lambda svc, fc, notes: svc.gateway.limits.transfer_timeout_seconds == 9 and any("drained for the old one" in n for n in notes)),
     ("guests: [G]", "guests: [G, K]", "applied", lambda svc, fc, notes: "K" in svc.rooms["fake:team"].core.roster.guests),
     ('"fake:team*"', '"fake:nothing"', "applied", lambda svc, fc, notes: svc.rooms == {}),
 ]

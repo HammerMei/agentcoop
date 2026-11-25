@@ -353,3 +353,19 @@ async def test_a_post_that_held_the_room_past_thirty_seconds_is_said(monkeypatch
     monkeypatch.setattr(sb.room, "post", slow)
     await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id))
     assert sb.trace.last("slow_post", bot="a").seconds == 31
+
+
+async def test_a_platform_error_during_the_upload_is_said_with_its_message(monkeypatch, caplog):
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a hello", "t1")
+    wake = sb.gateway.poll("a")
+
+    async def down(*a, **kw):
+        raise PlatformError("fake: upload x.bin: 503 Service Unavailable")
+
+    monkeypatch.setattr(sb.room, "post", down)
+    with caplog.at_level("WARNING"), pytest.raises(PlatformError):
+        await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id, files=(Upload.of("x.bin", b"x"),)))
+    assert sb.trace.last("platform_error", bot="a").error == "fake: upload x.bin: 503 Service Unavailable"
+    assert any("failed at the platform (fake: upload x.bin: 503" in r.message and "counts as answered" in r.message
+               for r in caplog.records)

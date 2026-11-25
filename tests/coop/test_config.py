@@ -126,6 +126,8 @@ def test_load_reads_yaml_and_an_empty_file_is_an_empty_config(tmp_path):
     ("gateway: {attachments: {max_per_post: true}}", "gateway.attachments.max_per_post: a number"),
     ("gateway: {attachments: {transfer_timeout_seconds: 0}}", "transfer_timeout_seconds: a number of at least 1"),
     ("gateway: {attachments: {cache_dir: x}}", "gateway.attachments: unknown keys \\['cache_dir'\\]"),
+    ("gateway: {attachments: {max_size_mb: .nan}}", "gateway.attachments.max_size_mb: a number of at least 0"),
+    ("gateway: {attachments: {max_per_post: .inf}}", "gateway.attachments.max_per_post: a number of at least 0"),
 ])
 def test_what_the_loader_refuses_and_where_it_points(text, message):
     doc = yaml.safe_load(text)

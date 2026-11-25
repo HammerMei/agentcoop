@@ -391,6 +391,25 @@ async def test_a_download_is_streamed_with_its_length_and_a_broken_one_ends_shor
     assert r.status_code == 413 and "over the 0.0001 MB limit" in r.json()["error"]
 
 
+async def test_a_download_that_runs_past_the_transfer_timeout_ends_short(api, sb, monkeypatch):
+    from coop.room.attachments import Limits
+
+    post = await sb.human("@a see", "t1", attachments=(("slow.bin", "application/octet-stream", b"0123456789"),))
+    wake = await wake_for(api, "a")
+    r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
+    handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
+
+    async def slow(file_id):
+        yield b"0123"
+        await asyncio.sleep(0.5)  # the whole fetch, the writes included, is under one deadline (real time)
+        yield b"456789"
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", slow)
+    sb.gateway.limits = Limits(transfer_timeout_seconds=0.2)
+    with pytest.raises(httpx.RemoteProtocolError):
+        await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+
+
 # ── done, bio, rules ────────────────────────────────────────────────────────
 
 

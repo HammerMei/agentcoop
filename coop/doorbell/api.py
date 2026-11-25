@@ -332,6 +332,9 @@ async def rules(request: web.Request) -> web.Response:
 async def attachment(request: web.Request) -> web.StreamResponse:
     doorbell: _Doorbell = request.app[DOORBELL]
     handle = request.match_info["handle"]
+    # one deadline for the whole fetch, the writes to the agent included: a reader that
+    # stops reading does not hold the handler and the platform's stream past it
+    deadline = asyncio.get_running_loop().time() + doorbell.gateway.limits.transfer_timeout_seconds
     try:
         found, chunks = doorbell.gateway.fetch_attachment(request[AGENT], handle)
         first = await anext(chunks, b"")  # what the platform refuses, it refuses here, before any header
@@ -350,16 +353,17 @@ async def attachment(request: web.Request) -> web.StreamResponse:
                                            "Content-Disposition": f'attachment; filename="{name}"'})
     if found.size:
         response.content_length = found.size  # a short body is then a truncation the client can see
-    await response.prepare(request)
-    await response.write(first)
     try:
-        async for chunk in chunks:
-            await response.write(chunk)
-    except (PlatformError, TransferTimeout, AttachmentRefused) as exc:
+        async with asyncio.timeout_at(deadline):
+            await response.prepare(request)
+            await response.write(first)
+            async for chunk in chunks:
+                await response.write(chunk)
+    except (PlatformError, TransferTimeout, AttachmentRefused, TimeoutError) as exc:
         # the headers are out: the body ends short of its length (or of the chunked
         # terminator) and the client discards it; closing the transport here, rather
         # than raising, keeps aiohttp from logging a traceback for an ordinary break
-        logger.warning("attachment %s: the transfer broke: %s", handle, exc)
+        logger.warning("attachment %s: the transfer broke: %s", handle, exc or type(exc).__name__)
         response.force_close()
         if request.transport is not None:
             request.transport.close()

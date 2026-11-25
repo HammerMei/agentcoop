@@ -269,7 +269,7 @@ class Gateway:
         if problem is not None:
             raise AttachmentRefused(problem, handle)
         chunks = bounded(core.platform.fetch_attachment(entry.attachment.id), handle, self.limits,
-                         expected=entry.attachment.size or None, clock=self.clock.now)
+                         expected=entry.attachment.size or None)  # the loop's monotonic clock, not the room's
 
         async def counted() -> AsyncIterator[bytes]:
             async for chunk in chunks:
@@ -293,7 +293,7 @@ class Gateway:
         if problem is not None:
             core.trace.add(core.now(), "attachment_refused", gateway=core.name, bot=bot, thread=reply.thread, name=name)
             raise AttachmentRefused(problem, name)
-        reply.files = tuple(replace(u, chunks=bounded(u.chunks, u.name, self.limits, expected=u.size, clock=self.clock.now))
+        reply.files = tuple(replace(u, chunks=bounded(u.chunks, u.name, self.limits, expected=u.size))
                             for u in reply.files)
 
     def starting_thread(self, agent: str, wake_id: str) -> str:

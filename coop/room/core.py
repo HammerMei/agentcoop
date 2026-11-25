@@ -1185,8 +1185,9 @@ class RoomCore:
 
     def _post_failed(self, bot: str, reply: Reply, run: TurnRun | None, exc: BaseException) -> None:
         """A refused post closes the thread for the turn, and the reply still counts as
-        given (5.6, 5.9), as does one the platform may have taken (a platform error:
-        unknown either way, counted as not posted, the agent reads the room). A refused
+        given (5.6, 5.9), as does one the platform did not answer (unknown whether taken
+        when the post request failed, not posted when a file's upload before it did;
+        counted as not posted, the agent reads the room). A refused
         file, by the platform or by the gateway's limits while it was read, posted
         nothing and leaves the thread open and unanswered; so does any other failure
         (the agent's connection dropped mid-upload). Design §3.3."""
@@ -1199,8 +1200,12 @@ class RoomCore:
         elif isinstance(exc, (RefusedAttachment, AttachmentRefused, TransferTimeout)):
             self.trace.add(self.now(), "attachment_refused", gateway=self.name, bot=bot, thread=reply.thread, name=exc.name)
         elif isinstance(exc, PlatformError):
-            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
+            # the post request itself, or a file's upload before it (then nothing was posted):
+            # the connector's message says which, and the thread counts as answered either way
+            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread, error=str(exc))
             if given:
+                logger.warning("%s: a post by %s in %s failed at the platform (%s); the thread counts as answered",
+                               self.room, bot, reply.thread, exc)
                 run.ledger.add(reply.thread)
         else:
             self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread,

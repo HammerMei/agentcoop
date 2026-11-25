@@ -47,6 +47,7 @@ in a normal install is the runtime directory (``coop/paths.py``).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -313,7 +314,7 @@ def _attachments(entry: Any, where: str) -> Limits:
         value = entry.get(key)
         if value is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < least:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < least:
             raise ConfigError(f"{where}.{key}: a number of at least {least}")
         if kind is int and int(value) != value:
             raise ConfigError(f"{where}.{key}: a whole number")
