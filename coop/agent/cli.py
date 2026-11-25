@@ -6,6 +6,7 @@ coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--cont
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
 coop attachment ID [--out PATH]
+coop agent run --kind claude|opencode|codex [--program P] [--workdir D] [--state D] [--wait S]
 ```
 
 They are the ``coop`` binary's agent family (coop/entry.py); ``python -m coop <command>`` is the same.
@@ -23,7 +24,9 @@ import asyncio
 import mimetypes
 import os
 import secrets
+import signal
 import sys
+import tomllib
 from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -42,20 +45,43 @@ from ..room.attachments import AttachmentRefused
 from ..room.model import ALL, Attachment, Post, Reply, Upload, Wake
 from ..room.platform import RefusedAttachment, RefusedPost
 from ..room.prompt import one_line, render_hint
+from .adapters import ADAPTERS
 from .client import HttpDoorbell
 
 PROG = "coop"
 
 
+AGENT_TOML = Path.home() / ".coop" / "agent.toml"
+
+
+def defaults() -> dict[str, str]:
+    """The connection: the ``COOP_*`` variables, else ``~/.coop/agent.toml``'s
+    ``[connection]`` (``gateway``, ``token``, ``fingerprint``, ``transfer_timeout``),
+    so a service unit carries no token on its command line (design §3.4)."""
+    found: dict[str, str] = {}
+    try:
+        section = tomllib.loads(AGENT_TOML.read_text()).get("connection", {})
+    except (OSError, ValueError):
+        section = {}
+    for key in ("gateway", "token", "fingerprint", "transfer_timeout"):
+        value = os.environ.get(f"COOP_{key.upper()}")
+        if value is None and isinstance(section.get(key), (str, int, float)):
+            value = str(section[key])
+        if value is not None:
+            found[key] = value
+    return found
+
+
 def parser() -> argparse.ArgumentParser:
+    given = defaults()
     top = argparse.ArgumentParser(prog=PROG, description="the agent's side of the room")
-    top.add_argument("--gateway", default=os.environ.get("COOP_GATEWAY"), help="doorbell address (COOP_GATEWAY)")
-    top.add_argument("--token", default=os.environ.get("COOP_TOKEN"), help="bearer token (COOP_TOKEN)")
-    top.add_argument("--transfer-timeout", type=float, default=float(os.environ.get("COOP_TRANSFER_TIMEOUT", "120")),
+    top.add_argument("--gateway", default=given.get("gateway"), help="doorbell address (COOP_GATEWAY, or agent.toml)")
+    top.add_argument("--token", default=given.get("token"), help="bearer token (COOP_TOKEN, or agent.toml)")
+    top.add_argument("--transfer-timeout", type=float, default=float(given.get("transfer_timeout", "120")),
                      metavar="S", help="how long a file transfer may take, the gateway's transfer_timeout_seconds "
                      "(COOP_TRANSFER_TIMEOUT, default 120)")
-    top.add_argument("--fingerprint", default=os.environ.get("COOP_FINGERPRINT"),
-                     help="the gateway certificate's SHA-256 fingerprint to pin (COOP_FINGERPRINT)")
+    top.add_argument("--fingerprint", default=given.get("fingerprint"),
+                     help="the gateway certificate's SHA-256 fingerprint to pin (COOP_FINGERPRINT, or agent.toml)")
     sub = top.add_subparsers(dest="command", required=True)
 
     read = sub.add_parser("read", help="the hint and the posts of a wake, or a room's posts after the cursor")
@@ -89,6 +115,15 @@ def parser() -> argparse.ArgumentParser:
     attachment = sub.add_parser("attachment", help="download one attachment by the handle read printed")
     attachment.add_argument("id")
     attachment.add_argument("--out", type=Path, help="where to write it (default: its name, here)")
+    agent = sub.add_parser("agent", help="the utility for CLI agents")
+    asub = agent.add_subparsers(dest="what", required=True)
+    run_ = asub.add_parser("run", help="one command per wake, done --failed when the agent sent none (design §3.4)")
+    run_.add_argument("--kind", required=True, choices=sorted(ADAPTERS), help="which CLI drives the turns")
+    run_.add_argument("--program", help="the CLI's program (default: its name on PATH)")
+    run_.add_argument("--workdir", type=Path, default=Path.cwd(), help="the command's working directory (default: here)")
+    run_.add_argument("--state", type=Path, default=Path.home() / ".coop" / "agents" / "default",
+                      help="where the sessions and the rules are kept (default: ~/.coop/agents/default)")
+    run_.add_argument("--wait", type=float, default=30.0, metavar="S", help="the long-poll wait (default 30)")
     return top
 
 
@@ -212,7 +247,28 @@ def upload_of(path: Path) -> Upload:
     return Upload(path.name, content_type or "application/octet-stream", path.stat().st_size, chunks())
 
 
-COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio, "attachment": cmd_attachment}
+async def cmd_agent(doorbell: HttpDoorbell, args) -> int:
+    """``coop agent run``: the utility's loop until SIGTERM/SIGINT."""
+    from .adapters import DEFAULT_PROGRAM
+    from .run import Runner
+
+    adapter = ADAPTERS[args.kind](args.program or DEFAULT_PROGRAM[args.kind])
+    here = str(Path(sys.argv[0]).resolve().parent)
+    env = {"COOP_GATEWAY": args.gateway, "COOP_TOKEN": args.token, "COOP_TRANSFER_TIMEOUT": str(args.transfer_timeout),
+           "PATH": f"{here}{os.pathsep}{os.environ.get('PATH', '')}"}
+    if args.fingerprint:
+        env["COOP_FINGERPRINT"] = args.fingerprint
+    runner = Runner(doorbell, adapter, args.state.expanduser(), args.workdir.expanduser(), env)
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, runner.stop)
+    print(f"coop agent run: {adapter.kind} ({adapter.program}) in {runner.workdir}, state in {runner.state_dir}",
+          file=sys.stderr)
+    return await runner.serve(args.wait)
+
+
+COMMANDS = {"read": cmd_read, "send": cmd_send, "done": cmd_done, "bio": cmd_bio, "attachment": cmd_attachment,
+            "agent": cmd_agent}
 
 
 # ── rendering ───────────────────────────────────────────────────────────────

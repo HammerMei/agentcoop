@@ -31,7 +31,7 @@ def test_an_agent_command_goes_to_the_agent_cli_with_its_arguments():
     with patch("coop.agent.cli.main", return_value=7) as agent_main:
         assert main(["read", "--room", "team", "--gateway", "http://x", "--token", "t"]) == 7
     agent_main.assert_called_once_with(["read", "--room", "team", "--gateway", "http://x", "--token", "t"])
-    assert set(AGENT_COMMANDS) == {"read", "send", "done", "bio", "attachment"}
+    assert set(AGENT_COMMANDS) == {"read", "send", "done", "bio", "attachment", "agent"}
 
 
 def test_an_agent_command_after_its_connection_options_is_still_the_agents(capsys):
