@@ -56,6 +56,7 @@ class FakeMattermost:
         self.uploads: list[dict] = []  # what ``POST /files`` received: the headers and query a real server sees
         self.refuse_posts = False
         self.refuse_files = False
+        self.upload_html = False  # ``POST /files`` answers a proxy's page with a 200
         self.failure: Exception | None = None  # raised by every request while set: the server is unreachable
         self.not_found = False  # every request answers 404
         self.html = False  # every request answers 200 with a page, as a proxy in the way does
@@ -137,6 +138,8 @@ class FakeMattermost:
         ``filename`` as query parameters, a ``Content-Length`` the server insists on."""
         if self.refuse_files:
             return httpx.Response(413, json={"message": "Unable to upload file. File is too large."})
+        if self.upload_html:
+            return httpx.Response(200, text="<html>sign in</html>")
         params = dict(request.url.params)
         if "Content-Length" not in request.headers or request.headers.get("Transfer-Encoding") == "chunked":
             return httpx.Response(400, json={"message": "content length required"})
@@ -277,6 +280,13 @@ async def test_files_uploaded_before_a_later_failure_are_said_to_stay_on_the_ser
     assert mm.files["f1"] == b"ok" and len(mm.posts["c01"]) == 0
     assert any("files f1 uploaded for a post that was not made stay on the server unattached" in r.message
                for r in caplog.records)
+
+
+async def test_an_upload_answered_with_a_page_instead_of_json_is_a_platform_error(connected):
+    connector, mm, seen, _ = connected
+    mm.upload_html = True
+    with pytest.raises(PlatformError, match="not JSON"):
+        await connector.post("laomei_bot", "c01", "x", None, files=(Upload.of("a.txt", b"a"),))
 
 
 async def test_what_the_gateways_limits_raise_while_a_file_is_read_passes_through_the_upload(connected):

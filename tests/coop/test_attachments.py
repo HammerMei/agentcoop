@@ -215,6 +215,8 @@ async def test_a_file_alone_with_recipients_mentions_them_and_checks_them():
     sb.gateway.limits = Limits()
     with pytest.raises(RefusedSend, match="recipient 'nobody' is not a member"):  # the recipients rule applies to a caption
         await sb.gateway.send("a", Reply("t1", ["nobody"], wake_id=wake.wake_id, files=(Upload.of("h.png", b"x"),)))
+    await sb.gateway.done("a", wake.wake_id)
+    assert sb.trace.last("rule", bot="a", mechanism="recipients").outcome == "rejected"  # and is counted at done
 
 
 async def test_a_file_refused_mid_send_leaves_the_thread_unanswered(monkeypatch):

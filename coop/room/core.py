@@ -1130,8 +1130,8 @@ class RoomCore:
         found = set()
         if reply.control is not None:
             found.add((reply.thread, "control"))
-        if reply.text is not None:
-            found.add((reply.thread, "text"))
+        if reply.text is not None or (reply.files and reply.to):
+            found.add((reply.thread, "text"))  # a file's caption of mentions is a recipients item too
         return found
 
     def _note_hinted(self, bot: str, reply: Reply, run: TurnRun | None) -> None:

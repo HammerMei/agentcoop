@@ -197,6 +197,20 @@ async def test_a_file_the_platform_refuses_is_one_error_line_naming_it(sb, coop,
     assert capsys.readouterr().err.splitlines()[-1] == "[ERROR] the platform refused the file huge.iso: 413: too large"
 
 
+async def test_a_download_never_writes_through_a_name_already_there(sb, coop, capsys, tmp_path, monkeypatch):
+    await sb.human("@a see", "t1", attachments=(("report.pdf", "application/pdf", b"new"),))
+    w = await wake_id(sb)
+    assert await coop("read", "--wake", w) == 0
+    capsys.readouterr()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a1.part").write_text("someone else's")
+    (tmp_path / "elsewhere").write_text("target")
+    (tmp_path / "r.pdf.part").symlink_to(tmp_path / "elsewhere")
+    assert await coop("attachment", "a1", "--out", str(tmp_path / "r.pdf")) == 0
+    assert (tmp_path / "a1.part").read_text() == "someone else's" and (tmp_path / "elsewhere").read_text() == "target"
+    assert (tmp_path / "r.pdf").read_bytes() == b"new" and not list(tmp_path.glob(".r.pdf.*"))
+
+
 async def test_a_download_whose_final_rename_fails_leaves_no_part_file(sb, coop, capsys, tmp_path, monkeypatch):
     await sb.human("@a see", "t1", attachments=(("report.pdf", "application/pdf", b"x"),))
     w = await wake_id(sb)

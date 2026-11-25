@@ -108,7 +108,10 @@ class MattermostREST:
         r = await self._client.post("/files", params={"channel_id": channel_id, "filename": name},
                                     content=chunks, headers=headers)
         r.raise_for_status()
-        infos = r.json().get("file_infos") or []
+        try:
+            infos = r.json().get("file_infos") or []
+        except ValueError as exc:  # a 2xx that is not JSON (a proxy's page), as ``_json`` treats it
+            raise httpx.DecodingError(f"POST /files: not JSON: {exc}", request=r.request) from exc
         if not infos:
             raise httpx.DecodingError("POST /files: no file_infos in the answer", request=r.request)
         return infos[0]

@@ -346,6 +346,11 @@ async def test_a_file_over_the_limits_is_413_and_nothing_is_posted(api, sb):
     assert r.status_code == 400 and "multipart" in r.json()["error"]
 
 
+async def test_a_multipart_send_with_no_boundary_is_400_not_500(api, sb):
+    r = await api.post("/v1/agents/me/posts", headers={**as_("a"), "Content-Type": "multipart/form-data"}, content=b"x")
+    assert r.status_code == 400 and "JSON reply" in r.json()["error"]
+
+
 async def test_a_file_the_platform_refuses_is_502_with_the_file_named_and_the_thread_open(api, sb, monkeypatch):
     from coop.room.platform import RefusedAttachment
 

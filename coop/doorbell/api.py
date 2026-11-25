@@ -223,7 +223,10 @@ async def _send_body(request: web.Request) -> tuple[dict | None, MultipartReader
     """The reply document, and the multipart reader when the send carries files."""
     if request.content_type != "multipart/form-data":
         return await _json(request), None
-    parts = await request.multipart()
+    try:
+        parts = await request.multipart()
+    except ValueError:  # a multipart content type with no usable boundary: not a send
+        return None, None
     return await _reply_part(parts), parts
 
 
