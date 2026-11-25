@@ -1,5 +1,11 @@
 # AgentCoop Architecture
 
+> **`coop legacy`** — the commands in this document are the current gateway's and
+> are run as `coop legacy <command>` (`coop legacy start`, `coop legacy send …`):
+> the `coop` binary now serves the remote-agent daemon and its agent commands
+> (`docs/design/remote-agent-gateway.md`), and the bare `coop start` / `coop send`
+> are that daemon's. The prefix goes with the old package (design §7 step 6).
+
 A comprehensive guide to the internal design of AgentCoop—a standalone Python daemon that bridges chat platforms to AI agent backends with role-based access control and human-in-the-loop tool approval.
 
 **Target audience:** Developers who want to understand the system internals, extend with new connectors or agents, or contribute to the codebase.

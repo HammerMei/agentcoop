@@ -109,7 +109,7 @@ def acg(rc_setup: dict[str, Any]) -> None:
     """Wait for the AgentCoop Docker container to be ready, then warm up agents.
 
     Expects the container to already be started (by Makefile / CI).
-    Polls `docker exec acg-e2e coop status` until it succeeds
+    Polls `docker exec acg-e2e coop legacy status` until it succeeds
     or times out.
 
     After AgentCoop reports ready, sends a warm-up ping to both the DM (OpenCode)
@@ -185,7 +185,7 @@ def _warmup_agents(rc_setup: dict[str, Any]) -> None:
 
 
 def _wait_for_acg(timeout: float, interval: float) -> None:
-    """Poll docker exec until coop status returns 0.
+    """Poll docker exec until coop legacy status returns 0.
 
     "Not there at all" and "there but still starting" get different
     treatment. Waiting the full timeout for a container that does not exist
@@ -211,7 +211,7 @@ def _wait_for_acg(timeout: float, interval: float) -> None:
     last_output = ""
     while time.monotonic() < deadline:
         result = subprocess.run(
-            ["docker", "exec", COOP_CONTAINER, "coop", "status"],
+            ["docker", "exec", COOP_CONTAINER, "coop", "legacy", "status"],
             capture_output=True,
             text=True,
         )
@@ -305,7 +305,7 @@ def mm_connected(acg: None, mm_setup: dict[str, Any]) -> None:
         pytest.fail(
             "The gateway is not running inside "
             f"'{COOP_CONTAINER}' — this is not a Mattermost problem.\n"
-            "'coop status' exits 0 even when it reports 'not "
+            "'coop legacy status' exits 0 even when it reports 'not "
             "running', so the readiness wait upstream does not catch it. "
             f"'docker logs {COOP_CONTAINER}' will show a startup that never "
             "finished; 'make e2e-dump' collects everything."

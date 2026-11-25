@@ -1,5 +1,11 @@
 # Migrating to AgentCoop v1
 
+> **`coop legacy`** — the commands in this document are the current gateway's and
+> are run as `coop legacy <command>` (`coop legacy start`, `coop legacy send …`):
+> the `coop` binary now serves the remote-agent daemon and its agent commands
+> (`docs/design/remote-agent-gateway.md`), and the bare `coop start` / `coop send`
+> are that daemon's. The prefix goes with the old package (design §7 step 6).
+
 v1.0.0 is a clean break from the v0 line (agent-chat-gateway 0.x) in two ways,
 and both are handled by reinstalling rather than by migrating anything in place:
 

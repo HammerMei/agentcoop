@@ -29,13 +29,13 @@ lint: ## Run ruff check (if installed)
 	fi
 
 start: ## Start daemon
-	uv run coop start
+	uv run coop legacy start
 
 stop: ## Stop daemon
-	uv run coop stop
+	uv run coop legacy stop
 
 status: ## Show daemon status
-	uv run coop status
+	uv run coop legacy status
 
 clean: ## Remove __pycache__, .coverage, dist/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
@@ -140,7 +140,7 @@ e2e-shell: ## Shell into a running E2E container (S=acg|rocketchat|mongodb|matte
 
 e2e-acg: ## Run an AgentCoop command inside the container (e.g. make e2e-acg C="list")
 	@test -n "$(C)" || (echo "usage: make e2e-acg C=\"list\"" && exit 1)
-	docker compose -f $(E2E_COMPOSE) exec acg coop $(C)
+	docker compose -f $(E2E_COMPOSE) exec acg coop legacy $(C)
 
 e2e-dump: ## Write full container logs + state to ./e2e-logs (same set CI uploads)
 	@mkdir -p e2e-logs
@@ -152,7 +152,7 @@ e2e-dump: ## Write full container logs + state to ./e2e-logs (same set CI upload
 	@docker compose -f $(E2E_COMPOSE) config > e2e-logs/resolved-compose.yml 2>&1 || true
 	@docker exec acg-e2e sh -c 'cat /root/.agentcoop/gateway.log' \
 	    > e2e-logs/acg-gateway.log 2>&1 || true
-	@docker exec acg-e2e coop list --all > e2e-logs/acg-list.txt 2>&1 || true
+	@docker exec acg-e2e coop legacy list --all > e2e-logs/acg-list.txt 2>&1 || true
 	@echo "==> Wrote e2e-logs/ ($$(ls e2e-logs | wc -l | tr -d ' ') files)"
 
 e2e-probe: ## Re-verify the RC platform behaviour design §6 depends on, against the running stack

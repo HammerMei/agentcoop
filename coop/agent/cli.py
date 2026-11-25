@@ -8,7 +8,7 @@ coop bio   --file bio.md
 coop attachment ID [--out PATH]
 ```
 
-Until the ``coop`` entry point moves, they run as ``python -m coop.agent <command>``.
+They are the ``coop`` binary's agent family (coop/entry.py); ``python -m coop <command>`` is the same.
 The gateway address and the token come from ``--gateway`` / ``--token`` or the
 environment (``COOP_GATEWAY``, ``COOP_TOKEN``; ``COOP_TRANSFER_TIMEOUT`` matches the gateway's
 ``transfer_timeout_seconds`` when it is raised above 120). A failure prints one ``[ERROR]`` line

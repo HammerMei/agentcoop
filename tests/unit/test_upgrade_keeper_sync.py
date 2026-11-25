@@ -1,4 +1,4 @@
-"""`coop upgrade` brings ~/.agentcoop/agents/builtin/coop-keeper/ up to the shipped
+"""`coop legacy upgrade` brings ~/.agentcoop/agents/builtin/coop-keeper/ up to the shipped
 release by manifest, and touches nothing else (coop-keeper design §3.1 as amended:
 a forever-growing list of owned paths, `in-use` overwritten, `obsolete` removed,
 everything unlisted left alone).

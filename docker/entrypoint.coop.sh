@@ -246,17 +246,17 @@ fi
 # Start the gateway daemon
 # -----------------------------------------------------------------------------
 info "Starting AgentCoop..."
-coop start
+coop legacy start
 
 # Wait briefly and check status — but do NOT exit on failure.
 # A misconfigured gateway should keep the container alive so the user can
 # inspect logs and fix config without hitting a restart loop.
 sleep 2
-if coop status; then
+if coop legacy status; then
     success "Gateway is running."
 else
     warn "Gateway failed to start — container will stay alive for inspection."
-    warn "Fix your config, then run: docker exec coop coop start"
+    warn "Fix your config, then run: docker exec coop coop legacy start"
     warn "Logs: docker logs coop  OR  docker exec coop tail -f $RUNTIME_DIR/gateway.log"
 fi
 
@@ -266,7 +266,7 @@ fi
 # -----------------------------------------------------------------------------
 cleanup() {
     info "Shutdown signal received — stopping AgentCoop..."
-    coop stop
+    coop legacy stop
     info "AgentCoop stopped."
     exit 0
 }

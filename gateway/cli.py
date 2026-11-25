@@ -26,7 +26,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """The full `coop` argparse tree, separate from main() so tests can parse a
     command line (the coop-keeper skills' commands, say) without running it."""
     parser = argparse.ArgumentParser(
-        prog="coop",
+        prog="coop legacy",  # the entry point is the remote-agent daemon's (coop/entry.py); this tree is reached through it
         description="Standalone service bridging Rocket.Chat rooms to agent sessions",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
@@ -878,7 +878,7 @@ def _validate_or_exit(config_path: str) -> None:
     `GatewayConfig.from_file()` — parsing and dataclass construction, none of
     the cross-checks (state orphans, room/session uniqueness, rule shadowing)
     that `validate_config()` runs. A config the operator could see rejected by
-    `coop config validate` still started a gateway.
+    `coop legacy config validate` still started a gateway.
 
     The condition mirrors the reload path's (`GatewayService._handle_config_reload`)
     exactly: errors refuse, warnings and lint findings do not. Callers run this
@@ -908,7 +908,7 @@ def _validate_or_exit(config_path: str) -> None:
             # installing and the first bot — but a daemon with no watcher
             # rule would sit there answering nothing.
             print(f"[ERROR] {config_path}: no watcher rules — nothing to run. "
-                  f"Add a rule (coop config add rule …) and start again.",
+                  f"Add a rule (coop legacy config add rule …) and start again.",
                   file=sys.stderr)
             sys.exit(1)
         return
@@ -1034,7 +1034,7 @@ def _run_config_reload(args) -> None:
         plan.dry_run = False
         plan.error = ("the daemon is not running, so there is nothing to apply to — the plan "
                       "above is what the next start executes. Start it with: "
-                      "coop start")
+                      "coop legacy start")
         if args.json:
             # Refused, with the plan body kept: `ok: false` plus `changes` and
             # `watchers` is what text mode shows too (plan, then the error).
@@ -1106,7 +1106,7 @@ def _run_config_show(args) -> None:  # noqa: C901
             print(f"Active:  {active['digest']} (loaded {active['loaded_at']})")
             if not in_sync:
                 print("⚠ The running daemon's configuration differs from the file — "
-                      "run 'coop config reload' to apply it.")
+                      "run 'coop legacy config reload' to apply it.")
         print()
         for path, value in flatten_config(config):
             print(f"{path}: {value}")
@@ -1266,7 +1266,7 @@ def _run_config_edit(args) -> None:  # noqa: C901
             outcome = ce.EditOutcome(
                 ok=False, dry_run=args.dry_run, config_path=os.path.abspath(args.config),
                 error=f"could not apply the edit ({type(exc).__name__}) — nothing written; "
-                      "'coop config validate' on the file may say more")
+                      "'coop legacy config validate' on the file may say more")
     _report_edit(outcome, json_mode=args.json)
 
 
@@ -1423,7 +1423,7 @@ def _run_schedule(args) -> None:
     """Handle 'schedule' subcommands."""
     if not hasattr(args, "schedule_cmd") or not args.schedule_cmd:
         print(
-            "Usage: coop schedule "
+            "Usage: coop legacy schedule "
             "{create,list,delete,pause,resume,migrate}"
         )
         sys.exit(1)
@@ -2157,7 +2157,7 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
 
     running, pid = is_running()
     if not running:
-        print("Error: Gateway is not running. Start it with: coop start", file=sys.stderr)
+        print("Error: Gateway is not running. Start it with: coop legacy start", file=sys.stderr)
         sys.exit(1)
 
     if not CONTROL_SOCK.exists():
@@ -2173,7 +2173,7 @@ def _send_command(request: dict, timeout: float = 60.0) -> dict:
         # the daemon took the request and may well still be working on it
         # (a long reload). Neither "nothing changed" nor "done": exit 2.
         print(f"[ERROR] No response from the daemon within {timeout:.0f}s (pid={pid}). "
-              f"It may still be working on the request — check 'coop "
+              f"It may still be working on the request — check 'coop legacy "
               f"status' and the log before running it again.", file=sys.stderr)
         sys.exit(2)
     except OSError as exc:

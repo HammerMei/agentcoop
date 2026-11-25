@@ -1020,7 +1020,7 @@ class TestHumanApprovalDisabled(unittest.IsolatedAsyncioTestCase):
             human_approval=False,
         )
         broker._owner_allowed_tools = AgentConfig().effective_owner_allowed_tools()
-        body = _hook_body("Bash", tool_input={"command": "coop send --room r hello"}, session_id="ses_o")
+        body = _hook_body("Bash", tool_input={"command": "coop legacy send --room r hello"}, session_id="ses_o")
         result = json.loads(await broker._handle_hook(body))
         self.assertEqual(result["decision"], "allow")
         body = _hook_body("Bash", tool_input={"command": "rm -rf /"}, session_id="ses_o")

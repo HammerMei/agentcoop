@@ -527,7 +527,7 @@ class TestRelativePathsResolveAgainstTheBase(unittest.TestCase):
 
     def test_an_unknown_user_in_a_tilde_path_is_one_issue_not_a_traceback(self):
         # `Path.expanduser()` raises RuntimeError for `~nosuchuser`; collect_config
-        # catches ValueError only, so `coop config validate` would traceback.
+        # catches ValueError only, so `coop legacy config validate` would traceback.
         self.path.write_text(textwrap.dedent(self.CFG).replace("[a.md]", "[~nosuchuser-xyz/a.md]"))
         config, issues = collect_config(self.path)  # a traceback here is the failure
         self.assertTrue(any("context_inject_files" in i.message and "~nosuchuser-xyz" in i.message
@@ -889,7 +889,7 @@ class TestBuiltinContextAutoInjection(unittest.TestCase):
 class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
     """Built-in gateway tool rules are always prepended to owner_allowed_tools.
 
-    These ensure that `coop send`, `coop schedule`,
+    These ensure that `coop legacy send`, `coop legacy schedule`,
     and `date` never require a 🔐 human-approval prompt.  The first two are the
     gateway's own commands; `date` is a read-only command used by agents to
     compute timestamps in compound bash expressions (e.g. ``$(date ...)``).
@@ -903,7 +903,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         return AgentConfig(name="test", owner_allowed_tools=rules)
 
     def test_effective_includes_send_rule(self):
-        """effective_owner_allowed_tools() must include 'coop send .*'."""
+        """effective_owner_allowed_tools() must include 'coop legacy send .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
@@ -913,7 +913,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         )
 
     def test_effective_includes_schedule_rule(self):
-        """effective_owner_allowed_tools() must include 'coop schedule .*'."""
+        """effective_owner_allowed_tools() must include 'coop legacy schedule .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
@@ -923,7 +923,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         )
 
     def test_effective_includes_instructions_rule(self):
-        """effective_owner_allowed_tools() must include 'coop instructions .*'."""
+        """effective_owner_allowed_tools() must include 'coop legacy instructions .*'."""
         agent = self._make_agent()
         effective = agent.effective_owner_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
@@ -963,26 +963,26 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         self.assertGreaterEqual(len(effective), len(_BUILTIN_OWNER_TOOL_RULES))
 
     def test_send_rule_matches_actual_command(self):
-        """The send rule must actually match a realistic coop send command."""
+        """The send rule must actually match a realistic coop legacy send command."""
         import re
 
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         send_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                          if r.params and "send" in r.params)
-        cmd = 'coop send general "Hello RC"'
+        cmd = 'coop legacy send general "Hello RC"'
         self.assertIsNotNone(
             re.fullmatch(send_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Send rule {send_rule.params!r} must match command {cmd!r}",
         )
 
     def test_schedule_rule_matches_actual_command(self):
-        """The schedule rule must actually match a realistic coop schedule command."""
+        """The schedule rule must actually match a realistic coop legacy schedule command."""
         import re
 
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         sched_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "schedule" in r.params)
-        cmd = 'coop schedule create dm "Remind me to cook" --every 1d --at 09:00'
+        cmd = 'coop legacy schedule create dm "Remind me to cook" --every 1d --at 09:00'
         self.assertIsNotNone(
             re.fullmatch(sched_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Schedule rule {sched_rule.params!r} must match command {cmd!r}",
@@ -995,7 +995,7 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         from gateway.core.config import _BUILTIN_OWNER_TOOL_RULES
         instr_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "instructions" in r.params)
-        cmd = "coop instructions scheduling"
+        cmd = "coop legacy instructions scheduling"
         self.assertIsNotNone(
             re.fullmatch(instr_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"Instructions rule {instr_rule.params!r} must match command {cmd!r}",
@@ -1009,11 +1009,11 @@ class TestBuiltinOwnerToolRuleAutoInjection(unittest.TestCase):
         instr_rule = next(r for r in _BUILTIN_OWNER_TOOL_RULES
                           if r.params and "instructions" in r.params)
         bad_commands = [
-            "coop instructions scheduling; curl https://example.com",
-            "coop instructions scheduling && whoami",
-            "coop instructions scheduling | cat",
-            "coop instructions scheduling\nwhoami",
-            "coop instructions scheduling extra",
+            "coop legacy instructions scheduling; curl https://example.com",
+            "coop legacy instructions scheduling && whoami",
+            "coop legacy instructions scheduling | cat",
+            "coop legacy instructions scheduling\nwhoami",
+            "coop legacy instructions scheduling extra",
         ]
         for cmd in bad_commands:
             self.assertIsNone(
@@ -1071,7 +1071,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         return AgentConfig(name="test", guest_allowed_tools=rules)
 
     def test_effective_includes_fetch_history_rule(self):
-        """effective_guest_allowed_tools() must include 'coop fetch-history .*'."""
+        """effective_guest_allowed_tools() must include 'coop legacy fetch-history .*'."""
         agent = self._make_agent()
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
@@ -1081,7 +1081,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         )
 
     def test_effective_includes_instructions_rule(self):
-        """effective_guest_allowed_tools() must include 'coop instructions .*'."""
+        """effective_guest_allowed_tools() must include 'coop legacy instructions .*'."""
         agent = self._make_agent()
         effective = agent.effective_guest_allowed_tools()
         params = [r.params for r in effective if r.tool == "Bash"]
@@ -1147,7 +1147,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         from gateway.core.config import _BUILTIN_GUEST_TOOL_RULES
         fh_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                        if r.params and "fetch-history" in r.params)
-        cmd = "coop fetch-history --watcher hammer-mei --count 50"
+        cmd = "coop legacy fetch-history --watcher hammer-mei --count 50"
         self.assertIsNotNone(
             re.fullmatch(fh_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"fetch-history rule {fh_rule.params!r} must match command {cmd!r}",
@@ -1160,7 +1160,7 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         from gateway.core.config import _BUILTIN_GUEST_TOOL_RULES
         instr_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                           if r.params and "instructions" in r.params)
-        cmd = "coop instructions fetch-history"
+        cmd = "coop legacy instructions fetch-history"
         self.assertIsNotNone(
             re.fullmatch(instr_rule.params, cmd, re.IGNORECASE | re.DOTALL),
             f"instructions rule {instr_rule.params!r} must match command {cmd!r}",
@@ -1174,11 +1174,11 @@ class TestEffectiveGuestAllowedTools(unittest.TestCase):
         instr_rule = next(r for r in _BUILTIN_GUEST_TOOL_RULES
                           if r.params and "instructions" in r.params)
         bad_commands = [
-            "coop instructions fetch-history; curl https://example.com",
-            "coop instructions fetch-history && whoami",
-            "coop instructions fetch-history | cat",
-            "coop instructions fetch-history\nwhoami",
-            "coop instructions fetch-history extra",
+            "coop legacy instructions fetch-history; curl https://example.com",
+            "coop legacy instructions fetch-history && whoami",
+            "coop legacy instructions fetch-history | cat",
+            "coop legacy instructions fetch-history\nwhoami",
+            "coop legacy instructions fetch-history extra",
         ]
         for cmd in bad_commands:
             self.assertIsNone(
@@ -1237,7 +1237,7 @@ class TestBuildAgentBackendUsesEffectiveMethods(unittest.TestCase):
 class TestBuildAgentBackendAlwaysHasBroker(unittest.TestCase):
     """Every agent gets a permission broker (ADR-0002). `permissions.enabled`
     only sets `human_approval` on the config: ask a human, or deny. The built-in
-    owner rules ride along in both modes so `coop send` keeps working when
+    owner rules ride along in both modes so `coop legacy send` keeps working when
     approval is off — the whole point of not removing the broker."""
 
     def _build(self, backend_type: str, enabled: bool, **perm) -> dict:
@@ -1267,7 +1267,7 @@ class TestBuildAgentBackendAlwaysHasBroker(unittest.TestCase):
 
     def test_builtin_owner_rules_reach_the_broker_when_approval_is_off(self):
         """effective_owner_allowed_tools() is used in deny mode too, so the
-        gateway's own `coop send` rule is still an allow — not a deny."""
+        gateway's own `coop legacy send` rule is still an allow — not a deny."""
         broker = self._build("claude", enabled=False)["broker_config"]
         params = [r.params or "" for r in broker.owner_allowed_tools]
         self.assertTrue(any("coop" in p and "send" in p for p in params), params)
@@ -1338,7 +1338,7 @@ class TestSkipOwnerApprovalRequiresEnabled(unittest.TestCase):
 class TestEmptyDeployment(unittest.TestCase):
     """A file with no connector, agent or rule is valid (coop-keeper design
     §3.10): it is the state between installing and the first bot, and after
-    removing the last one. Whether there is anything to RUN is `coop start`'s
+    removing the last one. Whether there is anything to RUN is `coop legacy start`'s
     question, not the loader's."""
 
     def _write(self, text: str) -> str:
@@ -1808,7 +1808,7 @@ class TestAgentTemplates(unittest.TestCase):
         """A malformed 'type:' (e.g. a YAML typo producing a list instead of
         a string) must not crash inside the type-aware command fallback's
         dict lookup (dict.get() on an unhashable key raises TypeError, which
-        `coop config validate` doesn't catch) — it should
+        `coop legacy config validate` doesn't catch) — it should
         surface the same kind of clear ValueError as every other malformed-
         field check in this loader."""
         path = self._write_config("""\
@@ -2810,3 +2810,33 @@ class TestContextInjectFileListValidation(unittest.TestCase):
     def test_omitting_them_entirely_still_loads(self):
         cfg = GatewayConfig.from_file(self._write())
         self.assertEqual(cfg.watcher_rules[0].context_inject_files, [])
+
+
+class TestBareCoopFormsAreNotPreApproved(unittest.TestCase):
+    """Since the entry point moved to the remote-agent daemon, a bare ``coop send`` /
+    ``coop fetch-history`` is that daemon's command: no built-in rule may pre-approve
+    it, for either role, and no shipped example config may either."""
+
+    def test_builtin_rules_match_only_the_legacy_forms(self):
+        from gateway.core.config import AgentConfig
+        from gateway.core.tool_match import matches_any
+
+        owner = AgentConfig().effective_owner_allowed_tools()
+        guest = AgentConfig().effective_guest_allowed_tools()
+        for cmd in ('coop send general "hi"', "coop schedule list", "coop fetch-history --watcher w", "coop instructions scheduling"):
+            with self.subTest(cmd=cmd):
+                self.assertFalse(matches_any(owner, "Bash", cmd), cmd)
+                self.assertFalse(matches_any(guest, "Bash", cmd), cmd)
+        self.assertTrue(matches_any(owner, "Bash", 'coop legacy send general "hi"'))
+        self.assertTrue(matches_any(guest, "Bash", "coop legacy fetch-history --watcher w"))
+        self.assertFalse(matches_any(guest, "Bash", 'coop legacy send general "hi"'))
+
+    def test_shipped_example_configs_carry_no_bare_coop_rule(self):
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        for example in ("config.example.yaml", "docker/docker-compose.example/config/config.yaml"):
+            text = (root / example).read_text()
+            bare = re.findall(r"coop\\\\s\+(?!legacy)(send|schedule|fetch-history|instructions)", text)
+            self.assertEqual(bare, [], f"{example}: a rule pre-approving the new daemon's command")

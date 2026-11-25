@@ -22,7 +22,7 @@ which is why this is the one tab NOT sorted by name, and why '['/']' move
 the rule under the cursor up/down (persisted immediately, like every other
 direct list mutation here). The runtime side — which sessions each rule has
 actually materialized — is deliberately NOT shown here: the config tool
-operates on config.yaml only (owner decision 2026-08-18); `coop list` is the
+operates on config.yaml only (owner decision 2026-08-18); `coop legacy list` is the
 runtime view.
 
 The Templates tab (v0.3 redesign) replaced the old Defaults tab (a fixed,
@@ -763,7 +763,7 @@ class OverviewScreen(Screen):
     async def action_view_validation_details(self) -> None:
         """'v' — the actual message text behind the banner's bare count
         (user-reported: no way to find out WHAT to fix without running
-        `coop config validate` in a separate terminal). A
+        `coop legacy config validate` in a separate terminal). A
         no-op if there's nothing to show (result is None — e.g. right after
         an app.load_error, which already shows its full message inline —
         or a clean validate with lint off)."""
@@ -847,7 +847,7 @@ class OverviewScreen(Screen):
         if has_lint:
             summary += f", {len(result.lint_findings)} lint finding(s)"
         # User-reported: the count alone gave no way to find out WHAT to
-        # fix short of running `coop config validate`
+        # fix short of running `coop legacy config validate`
         # separately — the actual message text (result.errors/warnings/
         # lint_findings) was computed but never shown anywhere. Only
         # advertised inline, in the banner itself, when there's actually

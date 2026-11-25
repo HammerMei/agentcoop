@@ -261,7 +261,7 @@ class EditableConfig:
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup_dir.chmod(0o700)
             # Nanoseconds, not seconds: two saves in one second (a scripted
-            # `coop config patch` twice) named the same backup, and the second
+            # `coop legacy config patch` twice) named the same backup, and the second
             # copy2 overwrote the first — the very snapshot it promised to keep.
             backup_path = backup_dir / f"{target.name}.bak.{time.time_ns()}"
             shutil.copy2(target, backup_path)

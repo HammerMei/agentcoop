@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The `coop` binary is the remote-agent daemon's** (`coop.entry:main`). Its first
+  word routes: `start/stop/status/list/pause/resume/reset/reload/config` are the new
+  daemon's operator commands, `read/send/done/bio/attachment` the agent's, and
+  **every command of the current gateway is `coop legacy <command>`** (`coop legacy
+  start`, `coop legacy send …`, `coop legacy schedule …`). Nothing detects the old
+  form: a bare `coop start` or `coop status` now acts on the new daemon, and a bare
+  `coop send` is the new daemon's agent send. Update what runs the old gateway —
+  service units, cron lines, the keeper, agent instructions, your own permission
+  rules — to the `legacy` form; the built-in owner/guest tool rules, the shipped
+  contexts and the keeper's skills are updated in this release. `python -m coop`
+  is the same command.
+
 ### Added
 - **coop-keeper**, the built-in admin agent (`agents/coop-keeper/`, installed
   to `~/.agentcoop/agents/builtin/coop-keeper/`). Run it from that directory

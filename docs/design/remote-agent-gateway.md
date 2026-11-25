@@ -658,7 +658,15 @@ field carries the gateway's event kind on a `SYSTEM:` post.
    (to confirm: the production host was not reachable when this was written).
 2. Deploy the new daemon beside the old one on a lab server, pointed at a lab room,
    with the fake agent. Then with one real CLI agent through the utility.
-3. Production: move agents one at a time. The old gateway keeps the rooms it still
+3. Production: move agents one at a time. The `coop` binary is the new daemon's
+   from the start of this step: its first word routes to the operator's commands,
+   the agent's (`read`, `send`, `done`, `bio`, `attachment`), or, as `coop legacy
+   <command>`, the whole command tree of the old gateway, which keeps its own
+   runtime files (`gateway.pid`, `control.sock`) beside the new daemon's
+   (`coop.pid`, `coop.sock`). Nothing detects the old form: a bare `coop start` is
+   the new daemon's, and what runs the old one — service units, the keeper, the
+   contexts an agent reads, the built-in tool rules — says `legacy`. The old
+   gateway keeps the rooms it still
    owns. An agent migrated to the new daemon is removed from the old configuration
    the same day, so no agent is woken twice. Its new cursor starts at the room's
    latest post (§3.6 step 4). The move is not seamless and does not claim to be:
@@ -667,7 +675,7 @@ field carries the gateway's event kind on a `SYSTEM:` post.
 4. Agents that are not AgentCoop-hosted today keep working untouched. They may
    subscribe later for relevance tags and metadata.
 5. Re-home scheduled jobs before removing the old daemon.
-6. Remove the old `gateway/` package.
+6. Remove the old `gateway/` package, and `coop legacy` with it.
 
 ## 8. Open decisions
 

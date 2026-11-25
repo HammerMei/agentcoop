@@ -1,5 +1,11 @@
 # Built-in Task Scheduler
 
+> **`coop legacy`** — the commands in this document are the current gateway's and
+> are run as `coop legacy <command>` (`coop legacy start`, `coop legacy send …`):
+> the `coop` binary now serves the remote-agent daemon and its agent commands
+> (`docs/design/remote-agent-gateway.md`), and the bare `coop start` / `coop send`
+> are that daemon's. The prefix goes with the old package (design §7 step 6).
+
 ## Overview
 
 The scheduler lets AgentCoop proactively trigger tasks on a fixed cadence or at a specific time — without waiting for a human to send a message. You can use it to:

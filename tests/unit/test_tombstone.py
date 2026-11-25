@@ -39,7 +39,7 @@ class TestTombstone(unittest.TestCase):
         py = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
         scripts = py["project"]["scripts"]
         self.assertEqual(scripts["agent-chat-gateway"], "gateway.tombstone:main")
-        self.assertEqual(scripts["coop"], "gateway.cli:main")
+        self.assertEqual(scripts["coop"], "coop.entry:main")  # the remote-agent daemon's; the old tree is `coop legacy`
         self.assertEqual(scripts["coop-provision"], "gateway.admin.cli:main")
         self.assertNotIn("acg-provision", scripts)
 

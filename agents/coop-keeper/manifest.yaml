@@ -1,6 +1,6 @@
 # Paths in this directory that AgentCoop owns, relative to the directory.
 #
-# `coop upgrade` reads the shipped copy of this file and, for each entry:
+# `coop legacy upgrade` reads the shipped copy of this file and, for each entry:
 #   in-use   — a file is overwritten with the shipped one; a directory is
 #              replaced as a unit (removed, then copied).
 #   obsolete — removed if present, file or directory.

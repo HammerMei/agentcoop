@@ -219,7 +219,7 @@ class MembershipHook:
 # classes: enforcement happens in `gateway/config.py`, which only ever sees a
 # `ConnectorConfig` (a type string, no instance), and `gateway/connectors/` imports
 # `gateway.config`, so reading the classes from there would invert the dependency
-# and pull the whole websocket stack into `coop config validate`.
+# and pull the whole websocket stack into `coop legacy config validate`.
 #
 # Two declarations of one fact is the shape that has bitten this loader repeatedly,
 # so they are bound by a test that walks every type the connector factory knows and

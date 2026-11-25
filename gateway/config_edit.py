@@ -1,4 +1,4 @@
-"""Editing `config.yaml` from the command line: `coop config add/remove/patch`,
+"""Editing `config.yaml` from the command line: `coop legacy config add/remove/patch`,
 `show --raw` and `backends` (coop-keeper design §3.10).
 
 Everything here works on the RAW document — the file as written, templates and
@@ -573,7 +573,7 @@ def validate_document(document: dict, config_path: Path) -> "ValidationResult":
             # value it choked on, which may be a credential.
             raise PatchError(
                 f"the validator could not check the result ({type(exc).__name__}) — "
-                "nothing written; 'coop config validate' on the file may say more"
+                "nothing written; 'coop legacy config validate' on the file may say more"
             ) from exc
     finally:
         with contextlib.suppress(OSError):
@@ -831,7 +831,7 @@ def agent_fragment(
         # start, as "Unknown agent type" from backend construction.
         raise PatchError(
             f"unknown agent type {agent_type!r} — one of "
-            f"{', '.join(sorted(_AGENT_TYPE_DEFAULT_COMMAND))} (see 'coop config backends')"
+            f"{', '.join(sorted(_AGENT_TYPE_DEFAULT_COMMAND))} (see 'coop legacy config backends')"
         )
     if os.sep in command and not os.path.isabs(command):
         # `./claude` would be checked here against the caller's directory and
@@ -846,7 +846,7 @@ def agent_fragment(
     if resolved is None:
         raise PatchError(
             f"command {command!r} was not found on PATH — install the backend, or see "
-            "'coop config backends'"
+            "'coop legacy config backends'"
         )
     if not os.path.isabs(resolved):
         # A relative PATH entry (`.`, `bin`) resolved it against the caller's

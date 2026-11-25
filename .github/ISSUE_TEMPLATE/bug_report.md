@@ -24,6 +24,6 @@ What you expected to happen.
 ## Environment
 - OS: [e.g. macOS 14, Ubuntu 22.04]
 - Python version: `python3 --version`
-- AgentCoop version: `coop status`
+- AgentCoop version: `coop legacy status`
 - Agent backend: [Claude / OpenCode]
 - Connector: [Rocket.Chat version]

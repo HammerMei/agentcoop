@@ -821,7 +821,7 @@ def _restart_daemon_in_fresh_interpreter() -> int:
 
 def run_upgrade() -> None:
     """Entry point called by CLI."""
-    console.print("[bold cyan]coop upgrade[/bold cyan]")
+    console.print("[bold cyan]coop legacy upgrade[/bold cyan]")
 
     meta = load_install_meta()
     if not meta:
@@ -877,7 +877,7 @@ def run_upgrade() -> None:
                 console.print(
                     f"[red]Error:[/red] the daemon did not start after the upgrade "
                     f"(exit {rc}). The code is upgraded; start it with "
-                    f"'coop start' and check the log."
+                    f"'coop legacy start' and check the log."
                 )
                 sys.exit(rc)
 

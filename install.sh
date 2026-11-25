@@ -272,7 +272,7 @@ uv sync --project "$REPO_DIR"
 #
 #   Backing up rather than refusing is deliberate. Refusing sounds safer but
 #   leaves a worse state: install_meta.json is written unconditionally further
-#   down, so `coop upgrade` would manage $REPO_DIR while PATH ran
+#   down, so `coop legacy upgrade` would manage $REPO_DIR while PATH ran
 #   whatever occupied the destination — a repo whose code never executes.
 #   Backing up keeps the managed command working AND loses nothing.
 #
@@ -437,7 +437,7 @@ if [ -d "$REPO_DIR/contexts" ] && [ -n "$(ls "$REPO_DIR/contexts/" 2>/dev/null)"
 fi
 
 # ---------------------------------------------------------------------------
-# Write install_meta.json — required by `coop upgrade` to locate the repo.
+# Write install_meta.json — required by `coop legacy upgrade` to locate the repo.
 # ---------------------------------------------------------------------------
 COOP_VERSION=$(grep '^version' "$REPO_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
 cat > "$RUNTIME_DIR/install_meta.json" << EOF
@@ -451,7 +451,7 @@ success "Wrote install_meta.json (version=$COOP_VERSION, repo=$REPO_DIR)"
 
 # ---------------------------------------------------------------------------
 # Install the coop-keeper agent directory.
-# Same code path as `coop upgrade`: the paths agents/coop-keeper/manifest.yaml
+# Same code path as `coop legacy upgrade`: the paths agents/coop-keeper/manifest.yaml
 # lists are written, anything else already in the directory is left alone —
 # so re-running the installer over an existing install keeps the operator's
 # files there. On a first install the directory is absent and this is a copy.
@@ -467,7 +467,7 @@ if install_keeper_dir "$REPO_DIR" "$RUNTIME_DIR"; then
 elif [ $? -eq 2 ]; then
   info "No coop-keeper directory in this checkout — skipped"
 else
-  error "coop-keeper could not be installed (see above). install_meta.json is written, so 'coop upgrade' can retry it once the cause is fixed."
+  error "coop-keeper could not be installed (see above). install_meta.json is written, so 'coop legacy upgrade' can retry it once the cause is fixed."
 fi
 
 # ---------------------------------------------------------------------------
@@ -509,5 +509,5 @@ printf '  Set up your first bot with coop-keeper, using either CLI:\n'
 printf '    cd %s/agents/builtin/coop-keeper && opencode\n' "$RUNTIME_DIR"
 printf '    cd %s/agents/builtin/coop-keeper && claude\n' "$RUNTIME_DIR"
 printf '\n'
-printf '  Then:  coop status          tail -f %s/gateway.log\n' "$RUNTIME_DIR"
+printf '  Then:  coop legacy status          tail -f %s/gateway.log\n' "$RUNTIME_DIR"
 printf '\n'

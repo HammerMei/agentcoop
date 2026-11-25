@@ -154,7 +154,7 @@ def connector_factory(cc: ConnectorConfig) -> Connector:
 
 ### 4. Teach the CLI and coop-keeper about it
 
-`coop config add connector --type` and `coop-provision init --type` accept
+`coop legacy config add connector --type` and `coop-provision init --type` accept
 the connector types the code knows (`gateway/config_edit.py`,
 `gateway/admin/cli.py`); add yours there, and add a profile backend under
 `gateway/admin/` if coop-keeper should provision accounts on it. Document the

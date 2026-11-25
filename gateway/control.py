@@ -61,7 +61,7 @@ def _degraded_error(entry: "ConnectorEntry") -> dict | None:
         return None
     return {"ok": False, "error": (
         f"Connector '{entry.name}' is degraded: {degraded}. Fix the cause and run "
-        f"'coop config reload' to bring it back.")}
+        f"'coop legacy config reload' to bring it back.")}
 
 
 class ControlServer:

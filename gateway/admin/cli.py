@@ -278,7 +278,7 @@ def parse_argv(argv: list[str]) -> argparse.Namespace:
 
 
 def _read_password_file(path: str) -> str:
-    """The same reader `coop config add --password-file` and `{from_file:}`
+    """The same reader `coop legacy config add --password-file` and `{from_file:}`
     use: one trailing newline stripped, empty refused, errors name the path
     and never the content. Re-raised as RuntimeError, which _run() reports
     as a clean `Error:` line."""

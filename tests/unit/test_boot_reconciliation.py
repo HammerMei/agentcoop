@@ -2,7 +2,7 @@
 
 Seam: a real `SessionManager` (`make_manager`) booted through `sync_only`,
 observed through `dispatch_command` and the saved state — what an operator
-sees after `coop restart` followed by `list`.
+sees after `coop legacy restart` followed by `list`.
 """
 
 from tests.helpers import (

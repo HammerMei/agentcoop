@@ -144,6 +144,7 @@ def test_schedule_fires(
 
     create_result = _docker_exec(
         "coop",
+        "legacy",
         "schedule",
         "create",
         watcher,
@@ -191,7 +192,7 @@ def test_schedule_fires(
     except Exception as exc:
         # Fetch the job list for debugging context before failing.
         list_result = _docker_exec(
-            "coop", "schedule", "list", "--all", check=False
+            "coop", "legacy", "schedule", "list", "--all", check=False
         )
         pytest.fail(
             f"Timed out waiting for scheduled job to fire (job_id={job_id}).\n"
@@ -205,7 +206,7 @@ def test_schedule_fires(
         )
 
     # ── 3. Verify job is marked completed ─────────────────────────────────────
-    list_result = _docker_exec("coop", "schedule", "list", "--all")
+    list_result = _docker_exec("coop", "legacy", "schedule", "list", "--all")
     assert list_result.returncode == 0, (
         f"'schedule list --all' failed:\n{list_result.stderr}"
     )
@@ -225,4 +226,4 @@ def test_schedule_fires(
     )
 
     # ── 4. Clean up ────────────────────────────────────────────────────────────
-    _docker_exec("coop", "schedule", "delete", job_id, check=False)
+    _docker_exec("coop", "legacy", "schedule", "delete", job_id, check=False)

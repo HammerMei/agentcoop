@@ -11,7 +11,7 @@ Runs when the session-start checks show one of:
   server no profile covers;
 - a profile whose `username`/`password`/`token` fields are `""` (empty means
   unfilled; `***` means filled);
-- `coop config show --raw --json` → `"exists": false`.
+- `coop legacy config show --raw --json` → `"exists": false`.
 
 ## A server with no profile
 

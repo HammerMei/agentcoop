@@ -1,7 +1,7 @@
 # fetch-history — On-Demand Channel History
 
 You can pull channel history at any point during your session using the
-`coop fetch-history` command. This complements the startup
+`coop legacy fetch-history` command. This complements the startup
 history injection (which is a fixed snapshot taken when your session began)
 by letting you reach further back or refresh your view mid-session.
 
@@ -15,19 +15,19 @@ by letting you reach further back or refresh your view mid-session.
 
 ```bash
 # Fetch recent history for your own watcher (most common)
-coop fetch-history --watcher <your-watcher-name> --count 50
+coop legacy fetch-history --watcher <your-watcher-name> --count 50
 
 # Fetch messages from a specific point forward (most intuitive)
-coop fetch-history --watcher <your-watcher-name> --count 50 --after "2026-05-10T19:25:00+08:00"
+coop legacy fetch-history --watcher <your-watcher-name> --count 50 --after "2026-05-10T19:25:00+08:00"
 
 # Page backwards — fetch messages older than a given timestamp
-coop fetch-history --watcher <your-watcher-name> --count 50 --before "2026-05-10T10:00:00+08:00"
+coop legacy fetch-history --watcher <your-watcher-name> --count 50 --before "2026-05-10T10:00:00+08:00"
 
 # Fetch a specific time window (combine --after and --before)
-coop fetch-history --watcher <your-watcher-name> --count 100 --after "2026-05-10T08:00:00+08:00" --before "2026-05-10T20:00:00+08:00"
+coop legacy fetch-history --watcher <your-watcher-name> --count 100 --after "2026-05-10T08:00:00+08:00" --before "2026-05-10T20:00:00+08:00"
 
 # Control how many messages are shown verbatim vs condensed
-coop fetch-history --watcher <your-watcher-name> --count 100 --verbatim 30
+coop legacy fetch-history --watcher <your-watcher-name> --count 100 --verbatim 30
 ```
 
 Your watcher name is in your `Coop Session Identity` context block (e.g. `hammer-mei`).
@@ -51,7 +51,7 @@ in your current context to get everything after that point:
 
 ```bash
 # "Show me everything from 7:25 PM onwards"
-coop fetch-history --watcher hammer-mei --count 50 --after "2026-05-10T19:25:00+08:00"
+coop legacy fetch-history --watcher hammer-mei --count 50 --after "2026-05-10T19:25:00+08:00"
 ```
 
 **Backward pagination:** use `--before` with the oldest timestamp in your current
@@ -59,11 +59,11 @@ result to page further back:
 
 ```bash
 # Step 1: get recent history
-coop fetch-history --watcher hammer-mei --count 50
+coop legacy fetch-history --watcher hammer-mei --count 50
 # → note the oldest ts shown, e.g. "2026-05-10T08:15:00+08:00"
 
 # Step 2: page back further
-coop fetch-history --watcher hammer-mei --count 50 --before "2026-05-10T08:15:00+08:00"
+coop legacy fetch-history --watcher hammer-mei --count 50 --before "2026-05-10T08:15:00+08:00"
 ```
 
 ## Output format
