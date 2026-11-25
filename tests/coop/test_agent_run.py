@@ -237,7 +237,10 @@ async def test_a_reset_wake_starts_a_new_session_and_a_newer_rules_version_refet
 async def test_the_loop_stops_on_a_refused_token_and_waits_out_an_unreachable_gateway(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(run_module, "RETRY_SECONDS", (0.01,))
     stub = StubDoorbell()
-    stub.polls = [OSError("connection refused"), None, DoorbellError(401, "bad token")]
+    import httpx
+
+    stub.polls = [OSError("connection refused"), httpx.ConnectError("All connection attempts failed"), None,
+                  DoorbellError(401, "bad token")]
     runner = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
     assert await runner.serve(wait=0) == 1
     err = capsys.readouterr().err

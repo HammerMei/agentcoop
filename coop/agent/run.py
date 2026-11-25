@@ -17,6 +17,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
+
 from ..errors import DoorbellError, LostResponse
 from ..room.model import Wake
 from .adapters import Adapter, Turn
@@ -70,7 +72,7 @@ class Runner:
                 wake = None
                 retry = await self._wait_out(exc, retry)
                 continue
-            except OSError as exc:  # the gateway unreachable, a connection reset
+            except (httpx.HTTPError, OSError) as exc:  # the gateway unreachable, a reset, a timeout
                 wake = None
                 retry = await self._wait_out(exc, retry)
                 continue
