@@ -264,10 +264,15 @@ async def test_rules_that_cannot_be_fetched_fail_the_wake_and_do_not_stop_the_ut
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr(doorbell, "rules", down)
+    runner.sessions["team"] = "old"
+    sb.gw.reset("a")
     await sb.human("@a hello", "t1")
-    await runner.take(await doorbell.poll())
+    wake = await doorbell.poll()
+    assert wake.reset
+    await runner.take(wake)
     assert "rules could not be fetched" in capsys.readouterr().err
     assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure"
+    assert "team" not in runner.sessions  # the reset was applied before the fetch could fail
 
 
 # ── the runner's parts, with a stub doorbell ────────────────────────────────
@@ -307,6 +312,7 @@ async def test_a_reset_wake_starts_a_new_session_and_a_newer_rules_version_refet
     runner = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
     runner.sessions["team"] = "old"
     assert runner._session_for(a_wake()) == ("old", False)
+    runner._forget_on_reset(a_wake(reset=True))  # what ``take`` does first on a reset wake
     chosen, first = runner._session_for(a_wake(reset=True))
     assert first and chosen != "old" and runner.sessions["team"] == chosen
     assert runner._session_for(a_wake(rules_version=8)) == (chosen, False)
@@ -318,6 +324,24 @@ async def test_a_reset_wake_starts_a_new_session_and_a_newer_rules_version_refet
     assert runner.rules.read_text() == "rules v2"
     again = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
     assert again.sessions["team"] == chosen and again.rules_version == 7  # the state file survives a restart
+
+
+async def test_a_stop_during_the_backoff_ends_the_wait_at_once(tmp_path, capsys):
+    stub = StubDoorbell()
+    stub.polls = [OSError("connection refused")]  # then a 60 s wait, were it not for the stop
+    runner = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
+    serving = asyncio.ensure_future(runner.serve(wait=0))
+    await asyncio.sleep(0.1)
+    runner.stop()
+    assert await asyncio.wait_for(serving, 2) == 0
+
+
+def test_the_default_state_directory_is_per_cli_kind_and_connection():
+    from coop.agent.cli import default_state
+
+    claude, opencode = default_state("claude", "http://g", "t"), default_state("opencode", "http://g", "t")
+    assert claude != opencode and claude.name.startswith("claude-") and opencode.name.startswith("opencode-")
+    assert default_state("claude", "http://g", "t2") != claude and claude.parent == Path.home() / ".coop" / "agents"
 
 
 async def test_the_loop_stops_on_a_refused_token_and_waits_out_an_unreachable_gateway(tmp_path, monkeypatch, capsys):
@@ -340,6 +364,9 @@ def test_the_connection_defaults_come_from_agent_toml_under_the_environment(tmp_
     monkeypatch.delenv("COOP_GATEWAY", raising=False)
     monkeypatch.delenv("COOP_TOKEN", raising=False)
     assert cli.defaults() == {}
+    (tmp_path / "agent.toml").write_text("[connection\nbroken")
+    with pytest.raises(SystemExit):
+        cli.defaults()  # a malformed file is an [ERROR], not a traceback and not silence
     (tmp_path / "agent.toml").write_text('[connection]\ngateway = "http://g:1"\ntoken = "t"\ntransfer_timeout = 300\n')
     assert cli.defaults() == {"gateway": "http://g:1", "token": "t", "transfer_timeout": "300"}
     monkeypatch.setenv("COOP_TOKEN", "from-env")

@@ -41,6 +41,7 @@ class Runner:
     rules_version: int = -1
     sessions: dict[str, str] = field(default_factory=dict)
     stopping: bool = False
+    _stopped: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     _poll: asyncio.Task | None = field(default=None, repr=False)
     _process: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _ended_by_stop: bool = field(default=False, repr=False)
@@ -91,16 +92,16 @@ class Runner:
         seconds = RETRY_SECONDS[min(retry, len(RETRY_SECONDS) - 1)]
         print(f"[WARNING] the gateway did not answer the poll ({exc}); polling again in {seconds:.0f} s", file=sys.stderr)
         try:
-            await asyncio.sleep(seconds)
-        except asyncio.CancelledError:
-            if not self.stopping:
-                raise
+            await asyncio.wait_for(self._stopped.wait(), seconds)  # a stop ends the wait at once
+        except TimeoutError:
+            pass
         return retry + 1
 
     def stop(self) -> None:
         """SIGTERM/SIGINT: the poll in flight is cancelled, the command's group ended, and
         its wake fails with ``utility stopped``."""
         self.stopping = True
+        self._stopped.set()
         if self._poll is not None:
             self._poll.cancel()
         if self._process is not None:
@@ -110,12 +111,16 @@ class Runner:
     async def take(self, wake: Wake) -> None:
         """One wake: the rules current, the session chosen, the command run to its
         exit or the lease's end, then ``done --failed`` unless the agent closed it."""
+        self._forget_on_reset(wake)  # before anything that can fail: a reset is applied once, at this wake
         try:
             await self._refresh_rules(wake)
         except (DoorbellError, httpx.HTTPError, OSError) as exc:
             if isinstance(exc, DoorbellError) and exc.status == 401:
                 raise
             await self._done(wake, f"rules could not be fetched: {exc}")
+            return
+        if self.stopping:  # a stop arrived during the fetch: no command is started for it
+            await self._done(wake, STOPPED)
             return
         session, first = self._session_for(wake)
         turn = Turn(wake_text(wake), self.rules, session, first)
@@ -142,9 +147,6 @@ class Runner:
     def _session_for(self, wake: Wake) -> tuple[str | None, bool]:
         """The room's session, or a new one: on a ``reset`` wake, or when none is held.
         A CLI that names its own session gets ``None`` on the first turn."""
-        if wake.reset and wake.room in self.sessions:
-            self.sessions.pop(wake.room)  # gone now: a reset whose turn fails must not resume the old one
-            self._save_sessions()
         held = self.sessions.get(wake.room)
         if held is not None:
             return held, False
@@ -207,6 +209,13 @@ class Runner:
                   f"wake starts a new session, or run coop reset <agent> {wake.room} to reset the room too",
                   file=sys.stderr)
             self.sessions.pop(wake.room, None)
+            self._save_sessions()
+
+    def _forget_on_reset(self, wake: Wake) -> None:
+        """A ``reset`` wake drops the room's session now, whatever its turn then does:
+        the gateway clears the reset when the wake is polled, so a turn that fails must
+        not resume what the operator discarded."""
+        if wake.reset and self.sessions.pop(wake.room, None) is not None:
             self._save_sessions()
 
     def _forget_unused(self, wake: Wake, first: bool) -> None:

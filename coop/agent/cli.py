@@ -63,8 +63,11 @@ def defaults() -> dict[str, str]:
     found: dict[str, str] = {}
     try:
         section = tomllib.loads(AGENT_TOML.read_text()).get("connection", {})
-    except OSError:  # no file: nothing to read; a malformed one is an error, not silence
+    except OSError:  # no file: nothing to read
         section = {}
+    except tomllib.TOMLDecodeError as exc:  # a malformed one is an error, said as the CLI says errors
+        print(f"[ERROR] {AGENT_TOML}: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
     for key in ("gateway", "token", "fingerprint", "transfer_timeout"):
         value = os.environ.get(f"COOP_{key.upper()}")
         if value is None and isinstance(section.get(key), (str, int, float)):
@@ -249,6 +252,13 @@ def upload_of(path: Path) -> Upload:
     return Upload(path.name, content_type or "application/octet-stream", path.stat().st_size, chunks())
 
 
+def default_state(kind: str, gateway: str, token: str) -> Path:
+    """``~/.coop/agents/<id>``, the id from the CLI kind and the connection: two agents
+    on one host, or one agent switched to another CLI, never share a session file."""
+    digest = hashlib.sha256(f"{kind}\n{gateway}\n{token}".encode()).hexdigest()[:12]
+    return Path.home() / ".coop" / "agents" / f"{kind}-{digest}"
+
+
 async def cmd_agent(doorbell: HttpDoorbell, args) -> int:
     """``coop agent run``: the utility's loop until SIGTERM/SIGINT."""
     from .adapters import DEFAULT_PROGRAM
@@ -263,8 +273,9 @@ async def cmd_agent(doorbell: HttpDoorbell, args) -> int:
             print("[WARNING] no `coop` on PATH: the agent's `coop read` will not run", file=sys.stderr)
     if args.fingerprint:
         env["COOP_FINGERPRINT"] = args.fingerprint
-    state = args.state or Path.home() / ".coop" / "agents" / hashlib.sha256(f"{args.gateway}\n{args.token}".encode()).hexdigest()[:12]
-    runner = Runner(doorbell, adapter, state.expanduser(), args.workdir.expanduser(), env)
+    state = args.state or default_state(args.kind, args.gateway, args.token)
+    # absolute: the command runs in ``--workdir``, and the rules path is passed to it
+    runner = Runner(doorbell, adapter, state.expanduser().resolve(), args.workdir.expanduser().resolve(), env)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, runner.stop)
