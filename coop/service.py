@@ -279,7 +279,8 @@ class Service:
         log = RoomLog(connector, info, roster, [])
         core = RoomCore(handle, log, self.clock, self.trace, [], roster, rule.params,
                         self._classifier_factory(self.config, handle) if rule.params.classifier_enabled else None,
-                        name="coop", rules_version=self.gateway.rules_version, wake_seed=self.wake_seed)
+                        name="coop", rules_version=self.gateway.rules_version, wake_seed=self.wake_seed,
+                        room_id=f"{server}:{info.id}")  # the handle follows the room's name; this does not
         run = RoomRun(handle, server, info, log, core, rule, saved=self._load_room_doc(server, info.id))
         log.hosted = core.hosted  # the one list: a file is fetched through a bot hosted here
         log.on_new = core.on_post

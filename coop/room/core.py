@@ -248,8 +248,10 @@ class RoomCore:
         name: str = "g1",
         rules_version: int = 0,
         wake_seed: int = 0,
+        room_id: str | None = None,
     ) -> None:
         self.room = room
+        self.room_id = room_id or room  # stable across a rename; the handle itself in the simulations
         self.platform = platform
         self.clock = clock
         self.trace = trace
@@ -972,7 +974,7 @@ class RoomCore:
         self._wake_seq += 1
         wake = Wake(f"w-{self.room}-{self._wake_seq}", self.room, bot, source, thread, through, hint,
                     trigger=self._trigger(bot, trigger), rules_version=self.rules_version,
-                    reset=self.persisted[bot].reset_pending)
+                    reset=self.persisted[bot].reset_pending, room_id=self.room_id)
         payload = tuple(self.platform.posts_after(self._cursor(bot), through))
         if wake.reset:
             # a fresh session holds none of its unfinished threads: their posts come again (design §3.4)

@@ -147,13 +147,13 @@ class Runner:
     def _session_for(self, wake: Wake) -> tuple[str | None, bool]:
         """The room's session, or a new one: on a ``reset`` wake, or when none is held.
         A CLI that names its own session gets ``None`` on the first turn."""
-        held = self.sessions.get(wake.room)
+        held = self.sessions.get(_key(wake))
         if held is not None:
             return held, False
         if self.adapter.new_session is None:
             return None, True
         chosen = self.adapter.new_session()
-        self.sessions[wake.room] = chosen  # kept now: a first turn the lease ends still has its session
+        self.sessions[_key(wake)] = chosen  # kept now: a first turn the lease ends still has its session
         self._save_sessions()
         return chosen, True
 
@@ -196,7 +196,7 @@ class Runner:
         """Keep the session the output names; drop one that did not resume."""
         named = self.adapter.session_in(stdout)
         if named is not None and named != session:
-            self.sessions[wake.room] = named  # the CLI named it (Codex), or renamed ours
+            self.sessions[_key(wake)] = named  # the CLI named it (Codex), or renamed ours
             self._save_sessions()
             return
         if first and reason.startswith("command"):
@@ -208,20 +208,20 @@ class Runner:
             print(f"[WARNING] {self.adapter.kind} session {session} for {wake.room} did not resume; dropped — the next "
                   f"wake starts a new session, or run coop reset <agent> {wake.room} to reset the room too",
                   file=sys.stderr)
-            self.sessions.pop(wake.room, None)
+            self.sessions.pop(_key(wake), None)
             self._save_sessions()
 
     def _forget_on_reset(self, wake: Wake) -> None:
         """A ``reset`` wake drops the room's session now, whatever its turn then does:
         the gateway clears the reset when the wake is polled, so a turn that fails must
         not resume what the operator discarded."""
-        if wake.reset and self.sessions.pop(wake.room, None) is not None:
+        if wake.reset and self.sessions.pop(_key(wake), None) is not None:
             self._save_sessions()
 
     def _forget_unused(self, wake: Wake, first: bool) -> None:
         """A session chosen for a first turn that never ran: not kept, so the next wake
         is a first turn again rather than a resume of nothing."""
-        if first and self.sessions.pop(wake.room, None) is not None:
+        if first and self.sessions.pop(_key(wake), None) is not None:
             self._save_sessions()
 
     async def _done(self, wake: Wake, reason: str) -> None:
@@ -246,6 +246,12 @@ class Runner:
 
     def _save_sessions(self) -> None:
         _atomic_write(self.state_dir / "sessions.json", json.dumps(self.sessions, indent=1, sort_keys=True) + "\n")
+
+
+def _key(wake: Wake) -> str:
+    """What a room's session is kept under: the room's stable id (``<server>:<platform
+    room id>``), never its handle, which follows the room's name (design §3.4)."""
+    return wake.room_id or wake.room
 
 
 def wake_text(wake: Wake) -> str:

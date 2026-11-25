@@ -229,6 +229,7 @@ trigger:                     # null for a catch-up or unfinished wake
   thread_root: T1
 lease_expires_at: 2026-11-17T18:05:00Z
 rules_version: 3                 # the agent re-fetches /v1/rules when this changes
+room_id: mm-lab:8f3k…            # <server>:<platform room id>: stable across a rename; the room's state key
 ```
 
 The payload carries no post text. The agent reads the posts itself.
@@ -476,10 +477,13 @@ How the utility runs, `coop agent run`:
   `COOP_*` variables in its environment, and the utility's own directory on
   `PATH`, so the bare `coop read --wake …` the wake text names works; the token
   is never in the command line or the wake text.
-- It keeps its state under `~/.coop/agents/<name>/`: `sessions.json` (the session
-  or thread id per room) and `rules.md` (the room-rules document at the version
-  the last wake carried; refetched when a wake carries a newer one), both written
-  atomically, so a command started mid-write reads whole files.
+- It keeps its state under `~/.coop/agents/<id>/`, the id derived from the CLI
+  kind and the connection unless `--state` names a directory, so two agents on
+  one host never share one: `sessions.json` (the session or thread id per room,
+  keyed by the wake's `room_id`, so a renamed room keeps its session; the handle
+  follows the name and is never a key) and `rules.md` (the room-rules document at
+  the version the last wake carried; refetched when a wake carries another), both
+  written atomically, so a command started mid-write reads whole files.
 - The command runs in its own process group, and the lease ends the group a
   second before `lease_expires_at`, so the utility's `done --failed "lease
   expired"` lands under the lease when the command goes within the second
