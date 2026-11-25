@@ -21,7 +21,7 @@ from mm_client import MMClient  # noqa: E402
 from coop.agent.client import HttpDoorbell  # noqa: E402
 from coop.config import load  # noqa: E402
 from coop.daemon import make_connector  # noqa: E402
-from coop.room.model import Reply  # noqa: E402
+from coop.room.model import Reply, Upload  # noqa: E402
 from coop.service import Service  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -89,6 +89,37 @@ async def test_a_mention_wakes_the_agent_over_the_doorbell_and_its_reply_threads
         assert service.gateway.poll("bot") is None  # the echo of the bot's own post wakes nobody
         state = tmp_path / "state" / "lab" / f"{mm_setup['member_channel_id']}.json"
         assert state.exists()
+    finally:
+        await service.stop()
+
+
+async def test_a_send_with_a_file_uploads_it_to_mattermost_and_a_read_fetches_it_back(
+    mm_setup, mm_test_client: MMClient, mm_bot_client: MMClient, tmp_path
+):
+    """The simple form of ``POST /files`` (the file as the body, ``Content-Length`` set)
+    against the real server, then the streamed ``GET /files/{id}`` through the handle
+    a read printed (design §3.3)."""
+    config = load(_config(tmp_path, mm_setup, mm_bot_client.token))
+    service = Service(config, tmp_path / "state", make_connector)
+    await service.start()
+    try:
+        room = f"lab:{mm_setup['member_channel']}"
+        assert room in service.rooms, service.notes
+        marker = f"coop e2e file {int(time.time())}"
+        payload = (marker.encode() + b"\n") * 20_000  # a few hundred KB, streamed in chunks both ways
+        async with HttpDoorbell(f"http://{service.listening[0]}:{service.listening[1]}", "e2e-agent-token") as agent:
+            sent = await agent.send(Reply(thread=None, to=[mm_setup["test_user_username"]], text=marker,
+                                          files=(Upload.of("notes.txt", payload, "text/plain"),)), room=room)
+            [found] = sent.post.attachments
+            # the server normalises the type (``text/plain; charset=utf-8`` on 11.7)
+            assert (found.name, found.size) == ("notes.txt", len(payload)) and found.content_type.startswith("text/plain")
+            assert found.id.startswith("a") and "-" in found.id  # the handle, never the platform's file id
+            name, data = await agent.attachment(found.id)
+            assert name == "notes.txt" and data == payload
+        posted = mm_test_client.poll_for_message(mm_setup["member_channel_id"], 0,
+                                                 lambda p: marker in p.get("message", ""), timeout=20)
+        assert posted["user_id"] == mm_setup["bot_user_id"]
+        assert [f["name"] for f in posted["metadata"]["files"]] == ["notes.txt"]
     finally:
         await service.stop()
 
