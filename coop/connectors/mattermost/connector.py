@@ -49,6 +49,7 @@ class MattermostConnector:
         self.on_event = on_event
         self._transport = transport
         self._websocket = websocket
+        self.transfer_timeout: float = 120.0  # the daemon sets it from ``gateway.attachments``
         self._bots: dict[str, _Bot] = {}  # by username
         self._rosters: dict[str, Roster] = {}
         self._members: dict[str, dict[str, MemberInfo]] = {}  # room id -> username -> member
@@ -226,7 +227,8 @@ class MattermostConnector:
         (its own size limit, a blocked type): nothing is posted. What the gateway's
         limits raise while the chunks are read passes through untouched."""
         try:
-            info = await bot.rest.upload(room_id, upload.name, upload.content_type, upload.size, upload.chunks)
+            info = await bot.rest.upload(room_id, upload.name, upload.content_type, upload.size, upload.chunks,
+                                         timeout=self.transfer_timeout)
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 raise RefusedAttachment(upload.name, f"{exc.response.status_code}: {exc.response.text[:200]}") from exc
@@ -238,7 +240,7 @@ class MattermostConnector:
     async def fetch_file(self, username: str, file_id: str) -> AsyncIterator[bytes]:
         rest = self._bots[username].rest
         try:
-            async with rest.stream_file(file_id) as r:
+            async with rest.stream_file(file_id, timeout=self.transfer_timeout) as r:
                 if r.status_code in (403, 404):
                     raise KeyError(file_id)
                 r.raise_for_status()

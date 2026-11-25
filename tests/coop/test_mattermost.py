@@ -146,6 +146,7 @@ class FakeMattermost:
         fid = f"f{len(self.uploads) + 1}"
         self.files[fid] = request.content
         self.uploads.append({"filename": params.get("filename"), "channel_id": params.get("channel_id"),
+                             "read_timeout": request.extensions.get("timeout", {}).get("read"),
                              "content_type": request.headers.get("Content-Type"),
                              "content_length": request.headers.get("Content-Length")})
         return httpx.Response(201, json={"file_infos": [{"id": fid, "name": params.get("filename"), "size": len(request.content)}]})
@@ -261,10 +262,14 @@ async def test_a_post_with_files_uploads_each_streamed_with_its_length_then_post
     assert [(u["filename"], u["channel_id"], u["content_type"], u["content_length"]) for u in mm.uploads] == [
         ("a.txt", "c01", "text/plain", "5"), ("b.bin", "c01", "application/octet-stream", "2")]
     assert mm.files["f1"] == b"hello" and [a.name for a in post.attachments] == ["a.txt", "b.bin"]
+    assert {u["read_timeout"] for u in mm.uploads} == {120.0}  # the transfer timeout, not the client's 30 s
+    connector.transfer_timeout = 7
+    await connector.post("laomei_bot", "c01", "again", None, files=(Upload.of("c.bin", b"c"),))
+    assert mm.uploads[-1]["read_timeout"] == 7
     mm.refuse_files = True
     with pytest.raises(RefusedAttachment, match="refused the file c.txt: 413"):
-        await connector.post("laomei_bot", "c01", "again", None, files=(Upload.of("c.txt", b"c"),))
-    assert len(mm.posts["c01"]) == 1  # nothing posted for a refused file
+        await connector.post("laomei_bot", "c01", "once more", None, files=(Upload.of("c.txt", b"c"),))
+    assert len(mm.posts["c01"]) == 2  # nothing posted for a refused file
 
 
 async def test_files_uploaded_before_a_later_failure_are_said_to_stay_on_the_server(connected, caplog):

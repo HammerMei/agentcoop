@@ -118,6 +118,10 @@ class Connector(Protocol):
     with the roster that decides each author's kind, and receives events."""
 
     name: str  # the server's name in the configuration
+    # ``gateway.attachments.transfer_timeout_seconds``: how long a file's REST calls wait
+    # for the platform between two chunks and for its answer after the last byte; the
+    # daemon sets it at start and on reload (design §3.3).
+    transfer_timeout: float
 
     async def start(self) -> None: ...
 

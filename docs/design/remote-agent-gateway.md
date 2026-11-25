@@ -374,8 +374,10 @@ for a send, before anything is posted. A file the platform itself refuses (over
 its own limit, a type it blocks) is `[ERROR] the platform refused the file: …`:
 the send posted nothing, and the thread is not marked refused, since the room
 did not refuse the reply. `transfer_timeout_seconds` (default 120) bounds one
-file's transfer in either direction; the REST client's own timeout bounds a
-stall between two chunks, not the transfer. A refused send is answered before
+file's transfer in either direction, and a file's REST calls (the upload, the
+stream) wait that long for the platform between two chunks and for its answer
+after the last byte, apart from the client's request timeout for a JSON call.
+A refused send is answered before
 its file parts are read, and the gateway drains what the agent is still sending
 for as long as a transfer may take, so the refusal reaches it.
 

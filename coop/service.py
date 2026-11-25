@@ -130,6 +130,7 @@ class Service:
         self._set_tokens(self.config)
         for server in self.config.servers.values():
             connector = self._connector_factory(server, self._event_handler(server.name))
+            connector.transfer_timeout = self.config.gateway.attachments.transfer_timeout_seconds
             self.connectors[server.name] = connector
             self._connected[server.name] = {}
             await connector.start()
@@ -443,6 +444,8 @@ class Service:
         self.notes = notes
         self._note_listener_changes(config, notes)
         self.gateway.limits = config.gateway.attachments  # applied: the next transfer runs under them
+        for connector in self.connectors.values():
+            connector.transfer_timeout = config.gateway.attachments.transfer_timeout_seconds
         old, self.config = self.config, config
         for server in config.servers.values():
             self.connectors[server.name].configure(server)  # the bots and usernames it holds now

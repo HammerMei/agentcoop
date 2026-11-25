@@ -242,6 +242,7 @@ class FakeConnector:
         self.file_limit: int = 0  # the platform's own size limit, 0 = none
         self.chunk_size: int = 4  # a fetch streams in small chunks, so a test sees several
         self.break_fetch_after: int | None = None  # a fetch fails after this many bytes
+        self.transfer_timeout: float = 120.0
         self.bots: dict[str, str] = {}  # username -> token
         self.rosters: dict[str, Roster] = {}
         self.refusing: set[str] = set()

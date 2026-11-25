@@ -490,7 +490,8 @@ RELOAD_CASES = [
     ("rooms:", "classifier: {command: [echo]}\nrooms:", "applied", lambda svc, fc, notes: svc.config.classifier.command == ("echo",)),
     ("rooms:", "gateway: {attachments: {max_size_mb: 1}}\nrooms:", "applied", lambda svc, fc, notes: svc.gateway.limits.max_size_mb == 1),
     ("rooms:", "gateway: {attachments: {transfer_timeout_seconds: 9}}\nrooms:", "warned",
-     lambda svc, fc, notes: svc.gateway.limits.transfer_timeout_seconds == 9 and any("drained for the old one" in n for n in notes)),
+     lambda svc, fc, notes: svc.gateway.limits.transfer_timeout_seconds == 9 == fc.transfer_timeout
+     and any("drained for the old one" in n for n in notes)),
     ("guests: [G]", "guests: [G, K]", "applied", lambda svc, fc, notes: "K" in svc.rooms["fake:team"].core.roster.guests),
     ('"fake:team*"', '"fake:nothing"', "applied", lambda svc, fc, notes: svc.rooms == {}),
 ]
