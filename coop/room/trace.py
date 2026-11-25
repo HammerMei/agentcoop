@@ -28,6 +28,8 @@ Kinds and their fields:
 - ``backoff``         — gateway, bot, until; ``degraded`` — gateway, bot, streak
 - ``rule``            — gateway, bot, thread, mechanism, outcome (held | rejected | violated | complied | held_complied | held_violated)
 - ``platform_refused`` — gateway, bot, thread (the platform refused an outbound post)
+- ``platform_error``  — gateway, bot, thread, error? (the platform did not answer a post; ``error`` names a failure of another kind)
+- ``slow_post``       — gateway, bot, thread, seconds (a platform post held the room past ``SLOW_POST_SECONDS``)
 - ``attachment_refused`` — gateway, bot, thread, name (the platform or the gateway's limits refused a file a send carried; nothing posted)
 - ``paused`` / ``resumed`` — gateway, bot
 """

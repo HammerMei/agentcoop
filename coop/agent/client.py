@@ -134,15 +134,16 @@ class HttpDoorbell:
         if r.status_code == 504:
             # the gateway reached the platform and got no answer: the same unknown as a timeout
             raise LostResponse()
+        doc = _document(r)
         if r.status_code in (413, 408):
             # a file over the limits, or one whose transfer ran out of time: nothing was posted
-            raise AttachmentRefused(r.json().get("error", ""))
-        if r.status_code == 502 and r.json().get("file") is not None:
+            raise AttachmentRefused(doc.get("error", r.text))
+        if r.status_code == 502 and doc.get("file") is not None:
             # the platform refused a file: nothing was posted, the thread is open
-            raise RefusedAttachment(r.json()["file"], r.json().get("error", ""))
+            raise RefusedAttachment(doc["file"], doc.get("reason") or doc.get("error", ""))
         if r.status_code == 502:
             # the gateway filled in a wake's thread the reply left out (design §3.3)
-            raise RefusedPost(r.json().get("thread") or reply.thread)
+            raise RefusedPost(doc.get("thread") or reply.thread)
         answer = self._answer(r)
         doc = answer["post"]
         return Sent(None if doc is None else decode_post(doc), tuple(answer.get("warnings", ())))
@@ -166,7 +167,7 @@ class HttpDoorbell:
             if r.status_code != 200:
                 await r.aread()
                 if r.status_code in (413, 408):
-                    raise AttachmentRefused(r.json().get("error", ""))
+                    raise AttachmentRefused(_document(r).get("error", r.text))
                 self._answer(r)
             found = _FILENAME.search(r.headers.get("Content-Disposition", ""))
             async for chunk in r.aiter_bytes():
@@ -200,6 +201,16 @@ class HttpDoorbell:
         if r.status_code == 400:
             raise InvalidReply(message)
         raise DoorbellError(r.status_code, message)
+
+
+def _document(r: httpx.Response) -> dict:
+    """The answer's JSON document, or ``{}`` for one that is not JSON (an error page a
+    proxy, or aiohttp itself, produced)."""
+    try:
+        doc = r.json()
+    except ValueError:
+        return {}
+    return doc if isinstance(doc, dict) else {}
 
 
 async def _multipart(boundary: str, body: dict, files: tuple[Upload, ...]) -> AsyncIterator[bytes]:

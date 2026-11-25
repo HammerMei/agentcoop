@@ -45,7 +45,7 @@ def check_reply(reply: Reply, ctx: ValidationContext) -> tuple[list[Problem], li
     rules: list[Problem] = []
     if not _shape_ok(reply, structural):
         return structural, rules
-    if reply.text is not None:
+    if reply.text is not None or (reply.files and reply.to):
         _check_recipients(reply, ctx, rules)
     if reply.control is not None:
         _check_control(reply, ctx, structural, rules)
@@ -131,9 +131,10 @@ def canonical_text(reply: Reply) -> str:
     """Render one reply so its platform mentions are exactly its recipients: control
     lines first, missing recipient mentions prepended, stray ``@`` removed."""
     lines = render_controls(reply.control) if reply.control else []
-    if reply.text is not None:
+    if reply.text is not None or (reply.files and reply.to):
+        # a file alone with recipients is a caption of just their mentions
         recipients = list(reply.to or [])
-        body = _MENTION.sub(lambda m: _keep_mention(m, recipients), reply.text)
+        body = _MENTION.sub(lambda m: _keep_mention(m, recipients), reply.text or "")
         present = {m.group(1).lower() for m in _MENTION.finditer(body)}
         missing = [r for r in recipients
                    if not (present & (_ROOM_WIDE if r == ALL else {r.lower()}))]

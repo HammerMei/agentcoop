@@ -155,7 +155,11 @@ class Service:
     async def _listen(self) -> None:
         host, _, port = self.config.gateway.address.rpartition(":")
         tls = self.config.gateway.tls
-        self._runner = web.AppRunner(build_app(self.gateway, self.tokens))
+        # a refused multipart send is answered before its file parts are read: aiohttp
+        # drains the rest of the body for ``lingering_time`` so the refusal reaches a
+        # client still streaming it, bounded as a transfer is (design §3.3)
+        lingering = max(10.0, self.config.gateway.attachments.transfer_timeout_seconds)
+        self._runner = web.AppRunner(build_app(self.gateway, self.tokens), lingering_time=lingering)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, int(port),
                            ssl_context=None if tls is None else server_context(*tls))

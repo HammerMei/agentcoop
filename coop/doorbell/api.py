@@ -208,7 +208,7 @@ async def send(request: web.Request) -> web.Response:
                                    _file_part(parts, f["name"])) for f in body["files"])
     try:
         core, bot = gateway.room_for(agent, reply, room)
-        gateway.check_files(reply)
+        gateway.check_files(core, bot, reply)
         sent = await core.send(bot, reply)
     except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost,
             AttachmentRefused, TransferTimeout, RefusedAttachment, PlatformError) as exc:
@@ -246,7 +246,7 @@ async def _file_part(parts: MultipartReader, name: str) -> AsyncIterator[bytes]:
     uploads them in."""
     part = await parts.next()
     if not isinstance(part, BodyPartReader) or part.name != "file":
-        raise AttachmentRefused(f"attachment {name}: no file part where one was declared")
+        raise AttachmentRefused(f"attachment {name}: no file part where one was declared", name)
     while chunk := await part.read_chunk():
         yield chunk
 
@@ -259,6 +259,8 @@ def _files_typed(body: dict) -> str | None:
             return "each file needs a name"
         if not isinstance(entry.get("size"), int) or isinstance(entry["size"], bool) or entry["size"] < 0:
             return f"file {entry['name']}: a size in bytes"
+        if entry.get("content_type") is not None and not isinstance(entry["content_type"], str):
+            return f"file {entry['name']}: content_type must be a string"
     return None
 
 
@@ -291,7 +293,7 @@ def _send_refusal(exc: Exception, thread: str | None = None) -> web.Response:
     if isinstance(exc, TransferTimeout):
         return _error(408, str(exc), thread=thread)
     if isinstance(exc, RefusedAttachment):
-        return _error(502, str(exc), thread=thread, file=exc.name)
+        return _error(502, str(exc), thread=thread, file=exc.name, reason=exc.reason)
     if isinstance(exc, PlatformError):
         return _error(504, f"the platform did not answer: {exc}", thread=thread)
     return _error(502, str(exc), thread=getattr(exc, "thread", None))
@@ -354,10 +356,14 @@ async def attachment(request: web.Request) -> web.StreamResponse:
         async for chunk in chunks:
             await response.write(chunk)
     except (PlatformError, TransferTimeout, AttachmentRefused) as exc:
-        # the headers are out: the body ends short, and the client discards it
+        # the headers are out: the body ends short of its length (or of the chunked
+        # terminator) and the client discards it; closing the transport here, rather
+        # than raising, keeps aiohttp from logging a traceback for an ordinary break
         logger.warning("attachment %s: the transfer broke: %s", handle, exc)
         response.force_close()
-        raise
+        if request.transport is not None:
+            request.transport.close()
+        return response
     await response.write_eof()
     return response
 

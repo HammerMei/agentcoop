@@ -36,6 +36,7 @@ class RefusedAttachment(Exception):
     def __init__(self, name: str, reason: str) -> None:
         super().__init__(f"the platform refused the file {name}: {reason}")
         self.name = name
+        self.reason = reason
 
 
 class Platform(Protocol):

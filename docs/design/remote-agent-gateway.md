@@ -197,8 +197,8 @@ Authentication: a bearer token per agent, issued by configuration (`coop config 
 agent` prints the token, the address and, when `gateway.tls` is set, the
 certificate fingerprint, once). The utility refuses a certificate that does not
 match the fingerprint it was given. The API answers a token only for rooms whose
-roster lists the agent, and an attachment `{id}` is the handle a `read` to that
-agent printed, not a platform id. The token reads room history and posts as the bot, so it
+roster lists the agent, and an attachment `{id}` is the handle a `read` in that
+room printed, not a platform id. The token reads room history and posts as the bot, so it
 travels only over TLS: a production listener on any directly reachable address
 terminates TLS, in the gateway (`gateway.tls`, §4: a self-signed certificate whose
 fingerprint the utility pins) or in a proxy in front of it. A plain `http://`
@@ -348,14 +348,23 @@ A handle is the gateway's name for one file in one room, minted when a `read`
 first prints it, and it lives while the gateway can still deliver the post: it
 is dropped once every hosted bot's cursor in the room has passed the post and an
 hour has gone by since a `read` last printed it (a `read --room --after` can
-print a handle for an older post; the hour is for that). Handles carry a prefix
-chosen when the daemon starts, so a handle from before a restart names nothing
-rather than another file.
+print a handle for an older post; the hour is for that), and never while a live
+turn's read lists it. Handles carry a prefix chosen when the daemon starts, so a
+handle from before a restart names nothing rather than another file.
 
 An agent posts a file with `coop send --attach PATH`, repeated for several files,
-the text as their caption. The send is one request with the files in it: the
-room's rules are checked before a byte reaches the platform, and a refused send
-uploads nothing. `gateway.attachments` holds the limits: `max_size_mb` bounds a
+the text as their caption; a file alone with `--to` posts their mentions as the
+caption, and the recipients rule applies to it as to text. The send is one
+request with the files in it: the room's rules are checked before a byte reaches
+the platform, and a refused send uploads nothing. The files are uploaded one by
+one before the post is made, and Mattermost has no call that deletes an upload,
+so a failure after the first file (a later file refused, the post itself
+refused) leaves what was taken on the server unattached; the connector says
+which ids. The platform takes the files while the room's send holds the room,
+as every post does, so a slow upload holds the room for its duration, bounded
+per file by `transfer_timeout_seconds`; a post that held the room past thirty
+seconds is said (`slow_post`, a warning), which is the number to revisit this
+on when agents post large files off the LAN. `gateway.attachments` holds the limits: `max_size_mb` bounds a
 file in either direction, `max_per_post` the files on one send, and both default
 to `0`, which leaves the platform's own limits in force (Mattermost's
 `FileSettings.MaxFileSize`, Rocket.Chat's `FileUpload_MaxFileSize`); set either
@@ -365,8 +374,10 @@ for a send, before anything is posted. A file the platform itself refuses (over
 its own limit, a type it blocks) is `[ERROR] the platform refused the file: …`:
 the send posted nothing, and the thread is not marked refused, since the room
 did not refuse the reply. `transfer_timeout_seconds` (default 120) bounds one
-file's transfer in either direction, apart from the REST client's request
-timeout, which is sized for a JSON answer and would cut a large file short.
+file's transfer in either direction; the REST client's own timeout bounds a
+stall between two chunks, not the transfer. A refused send is answered before
+its file parts are read, and the gateway drains what the agent is still sending
+for as long as a transfer may take, so the refusal reaches it.
 
 The room-rules skill is one document whose master copy lives in the gateway
 (`/v1/rules`). The gateway is the only place the rules are edited, so a change

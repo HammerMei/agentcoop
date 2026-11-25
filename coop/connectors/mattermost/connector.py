@@ -192,7 +192,21 @@ class MattermostConnector:
     async def post(self, username: str, room_id: str, text: str, thread: str | None,
                    files: tuple[Upload, ...] = ()) -> Post:
         bot = self._bots[username]
-        file_ids = tuple([await self._upload(bot, room_id, upload) for upload in files])  # in order, each streamed
+        file_ids: list[str] = []
+        try:
+            for upload in files:  # in order, each streamed
+                file_ids.append(await self._upload(bot, room_id, upload))
+            return await self._create_post(bot, room_id, text, thread, tuple(file_ids))
+        except BaseException:
+            if file_ids:
+                # Mattermost has no call that deletes an upload: what was taken before the
+                # failure stays on the server unattached (design §3.3)
+                logger.warning("%s: files %s uploaded for a post that was not made stay on the server unattached",
+                               self.name, ", ".join(file_ids))
+            raise
+
+    async def _create_post(self, bot: _Bot, room_id: str, text: str, thread: str | None,
+                           file_ids: tuple[str, ...]) -> Post:
         try:
             raw = await bot.rest.create_post(room_id, text, thread, file_ids)
         except httpx.HTTPStatusError as exc:

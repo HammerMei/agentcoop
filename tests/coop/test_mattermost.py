@@ -264,6 +264,21 @@ async def test_a_post_with_files_uploads_each_streamed_with_its_length_then_post
     assert len(mm.posts["c01"]) == 1  # nothing posted for a refused file
 
 
+async def test_files_uploaded_before_a_later_failure_are_said_to_stay_on_the_server(connected, caplog):
+    connector, mm, seen, _ = connected
+    first = Upload.of("ok.txt", b"ok")
+
+    async def refused_second():
+        yield b"x"
+        raise AttachmentRefused("attachment two.bin is over the limit", "two.bin")
+
+    with caplog.at_level("WARNING"), pytest.raises(AttachmentRefused):
+        await connector.post("laomei_bot", "c01", "x", None, files=(first, Upload("two.bin", "", 2, refused_second())))
+    assert mm.files["f1"] == b"ok" and len(mm.posts["c01"]) == 0
+    assert any("files f1 uploaded for a post that was not made stay on the server unattached" in r.message
+               for r in caplog.records)
+
+
 async def test_what_the_gateways_limits_raise_while_a_file_is_read_passes_through_the_upload(connected):
     connector, mm, seen, _ = connected
 

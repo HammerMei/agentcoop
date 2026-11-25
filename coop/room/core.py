@@ -67,6 +67,9 @@ from .words import count_words
 
 logger = logging.getLogger(__name__)
 
+# A platform post longer than this holds the room long enough to say so (design §3.3).
+SLOW_POST_SECONDS = 30.0
+
 NOTICE_PREFIX = "SYSTEM ERROR: turn failed:"
 HINTED_THREAD = "hinted_thread"  # a wake's send outside its hint: counted, never refused (design §3.1, 5.9 row)
 
@@ -466,7 +469,7 @@ class RoomCore:
         if run is not None and not run.leased:
             self.volatile[bot].turn = None
             self.trace.add(self.now(), "turn_end", gateway=self.name, bot=bot, wake=run.wake.wake_id,
-                           outcome="withdrawn", posts=0)
+                           outcome="withdrawn", posts=0, attachments=0, fetched=0)
         self.trace.add(self.now(), "paused", gateway=self.name, bot=bot)
         self._changed()
 
@@ -1085,11 +1088,9 @@ class RoomCore:
         if run is None:
             self._count_reply_rules(bot, reply, rules)
             self.volatile[bot].unsolicited_sends += 1
-        try:
-            post = await self._post_reply(bot, reply, run)
-        finally:
-            if run is not None and reply.thread is not None:
-                run.ledger.add(reply.thread)  # a reply the platform refused was still given (5.6, 5.9)
+        post = await self._post_reply(bot, reply, run)
+        if run is not None and reply.thread is not None:
+            run.ledger.add(reply.thread)  # a reply was given (5.6, 5.9); ``_post_failed`` says which failures count too
         self.trace.add(self.now(), "send", gateway=self.name, bot=bot, wake=reply.wake_id,
                        thread=reply.thread, post=post.id if post else None)
         return Sent(post, broken)
@@ -1164,32 +1165,55 @@ class RoomCore:
         new_thread = reply.thread is None
         previous_last = None if new_thread else self.volatile[bot].last_post.get(reply.thread)
         entry = None if new_thread else self._count_own_post(bot, reply.thread, self.now(), words)
+        started = self.now()
         try:
             post = await self.platform.post(bot, text, reply.thread, kind="bot", files=reply.files)
-        except (RefusedPost, RefusedAttachment, AttachmentRefused, TransferTimeout, PlatformError) as exc:
+        except BaseException as exc:
+            # whatever ended it (a refusal, a platform error, the agent's connection dropping
+            # mid-upload, a cancellation), the post did not happen: nothing stays counted
             if not new_thread:
                 self._uncount_own_post(bot, reply.thread, entry, previous_last)
             self._post_failed(bot, reply, run, exc)
             raise
+        finally:
+            self._note_slow_post(bot, reply.thread, started)
         if new_thread:
             self._count_own_post(bot, post.thread, self.now(), words)
         if run is not None:
             run.posts += 1
         return post
 
-    def _post_failed(self, bot: str, reply: Reply, run: TurnRun | None, exc: Exception) -> None:
-        """A refused post closes the thread for the turn; a refused file, by the platform
-        or by the gateway's limits while it was read, posted nothing and leaves the
-        thread open; a platform error is unknown either way, counted as not posted, and
-        the agent reads the room (design §3.3)."""
+    def _post_failed(self, bot: str, reply: Reply, run: TurnRun | None, exc: BaseException) -> None:
+        """A refused post closes the thread for the turn, and the reply still counts as
+        given (5.6, 5.9), as does one the platform may have taken (a platform error:
+        unknown either way, counted as not posted, the agent reads the room). A refused
+        file, by the platform or by the gateway's limits while it was read, posted
+        nothing and leaves the thread open and unanswered; so does any other failure
+        (the agent's connection dropped mid-upload). Design §3.3."""
+        given = run is not None and reply.thread is not None
         if isinstance(exc, RefusedPost):
             self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
-            if run is not None and reply.thread is not None:
+            if given:
                 run.refused.append(reply.thread)
+                run.ledger.add(reply.thread)
         elif isinstance(exc, (RefusedAttachment, AttachmentRefused, TransferTimeout)):
             self.trace.add(self.now(), "attachment_refused", gateway=self.name, bot=bot, thread=reply.thread, name=exc.name)
-        else:
+        elif isinstance(exc, PlatformError):
             self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
+            if given:
+                run.ledger.add(reply.thread)
+        else:
+            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread,
+                           error=f"{type(exc).__name__}: {exc}")
+
+    def _note_slow_post(self, bot: str, thread: str | None, started: float) -> None:
+        """A post holds the room's lock while the platform takes it, a send with files
+        for as long as the agent streams them (design §3.3): one past
+        ``SLOW_POST_SECONDS`` is said, so a frozen room has a number behind it."""
+        seconds = self.now() - started
+        if seconds > SLOW_POST_SECONDS:
+            logger.warning("%s: a post by %s held the room for %.0f s", self.room, bot, seconds)
+            self.trace.add(self.now(), "slow_post", gateway=self.name, bot=bot, thread=thread, seconds=round(seconds, 1))
 
     async def done(self, bot: str, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool:
         """Close the turn. Returns ``False`` for a wake with no live lease: logged, and

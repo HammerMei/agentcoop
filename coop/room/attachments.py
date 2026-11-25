@@ -76,6 +76,8 @@ async def bounded(chunks: AsyncIterator[bytes], name: str, limits: Limits, *, ex
         try:
             chunk = await asyncio.wait_for(anext(chunks), remaining)
         except StopAsyncIteration:
+            if expected is not None and total < expected:
+                raise AttachmentRefused(f"attachment {name} is shorter than the {expected} bytes declared", name) from None
             return
         except TimeoutError:
             raise TransferTimeout(name, limits.transfer_timeout_seconds) from None

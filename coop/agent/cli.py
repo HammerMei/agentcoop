@@ -182,12 +182,12 @@ async def cmd_attachment(doorbell: HttpDoorbell, args) -> int:
     try:
         with part.open("wb") as sink:
             name = await doorbell.download(args.id, sink.write)
+        if args.out is None:
+            out = Path(Path(name).name or args.id)
+        part.replace(out)
     except BaseException:
         part.unlink(missing_ok=True)
         raise
-    if args.out is None:
-        out = Path(Path(name).name or args.id)
-    part.replace(out)
     print(out)
     return 0
 

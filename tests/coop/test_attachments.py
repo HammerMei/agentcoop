@@ -11,7 +11,7 @@ import pytest
 from coop.errors import RefusedSend
 from coop.room.attachments import AttachmentRefused, Limits, TransferTimeout, bounded
 from coop.room.model import Reply, Upload
-from coop.room.platform import RefusedAttachment
+from coop.room.platform import PlatformError, RefusedAttachment
 
 from .helpers import FAST, Sandbox
 
@@ -201,3 +201,155 @@ async def test_a_file_the_platform_refuses_posts_nothing_and_leaves_the_thread_o
     assert sb.trace.last("attachment_refused", bot="a").name == "huge.iso"
     assert sb.gw.volatile["a"].turn.refused == []  # not the reply's refusal: the thread is still open
     assert sb.gw.status()["threads"]["t1"]["recent_posts"] == 0
+
+
+# ── the internal round's findings ───────────────────────────────────────────
+
+
+async def test_a_file_alone_with_recipients_mentions_them_and_checks_them():
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a the graph?", "t1")
+    wake = sb.gateway.poll("a")
+    sent = await sb.gateway.send("a", Reply("t1", ["H"], wake_id=wake.wake_id, files=(Upload.of("g.png", b"x"),)))
+    assert sent.post.text == "@H" and sent.post.attachments[0].name == "g.png"
+    sb.gateway.limits = Limits()
+    with pytest.raises(RefusedSend, match="recipient 'nobody' is not a member"):  # the recipients rule applies to a caption
+        await sb.gateway.send("a", Reply("t1", ["nobody"], wake_id=wake.wake_id, files=(Upload.of("h.png", b"x"),)))
+
+
+async def test_a_file_refused_mid_send_leaves_the_thread_unanswered(monkeypatch):
+    sb = Sandbox(bots=("a",), attach_agent=False, params=replace(FAST, enforce=True))
+    await sb.human("@a hello", "t1")
+    wake = sb.gateway.poll("a")
+    sb.gateway.read("a", wake.wake_id)
+
+    async def refuse(*a, **kw):
+        raise RefusedAttachment("huge.iso", "413: too large")
+
+    monkeypatch.setattr(sb.room, "post", refuse)
+    with pytest.raises(RefusedAttachment):
+        await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id, files=(Upload.of("huge.iso", b"x"),)))
+    assert sb.gw.volatile["a"].turn.ledger == set()  # nothing was given: the must-reply thread is still open
+    monkeypatch.undo()
+    await sb.gateway.done("a", wake.wake_id)
+    assert sb.trace.last("turn_end", bot="a").outcome == "invalid"
+
+
+async def test_a_failure_of_another_kind_mid_upload_leaves_no_phantom_post():
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a hello", "t1")
+    wake = sb.gateway.poll("a")
+
+    async def dropped() -> AsyncIterator[bytes]:
+        yield b"x"
+        raise ConnectionResetError("Connection lost")  # the agent's connection went mid-upload
+
+    with pytest.raises(ConnectionResetError):
+        await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id,
+                                         files=(Upload("x.bin", "", 2, dropped()),)))
+    assert sb.gw.status()["threads"]["t1"]["recent_posts"] == 0 and sb.gw.volatile["a"].turn.ledger == set()
+    assert sb.trace.last("platform_error", bot="a").error.startswith("ConnectionResetError")
+
+
+async def test_a_fetch_counts_as_fetched_only_when_the_whole_file_reached_the_agent(monkeypatch):
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"0123456789"),))
+    wake = sb.gateway.poll("a")
+    _, posts = sb.gateway.read("a", wake.wake_id)
+    [delivered] = [sb.gateway.deliverable("a", "team", p, wake.wake_id) for p in posts]
+    handle = delivered.attachments[0].id
+
+    async def breaks(file_id):
+        yield b"0123"
+        raise PlatformError("mm: dropped")
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", breaks)
+    with pytest.raises(PlatformError):
+        await collect(sb.gateway.fetch_attachment("a", handle)[1])
+    assert sb.gw.volatile["a"].turn.fetched == set()
+    monkeypatch.undo()
+    await collect(sb.gateway.fetch_attachment("a", handle)[1])
+    assert sb.gw.volatile["a"].turn.fetched == {handle}
+
+
+async def test_a_platform_stream_shorter_than_the_posts_size_is_refused_not_served(monkeypatch):
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"0123456789"),))
+    _, delivered = await read_and_done(sb, "a")
+
+    async def short(file_id):
+        yield b"0123"
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", short)
+    with pytest.raises(AttachmentRefused, match="shorter than the 10 bytes declared"):
+        await collect(sb.gateway.fetch_attachment("a", delivered[0].attachments[0].id)[1])
+
+
+async def test_a_closed_rooms_handles_are_dropped():
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"x"),))
+    _, delivered = await read_and_done(sb, "a")
+    handle = delivered[0].attachments[0].id
+    sb.gateway.remove_room("team")
+    with pytest.raises(KeyError):
+        sb.gateway.fetch_attachment("a", handle)
+    assert sb.gateway._handles == {}
+
+
+async def test_an_up_front_limit_refusal_is_traced():
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    sb.gateway.limits = Limits(max_per_post=1)
+    await sb.human("@a hello", "t1")
+    wake = sb.gateway.poll("a")
+    with pytest.raises(AttachmentRefused):
+        await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id,
+                                         files=(Upload.of("a", b"a"), Upload.of("b", b"b"))))
+    assert sb.trace.last("attachment_refused", bot="a").thread == "t1"
+
+
+async def test_a_handle_a_live_turn_lists_outlives_the_hour():
+    sb = Sandbox(bots=("a",), attach_agent=False, params=replace(FAST, lease_seconds=0))  # a lease that never expires
+    post = await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"x"),))
+    wake = sb.gateway.poll("a")
+    _, posts = sb.gateway.read("a", wake.wake_id)
+    [delivered] = [sb.gateway.deliverable("a", "team", p, wake.wake_id) for p in posts]
+    handle = delivered.attachments[0].id
+    sb.gw.persisted["a"].cursor = post.position  # as a reset wake leaves it: the post below the cursor, the turn live
+    await sb.run(3601)
+    sb.gateway.deliverable("a", "team", await sb.human("later", "t1"))  # runs the eviction
+    assert sb.gateway.fetch_attachment("a", handle)[0].name == "a.txt"
+    await sb.gateway.done("a", wake.wake_id, answered=("t1",))
+    sb.gateway.deliverable("a", "team", await sb.human("later still", "t1"))
+    with pytest.raises(KeyError):
+        sb.gateway.fetch_attachment("a", handle)
+
+
+async def test_a_handle_past_its_hour_survives_while_a_hosted_cursor_is_behind_its_post():
+    sb = Sandbox(bots=("a", "b"), attach_agent=False)
+    await sb.human("@a see", "t1", attachments=(("a.txt", "text/plain", b"x"),))
+    _, delivered = await read_and_done(sb, "a")
+    handle = delivered[0].attachments[0].id
+    await sb.run(3601)
+    sb.gateway.deliverable("a", "team", await sb.human("later", "t1"))
+    assert sb.gw.persisted["b"].cursor is None and sb.gateway.fetch_attachment("a", handle)[0].name == "a.txt"
+    await sb.human("@b you too", "t1")
+    await read_and_done(sb, "b")  # b's cursor passes the post (and b's read printed the handle again)
+    await sb.run(3601)
+    sb.gateway.deliverable("a", "team", await sb.human("later still", "t1"))
+    with pytest.raises(KeyError):
+        sb.gateway.fetch_attachment("a", handle)
+
+
+async def test_a_post_that_held_the_room_past_thirty_seconds_is_said(monkeypatch):
+    sb = Sandbox(bots=("a",), attach_agent=False)
+    await sb.human("@a hello", "t1")
+    wake = sb.gateway.poll("a")
+    real = sb.room.post
+
+    async def slow(*a, **kw):
+        sb.clock.clock += 31  # the platform took half a minute
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(sb.room, "post", slow)
+    await sb.gateway.send("a", Reply("t1", ["H"], "hi", wake_id=wake.wake_id))
+    assert sb.trace.last("slow_post", bot="a").seconds == 31

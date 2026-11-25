@@ -183,6 +183,31 @@ async def test_send_attach_over_the_limit_is_an_error_line_and_posts_nothing(sb,
     assert len(sb.room.posts) == 1
 
 
+async def test_a_file_the_platform_refuses_is_one_error_line_naming_it(sb, coop, capsys, tmp_path, monkeypatch):
+    from coop.room.platform import RefusedAttachment
+
+    async def refuse(*a, **kw):
+        raise RefusedAttachment("huge.iso", "413: too large")
+
+    (tmp_path / "huge.iso").write_bytes(b"x")
+    await sb.human("@a hello", "t1")
+    w = await wake_id(sb)
+    monkeypatch.setattr(sb.room, "post", refuse)
+    assert await coop("send", "--wake", w, "--to", "H", "--attach", str(tmp_path / "huge.iso"), "here") == 1
+    assert capsys.readouterr().err.splitlines()[-1] == "[ERROR] the platform refused the file huge.iso: 413: too large"
+
+
+async def test_a_download_whose_final_rename_fails_leaves_no_part_file(sb, coop, capsys, tmp_path, monkeypatch):
+    await sb.human("@a see", "t1", attachments=(("report.pdf", "application/pdf", b"x"),))
+    w = await wake_id(sb)
+    assert await coop("read", "--wake", w) == 0
+    capsys.readouterr()
+    (tmp_path / "taken").mkdir()
+    assert await coop("attachment", "a1", "--out", str(tmp_path / "taken")) == 1
+    assert capsys.readouterr().err.splitlines()[-1].startswith("[ERROR]")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["taken"]
+
+
 async def test_a_broken_download_leaves_no_file_behind(sb, coop, capsys, tmp_path, monkeypatch):
     from coop.room.platform import PlatformError
 

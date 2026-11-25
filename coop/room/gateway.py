@@ -105,6 +105,8 @@ class Gateway:
         if core is not None:
             for key in [k for k in self._username if k[0] == room]:
                 self._agent.pop((room, self._username.pop(key)), None)
+            for handle in [h for h, entry in self._handles.items() if entry.room == room]:
+                self._drop_handle(handle)  # its posts are not deliverable any more
         return core
 
     def bind(self, room: str, agent: str, username: str) -> None:
@@ -238,11 +240,18 @@ class Gateway:
         if floor is None:
             return
         cutoff = self.clock.now() - HANDLE_GRACE_SECONDS
+        # a live turn's read printed these (a reset wake delivers posts below every cursor)
+        held = {h for state in core.volatile.values()
+                if state.turn is not None and state.turn.leased for h in state.turn.handles}
         gone = [h for h, entry in self._handles.items()
-                if entry.room == core.room and not after(entry.position, floor) and entry.printed_at <= cutoff]
+                if entry.room == core.room and h not in held
+                and not after(entry.position, floor) and entry.printed_at <= cutoff]
         for handle in gone:
-            entry = self._handles.pop(handle)
-            del self._handle_of[(entry.room, entry.attachment.id)]
+            self._drop_handle(handle)
+
+    def _drop_handle(self, handle: str) -> None:
+        entry = self._handles.pop(handle)
+        del self._handle_of[(entry.room, entry.attachment.id)]
 
     def fetch_attachment(self, agent: str, handle: str) -> tuple[Attachment, AsyncIterator[bytes]]:
         """The file and its bytes, streamed from the platform under the limits.
@@ -250,28 +259,39 @@ class Gateway:
         roster does not list the agent, :class:`AttachmentRefused` for a file over
         ``max_size_mb``; what the platform raises comes with the first chunk."""
         entry = self._handles[handle]
-        core = self._room(entry.room)
+        core = self.rooms.get(entry.room)
+        if core is None:
+            raise KeyError(handle)  # the room closed under it (``remove_room`` drops them; a race)
         bot = self._bot(core, agent)
         if bot is None or bot not in core.hosted:
             raise PermissionError(f"{agent} is not in the roster of room {entry.room!r}")
         problem = self.limits.over_size(handle, entry.attachment.size)
         if problem is not None:
             raise AttachmentRefused(problem, handle)
-        state = core.volatile.get(bot)
-        run = state.turn if state is not None else None
-        if run is not None and run.leased and handle in run.handles:
-            run.fetched.add(handle)
-        chunks = core.platform.fetch_attachment(entry.attachment.id)
-        return entry.attachment, bounded(chunks, handle, self.limits, clock=self.clock.now)
+        chunks = bounded(core.platform.fetch_attachment(entry.attachment.id), handle, self.limits,
+                         expected=entry.attachment.size or None, clock=self.clock.now)
 
-    def check_files(self, reply: Reply) -> None:
+        async def counted() -> AsyncIterator[bytes]:
+            async for chunk in chunks:
+                yield chunk
+            # fetched: the whole file reached the agent, under the lease that printed it
+            state = core.volatile.get(bot)
+            run = state.turn if state is not None else None
+            if run is not None and run.leased and handle in run.handles:
+                run.fetched.add(handle)
+
+        return entry.attachment, counted()
+
+    def check_files(self, core: RoomCore, bot: str, reply: Reply) -> None:
         """The limits a send's files must fit before a byte reaches the platform
-        (design §3.3); each file's stream is then bounded by them as it is read."""
+        (design §3.3); each file's stream is then bounded by them as it is read. A
+        refusal here is traced like one raised while a file was read."""
         problem, name = self.limits.over_count(len(reply.files)), ""
         for upload in reply.files:
             if problem is None and (problem := self.limits.over_size(upload.name, upload.size)) is not None:
                 name = upload.name
         if problem is not None:
+            core.trace.add(core.now(), "attachment_refused", gateway=core.name, bot=bot, thread=reply.thread, name=name)
             raise AttachmentRefused(problem, name)
         reply.files = tuple(replace(u, chunks=bounded(u.chunks, u.name, self.limits, expected=u.size, clock=self.clock.now))
                             for u in reply.files)
@@ -294,7 +314,7 @@ class Gateway:
 
     async def send(self, agent: str, reply: Reply, room: str | None = None) -> Sent:
         core, bot = self.room_for(agent, reply, room)
-        self.check_files(reply)
+        self.check_files(core, bot, reply)
         return await core.send(bot, reply)
 
     def room_for(self, agent: str, reply: Reply, room: str | None = None) -> tuple[RoomCore, str]:
