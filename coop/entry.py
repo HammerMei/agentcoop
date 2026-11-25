@@ -2,7 +2,7 @@
 
 ```
 coop start | stop | status | list | pause | resume | reset | reload | config …   the operator's daemon (coop.cli)
-coop read | send | done | bio | attachment …                                     the agent's side (coop.agent.cli)
+coop read | send | done | bio | attachment | agent run …                         the agent's side (coop.agent.cli)
 coop legacy <command> …                                                          the current gateway's whole CLI (gateway.cli)
 ```
 
@@ -20,14 +20,14 @@ from __future__ import annotations
 
 import sys
 
-AGENT_COMMANDS = ("read", "send", "done", "bio", "attachment")
+AGENT_COMMANDS = ("read", "send", "done", "bio", "attachment", "agent")
 LEGACY = "legacy"
 
 USAGE = """\
 usage: coop <command> ...
 
   the daemon, for the operator:   start stop status list pause resume reset reload config     coop <command> --help
-  the room, for an agent:         read send done bio attachment                               coop read --help
+  the room, for an agent:         read send done bio attachment, agent run (the utility)       coop read --help
   the current gateway's commands: coop legacy <command> ...                                   coop legacy --help
 """
 

@@ -431,9 +431,13 @@ repository, `[unverified]` to settle before the adapter is called done.
 
 | Agent | First turn | Later turns | Instructions | Bypass |
 |---|---|---|---|---|
-| Claude Code | `claude -p --output-format json --append-system-prompt-file rules.md --dangerously-skip-permissions "<wake text>"` `[docs]`; the session id comes from the `session_id` field of the JSON output, as `gateway/agents/claude/adapter.py` reads it today `[src]` | `claude -p -r <session> ...` `[docs]` | `--append-system-prompt-file` `[docs]`, optional `--agent` `[docs]` | `--dangerously-skip-permissions` `[docs]`; hard ceiling via `--disallowedTools` `[docs]` or settings |
-| OpenCode 2.2.6 | `opencode run --session <id> --agent <entry> --format json --auto "<wake text>"` `[help]`; `--session`: "Session ID to continue, or to create if it does not exist" `[help]` | same `--session` `[help]` | an agent entry whose `system` is the rules, in a config file the utility writes. `OPENCODE_CONFIG` was verified live for `opencode acp` only (`acp-agent-backend.md` §8 item 6); `run` talks to a background service unless `--standalone` `[help]`, so the config path is `[unverified]` for `run` | `--auto`: "Auto-approve permissions that are not explicitly denied" `[help]` |
-| Codex | `codex exec --json --dangerously-bypass-approvals-and-sandbox "<wake text>"` `[help]`; reading the thread id from the output is `[unverified]` | `codex exec resume <id>` ("Resume a previous session by id or pick the most recent with --last") `[help]` | `[unverified]`: the carrier is settled from `[help]` evidence before the adapter is done. The reference page redirected and was not read. Whatever it is, the utility never writes a file the owner's working directory already holds, so a repository's own `AGENTS.md` is not replaced | `--dangerously-bypass-approvals-and-sandbox` `[help]`; `--full-auto` `[unverified]` |
+| Claude Code 2.1.330 | `claude -p --output-format json --append-system-prompt-file rules.md --system-prompt-snapshot off --dangerously-skip-permissions --session-id <uuid> "<wake text>"` — the utility names the session `[probe]`, so a first turn the lease ended still has one; the JSON output's `session_id` is that id `[probe]` | `claude -p -r <uuid> …` `[probe]` | `--append-system-prompt-file` `[docs]`, with `--system-prompt-snapshot off` so the file is re-read on every turn `[src]` (Claude Code replays the first request's system prompt on every resume otherwise) | `--dangerously-skip-permissions` `[help]`; hard ceiling via `--disallowedTools` `[help]` or settings |
+| OpenCode 2.2.6 | `opencode run --standalone --session ses_coop<hex> --format json --auto "<rules>\n---\n<wake text>"` — `--session` "continues, or creates if it does not exist" `[help]`, the id must start with `ses` `[probe]` (a bare name is refused), so the utility names one; `--standalone` runs a private server instead of the background service `[help]`, so ending the command ends the turn | the same call `[help]` | the rules travel in the message. An agent entry whose `system` is the rules, through `OPENCODE_CONFIG`, is verified for `opencode acp` only (`acp-agent-backend.md` §8 item 6) and not for `run`; not used | `--auto`: "Auto-approve permissions that are not explicitly denied" `[help]` |
+| Codex 0.167.0 | `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "<rules>\n---\n<wake text>"`; the thread id is the `thread_id` of the output's `thread.started` line `[probe]` | `codex exec resume --json … <thread id> "<…>"` `[probe]` | the prompt argument is "initial instructions for the agent" `[help]`, so the rules travel in it; the utility writes nothing into the working directory (a repository's `AGENTS.md` is the owner's) | `--dangerously-bypass-approvals-and-sandbox` `[help]` |
+
+Probed on the owner's machine on 2026-11-25 with the installed versions above; the
+OpenCode model call itself failed on provider credit, so what OpenCode does with
+the message is the lab's to see.
 
 The wake text is short: the room, the wake id, and "run `coop read --wake <id>`,
 reply with `coop send --wake <id>`, then `coop done --wake <id>`". The agent does the reading and sending itself
@@ -462,6 +466,51 @@ so nothing is lost. A lease that expired while the utility was down is a failure
 the backoff already handled.
 
 Working directory and credentials are the owner's, as today's `agents:` entries.
+
+How the utility runs, `coop agent run`:
+
+- Its connection is the agent CLI's (`--gateway`, `--token`, `--fingerprint`,
+  `--transfer-timeout`, or their `COOP_*` variables), and `~/.coop/agent.toml`
+  holds the same four as defaults, so neither the operator's shell nor a service
+  unit carries the token on a command line. The child command gets them as the
+  `COOP_*` variables in its environment, and the utility's own directory on
+  `PATH`, so the bare `coop read --wake …` the wake text names works; the token
+  is never in the command line or the wake text.
+- It keeps its state under `~/.coop/agents/<name>/`: `sessions.json` (the session
+  or thread id per room) and `rules.md` (the room-rules document at the version
+  the last wake carried; refetched when a wake carries a newer one), both written
+  atomically, so a command started mid-write reads whole files.
+- The command runs in its own process group, and the lease ends the group a
+  second before `lease_expires_at`, so the utility's `done --failed "lease
+  expired"` lands under the lease when the command goes within the second
+  (otherwise the gateway's own expiry has failed the turn first, the same
+  outcome): terminate, five seconds, kill — the kill to the whole group, for a
+  tool that outlived the command. A CLI spawns tools, and a tool left running
+  could `send` after the lease. What the command printed before it was stopped
+  is read after the kill, so a session a lease-ended first turn named is kept. The deadline is the gateway's clock; the
+  utility's host is assumed within a few seconds of it (NTP), and a larger skew
+  shows as leases that end early or late by that much — measured, not corrected.
+- Whether the agent sent `done` is the gateway's answer, not the utility's
+  bookkeeping: after the command exits the utility sends `done --failed <reason>`,
+  and a wake the agent already closed answers `false` (the gateway traces it as
+  `done_stale`, which is the normal end of a turn under the utility, not an
+  error). The reason names what ended the command: `no done from agent (exit N)`,
+  `lease expired`, `command failed to start: …`, `command could not be built: …`,
+  `rules could not be fetched: …`, `utility stopped`.
+- A session that will not resume (deleted by the CLI, a changed working
+  directory, a CLI upgrade) would fail every later wake and keep the bot in
+  backoff. The utility treats a non-zero exit on a resumed session whose output
+  carries no session id as a resume failure: it says so (`[WARNING] … session
+  <id> for <room> did not resume; dropped — the next wake starts a new session,
+  or run coop reset <agent> <room> to reset the room too`), drops the id, and the
+  next wake starts fresh; not for OpenCode, whose `--session` creates what it does
+  not find, so a failure there is never a missing session. The command's stderr
+  goes to the utility's own stderr, never into the room.
+- The loop: one wake at a time; the gateway unreachable → wait and poll again
+  (doubling to a minute); a 401 → stop, the token is wrong; `rules` or `done`
+  refused or unanswered → said, the turn is the gateway's lease expiry's to fail;
+  SIGTERM → the poll in flight is cancelled, the child's group is ended and its
+  wake fails with `utility stopped`.
 
 ### 3.5 Enforce mode
 
