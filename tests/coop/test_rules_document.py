@@ -10,5 +10,5 @@ from coop.room.gateway import RULES_VERSION
 
 def test_rules_version_is_bumped_with_the_rules_document():
     digest = hashlib.sha256(RULES.read_bytes()).hexdigest()[:12]
-    assert (RULES_VERSION, digest) == (2, "783533c1dd82"), (
+    assert (RULES_VERSION, digest) == (3, "4a6bb0042575"), (
         "coop/rules.md changed: bump RULES_VERSION in coop/room/gateway.py and update this pin")

@@ -112,6 +112,9 @@ class RoomLog:
             return None
         return next(p for p in self.posts if p.id == post_id)
 
+    async def typing(self, author: str, thread: str) -> None:
+        await self.connector.typing(author, self.id, thread)
+
     async def fetch_attachment(self, file_id: str) -> bytes:
         if not self.hosted:
             raise KeyError(file_id)

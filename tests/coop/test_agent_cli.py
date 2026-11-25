@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from coop.agent.cli import run
@@ -35,7 +37,7 @@ async def test_read_prints_the_reminder_the_hint_and_the_posts(sb, coop, capsys)
     w = await wake_id(sb)
     assert await coop("read", "--wake", w) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0] == f"you are a in team, rules v2, reply with `send --wake {w}` or `done`"
+    assert out[0] == f"you are a in team, rules v3, reply with `send --wake {w}` or `done`"
     assert out[1] == "Turn source: addressed. Starting thread: t1."
     assert out[-2:] == ["[t1] #p1 b (agent): a bot speaks", "[t1] #p2 H (owner, trigger): @a hello"]
 
@@ -94,6 +96,15 @@ async def test_a_refused_send_is_an_error_line(sb, coop, capsys):
     assert await coop("send", "--unsolicited", "--thread", "t1", "--to", "H", "still here") == 1
     err = capsys.readouterr().err.splitlines()[-1]
     assert err.startswith("[ERROR]") and "mute" in err and sb.posts_by("a") == []
+
+
+async def test_a_send_a_rule_would_refuse_is_a_warning_line_where_the_room_does_not_enforce(sb, coop, capsys):
+    sb.gw.params = replace(sb.gw.params, enforce=False)
+    await sb.human("mute: @a", "t1")
+    assert await coop("send", "--unsolicited", "--thread", "t1", "--to", "H", "still here") == 0
+    out, err = capsys.readouterr()
+    assert out.splitlines()[-1] == "[t1] #p2 a (agent): @H still here" and len(sb.posts_by("a")) == 1
+    assert err.splitlines()[-1].startswith("[WARNING] the send broke a rule this room does not enforce: mute@t1")
 
 
 async def test_a_late_send_on_an_expired_wake_needs_the_thread(sb, coop, capsys):

@@ -51,6 +51,7 @@ from .model import (
     Position,
     Post,
     Reply,
+    Sent,
     ThreadGroup,
     Trigger,
     TurnSource,
@@ -174,6 +175,7 @@ class BotVolatile:
 class CachedDecision:
     decision: Decision | None = None  # None while in flight
     time: float = 0.0
+    position: Position | None = None  # the post's: evicted once every hosted cursor has passed it
 
 
 @dataclass
@@ -388,11 +390,26 @@ class RoomCore:
         return self.clock.now()
 
     def _thread(self, thread: str) -> ThreadSettings:
+        """The thread's settings now: controls older than the TTL since the thread's last
+        post are gone (5.4). During a replay the clock is the posts' (``_thread_seen``),
+        not now: a mute said before an outage, in a thread that kept going, is kept."""
         settings = self.settings.setdefault(thread, ThreadSettings(last_activity=self.now()))
-        if self.params.control_ttl_seconds and self.now() - settings.last_activity > self.params.control_ttl_seconds:
+        ttl = self.params.control_ttl_seconds
+        if ttl and not self.replaying and self.now() - settings.last_activity > ttl:
             fresh = ThreadSettings(last_activity=settings.last_activity)
             self.settings[thread] = fresh
             return fresh
+        return settings
+
+    def _thread_seen(self, thread: str, time: float) -> ThreadSettings:
+        """The thread's settings as of a post at ``time``. A thread first seen is as old as
+        the post, and the TTL is measured from the previous post to this one, so a control
+        replayed from history expires by the gap that followed it, not by its age now."""
+        settings = self.settings.setdefault(thread, ThreadSettings(last_activity=time))
+        ttl = self.params.control_ttl_seconds
+        if ttl and time - settings.last_activity > ttl:
+            settings = self.settings[thread] = ThreadSettings(last_activity=settings.last_activity)
+        settings.last_activity = max(settings.last_activity, time)
         return settings
 
     def _tstate(self, thread: str) -> ThreadVolatile:
@@ -473,7 +490,7 @@ class RoomCore:
         if not self.online:
             return
         copies = [b for b in self.hosted if b != post.author]
-        self._thread(post.thread).last_activity = max(self._thread(post.thread).last_activity, post.time)
+        self._thread_seen(post.thread, post.time)
         if post.kind == "notice":
             return  # recognised before eligibility: no turn, no classifier, not in the window
         self._count_for_rate(post)  # a human post clears the window even when control-only (5.3)
@@ -695,7 +712,7 @@ class RoomCore:
     def _classify(self, post: Post, addressed: tuple[str, ...]) -> None:
         if not self._classifier_applies(post):
             return
-        self.decisions[post.id] = CachedDecision()
+        self.decisions[post.id] = CachedDecision(position=post.position)
         self.trace.add(self.now(), "classifier_call", gateway=self.name, post=post.id)
         request = self._request(post, self._all_addressed(post))  # what the classifier sees is fixed now
         self.clock.at(0, self._classifier_attempt, request, 1)
@@ -765,7 +782,7 @@ class RoomCore:
         await self._decided(post, addressed, decision)
 
     async def _decided(self, post: Post, addressed: tuple[str, ...], decision: Decision) -> None:
-        self.decisions[post.id] = CachedDecision(decision, self.now())
+        self.decisions[post.id] = CachedDecision(decision, self.now(), post.position)
         self.trace.add(self.now(), "classifier_decision", gateway=self.name, post=post.id,
                        add=list(decision.add), remove=list(decision.remove), fallback=decision.fallback,
                        reasons=dict(decision.reasons))
@@ -990,6 +1007,9 @@ class RoomCore:
             run.expiry = self.clock.at(self.params.lease_seconds, self._lease_expired, bot, run)
         self.trace.add(self.now(), "lease_started", gateway=self.name, bot=bot, wake=run.wake.wake_id,
                        expires_at=run.expires_at)
+        if run.wake.source == "addressed":  # someone asked: the room sees the bot is on it (design §3.2)
+            self.trace.add(self.now(), "typing", gateway=self.name, bot=bot, thread=run.wake.starting_thread)
+            self.clock.at(0, self.platform.typing, bot, run.wake.starting_thread)
         return run.wake
 
     def _live(self, bot: str, wake_id: str) -> TurnRun:
@@ -1022,16 +1042,16 @@ class RoomCore:
                 raise KeyError(after)
         return list(self.platform.posts_after(start))
 
-    async def send(self, bot: str, reply: Reply) -> Post | None:
+    async def send(self, bot: str, reply: Reply) -> Sent:
         """One reply posted on the bot's behalf (design §3.5). A wake's send is checked
         against that wake's hint; an unsolicited send against the thread's current
         mute (rate and cooldown exempt). Enforce mode refuses with :class:`RefusedSend`;
-        measure mode posts and counts. Returns ``None`` when a control resolved to
-        nothing and there was no text."""
+        measure mode posts and counts, and the rules broken come back as the
+        warnings, worded as the refusal would have been."""
         async with self._lock:
             return await self._send(bot, reply)
 
-    async def _send(self, bot: str, reply: Reply) -> Post | None:
+    async def _send(self, bot: str, reply: Reply) -> Sent:
         run = self._attributed(bot, reply)
         ctx = self._validation_context(bot, reply.thread, run)
         structural, rules = check_reply(reply, ctx)
@@ -1047,8 +1067,9 @@ class RoomCore:
         if run is not None:
             run.problems.update((p.mechanism, p.thread) for p in rules)
             run.items_seen.update(self._items(reply))
+        broken = tuple(f"{p.mechanism}@{p.thread}: {p.reason}" for p in rules)
         if rules and self.params.enforce:
-            reasons = "; ".join(f"{p.mechanism}@{p.thread}: {p.reason}" for p in rules)
+            reasons = "; ".join(broken)
             self.trace.add(self.now(), "refused", gateway=self.name, bot=bot, wake=reply.wake_id,
                            thread=reply.thread, reason=reasons)
             if run is None:
@@ -1066,7 +1087,7 @@ class RoomCore:
                 run.ledger.add(reply.thread)  # a reply the platform refused was still given (5.6, 5.9)
         self.trace.add(self.now(), "send", gateway=self.name, bot=bot, wake=reply.wake_id,
                        thread=reply.thread, post=post.id if post else None)
-        return post
+        return Sent(post, broken)
 
     def _attributed(self, bot: str, reply: Reply) -> TurnRun | None:
         """The live turn a send belongs to. A wake id with no live lease (a late send
@@ -1224,7 +1245,23 @@ class RoomCore:
         for thread in covered & state.unfinished:
             state.unfinished.discard(thread)
             self.trace.add(self.now(), "unfinished_removed", gateway=self.name, bot=bot, thread=thread)
+        self._evict_decisions()
         self._changed()
+
+    def _evict_decisions(self) -> None:
+        """Decided entries every hosted cursor has passed: no backlog holds their post, so
+        no sweep or start reads them again (a restart drops the whole cache). A bot whose
+        cursor is null, paused or away keeps them, as it keeps the backlog itself."""
+        cursors = [self.persisted[b].cursor for b in self.hosted]
+        if not cursors or any(c is None for c in cursors):
+            return
+        floor = min(cursors)
+        gone = [pid for pid, c in self.decisions.items()
+                if c.decision is not None and c.position is not None and not after(c.position, floor)]
+        for pid in gone:
+            del self.decisions[pid]
+            for state in self.volatile.values():
+                state.expired_decisions.discard(pid)
 
     def _finish(self, run: TurnRun, outcome: str, **more) -> None:
         bot = run.wake.bot

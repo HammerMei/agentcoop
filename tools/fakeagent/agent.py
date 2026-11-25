@@ -108,6 +108,7 @@ class Outcome:
 
     turn: Turn
     posted: list[Post] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # rules a non-enforcing room let the sends break
     refused: list[str] = field(default_factory=list)
     invalid: list[str] = field(default_factory=list)
     platform_refused: list[str] = field(default_factory=list)
@@ -178,7 +179,7 @@ class FakeAgent:
                           text=item.get("text"), control=item.get("control"),
                           wake_id=None if item.get("unsolicited") else wake.wake_id)
             try:
-                post = await doorbell.send(reply, room=wake.room)
+                sent = await doorbell.send(reply, room=wake.room)
             except RefusedSend as exc:
                 outcome.refused.append(f"{thread}: {exc.reasons}")
             except InvalidReply as exc:
@@ -186,8 +187,9 @@ class FakeAgent:
             except RefusedPost:
                 outcome.platform_refused.append(thread)
             else:
-                if post is not None:
-                    outcome.posted.append(post)
+                outcome.warnings.extend(sent.warnings)
+                if sent.post is not None:
+                    outcome.posted.append(sent.post)
         if behaviour.skip_done:
             return
         outcome.done = await doorbell.done(wake.wake_id, answered=tuple(outcome.answered))

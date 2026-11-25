@@ -25,7 +25,7 @@ from ..errors import (
     RefusedSend,
 )
 from ..fingerprint import fingerprint, same_fingerprint
-from ..room.model import Post, Reply, Wake
+from ..room.model import Post, Reply, Sent, Wake
 from ..room.platform import RefusedPost
 from ..wire import decode_post, decode_wake, encode_reply
 
@@ -100,7 +100,7 @@ class HttpDoorbell:
         r = await (await self._http()).get("/v1/agents/me/posts", params=params)
         return [decode_post(p) for p in self._answer(r)["posts"]]
 
-    async def send(self, reply: Reply, room: str | None = None) -> Post | None:
+    async def send(self, reply: Reply, room: str | None = None) -> Sent:
         body = encode_reply(reply)
         if room is not None:
             body["room"] = room
@@ -118,8 +118,9 @@ class HttpDoorbell:
         if r.status_code == 502:
             # the gateway filled in a wake's thread the reply left out (design §3.3)
             raise RefusedPost(r.json().get("thread") or reply.thread)
-        doc = self._answer(r)["post"]
-        return None if doc is None else decode_post(doc)
+        answer = self._answer(r)
+        doc = answer["post"]
+        return Sent(None if doc is None else decode_post(doc), tuple(answer.get("warnings", ())))
 
     async def done(self, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool:
         r = await (await self._http()).post("/v1/agents/me/done",

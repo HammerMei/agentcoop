@@ -89,10 +89,12 @@ async def test_startup_hosts_the_ruled_room_and_a_bots_reply_wakes_the_other(run
     await settle()
     wake = svc.gateway.poll("a")
     assert wake is not None and wake.trigger.author == "H" and wake.trigger.author_role == "owner"
+    await settle()
+    assert fc.typed == [("a_bot", "c1", wake.starting_thread)]  # the pick-up of an addressed wake
     _, posts = svc.gateway.read("a", wake.wake_id)
     assert [p.text for p in posts] == ["@a_bot hello"] and wake.bot == "a_bot"  # the room's names, as written
     reply = Reply(thread=wake.starting_thread, to=["b_bot"], text="your turn", wake_id=wake.wake_id)
-    post = await svc.gateway.send("a", reply)
+    post = (await svc.gateway.send("a", reply)).post
     assert fc.posts["c1"][-1].text == "@b_bot your turn" and post.author == "a_bot"
     await settle()
     wake_b = svc.gateway.poll("b")
@@ -547,7 +549,7 @@ async def test_crossed_usernames_wake_by_binding_not_by_name(tmp_path):
         wake = svc.gateway.poll("b")
         assert wake is not None and wake.bot == "a"
         _, posts = svc.gateway.read("b", wake.wake_id)
-        post = await svc.gateway.send("b", Reply(thread=wake.starting_thread, to=["H"], text="hi", wake_id=wake.wake_id))
+        post = (await svc.gateway.send("b", Reply(thread=wake.starting_thread, to=["H"], text="hi", wake_id=wake.wake_id))).post
         assert post.author == "a" and await svc.gateway.done("b", wake.wake_id)
         saved = json.loads((tmp_path / "state" / "fake" / "c1.json").read_text())
         assert set(saved["bots"]) == {"a", "b"} and tuple(saved["bots"]["b"]["cursor"]) == wake.hwm  # by agent
@@ -706,6 +708,49 @@ async def test_a_join_to_a_room_the_platform_cannot_describe_is_an_error_line_no
     await settle()
     assert "fake:other" not in svc.rooms and any(n.startswith("[ERROR] fake: room c2") for n in svc.notes)
     assert fc.bots  # the connection is still up: the next event is handled
+
+
+async def test_a_join_the_platform_could_not_describe_is_asked_again_on_reload(running, tmp_path):
+    """§14.3: the degraded part is retried on a later reload, not only by a restart
+    (#214 R5). A retry that fails again is said again and does not fail the reload."""
+    svc, fc = running
+    fc.add_room("c3", "late", PEOPLE)  # a room the bot was not in at start
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("c3", "a_bot", joined=True))
+    await settle()
+    assert any(n.startswith("[ERROR] fake: room c3") and "until a reload" in n for n in svc.notes)
+    every = CONFIG.replace('"fake:team*"', '"fake:*"')
+    notes = await svc.reload(config(tmp_path, every))  # still down: said again, nothing hosted, no raise
+    assert "fake:late" not in svc.rooms and any("room c3" in n and "still not described" in n for n in notes)
+    del fc.room  # the platform answers again
+    notes = await svc.reload(config(tmp_path, every))
+    assert svc.rooms["fake:late"].core.hosted == ["a_bot"] and "fake:late: 'a' hosted" in notes
+    assert any(n.startswith("[WARNING] fake: room c3") and "not delivered" in n for n in notes)  # said, not silent
+    assert svc.rooms["fake:late"].core.persisted["a_bot"].cursor == svc.rooms["fake:late"].log.last_position()
+    notes = await svc.reload(config(tmp_path, every))
+    assert not any("room c3" in n for n in notes)  # described once, not asked again
+
+
+async def test_a_join_announced_again_and_described_now_is_not_asked_about_on_reload(running, tmp_path):
+    """A reopened DM is announced again (Mattermost): the second announcement, described,
+    clears the first's failure, so a reload says nothing about a room that is hosted."""
+    svc, fc = running
+    fc.add_room("d1", "H", [MemberInfo("H"), MemberInfo("a_bot", is_bot=True)], "dm")
+
+    async def room(room_id):
+        raise PlatformError("down")
+    fc.room = room
+    await fc.on_event(Membership("d1", "a_bot", joined=True, created=True))
+    await settle()
+    del fc.room
+    await fc.on_event(Membership("d1", "a_bot", joined=True))
+    await settle()
+    fc.room = room  # flaky again at reload time
+    notes = await svc.reload(config(tmp_path, CONFIG.replace('"fake:team*"', '"fake:*"')))
+    assert "fake:dm:a_bot:H" in svc.rooms and not any("room d1" in n for n in notes)
 
 
 def test_a_rooms_handle_is_platform_names_only_by_kind():

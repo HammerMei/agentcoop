@@ -231,3 +231,32 @@ async def test_a_bio_under_a_roster_only_name_is_not_shown_to_the_classifier():
     await sb.run(0)
     offered = {m.username: m.profile for m in sb.classifier.calls[-1].agents}
     assert offered == {"a": "I run the deploys", "b": "b profile"}  # b: the roster's profile, not the gateway's bio
+
+
+async def test_a_decision_is_evicted_once_every_hosted_cursor_has_passed_its_post():
+    """The cache is bounded by the backlog, not by the room's life: an entry stays while
+    any hosted bot could still read its post, and goes with the first turn end after the
+    last of them has passed it (plan S3-2; #208 r2 G5)."""
+    classifier = ScriptedClassifier(decisions={"p1": Decision(add=("a",))})
+    sb = Sandbox(bots=("a", "b"), classifier=classifier,
+                 script=Script().on(reply(["H"], "ok"), bot="a").on(reply(["H"], "yes"), bot="b"))
+    await sb.human("anyone around?")  # p1: the classifier picks a
+    await sb.run(2)
+    assert sb.trace.last("turn_end", bot="a").outcome == "normal" and "p1" in sb.gw.decisions  # b has not passed p1
+    await sb.human("@b and you?")  # p3: b's turn commits its cursor past p1
+    await sb.run(2)
+    assert sb.trace.last("turn_end", bot="b").outcome == "normal" and "p1" not in sb.gw.decisions
+    assert "p3" in sb.gw.decisions  # above a's cursor still
+    assert sb.gw.status()["decisions"] == len(sb.gw.decisions)
+
+
+async def test_a_hosted_bot_that_never_finished_a_turn_keeps_every_decision():
+    """A null cursor is before every post: nothing is evicted while one is hosted, as
+    the backlog itself is kept for it."""
+    classifier = ScriptedClassifier(decisions={"p1": Decision(add=("a",))})
+    sb = Sandbox(classifier=classifier, script=Script().on(reply(["H"], "ok"), bot="a").on(reply(["H"], "yes"), bot="b"))
+    await sb.human("anyone around?")
+    await sb.run(2)
+    await sb.human("@b and you?")
+    await sb.run(2)
+    assert sb.gw.persisted["c"].cursor is None and "p1" in sb.gw.decisions

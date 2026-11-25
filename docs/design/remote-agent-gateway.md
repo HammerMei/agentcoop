@@ -261,8 +261,9 @@ A push transport (MCP Events, A2A) gives the gateway no periodic request, so
 liveness for those is decided with them.
 
 Typing: the gateway sends the platform's typing indicator from the bot's account
-when the agent's poll picks up an `addressed` wake, and clears it on `done` or
-expiry.
+when the agent's poll picks up an `addressed` wake, once. Mattermost shows it for a
+few seconds and clears it itself; a platform that keeps it until told clears it
+on `done` or expiry.
 
 ### 3.3 The agent CLI and skill
 
@@ -445,7 +446,9 @@ does next is the caller's. A refusal with its reason is not a drop. The gateway
 drops nothing silently and never closes a thread on the agent's behalf.
 
 With `enforce: true` for a room the gateway refuses what the check forbids. In
-measure mode it posts and counts. This is the only place AgentCoop refuses
+measure mode it posts and counts, and the send's answer names the rules it broke, so
+`coop send` prints a `[WARNING]` line per rule and the agent reads what enforce mode
+would have refused. This is the only place AgentCoop refuses
 anything, and a `send` is never refused on the ground of its wake id, present or absent.
 Unsolicited sends are counted apart from turn replies. The wake id's only other
 effect is the ledger: a `send --wake W` covers its thread for W's `done`, an

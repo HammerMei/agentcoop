@@ -68,6 +68,13 @@ async def test_a_post_goes_through_the_connector_as_the_bot_and_lands_in_the_log
     assert log.ingest(post) is False  # the echo from the connection is a duplicate
 
 
+async def test_typing_goes_through_the_connector_as_the_bot_in_this_room():
+    fc, log = make_log()
+    await fc.add_bot("a_bot", "tok")
+    await log.typing("a_bot", "p9")
+    assert fc.typed == [("a_bot", "c1", "p9")]
+
+
 async def test_a_refused_or_archived_thread_raises_refused_post():
     fc, log = make_log()
     await fc.add_bot("a_bot", "tok")

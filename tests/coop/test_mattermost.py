@@ -54,6 +54,7 @@ class FakeMattermost:
         self.refuse_posts = False
         self.failure: Exception | None = None  # raised by every request while set: the server is unreachable
         self.not_found = False  # every request answers 404
+        self.html = False  # every request answers 200 with a page, as a proxy in the way does
         self._ms = 1_700_000_000_000
         self._n = 0
         self.sockets: list[FakeSocket] = []
@@ -98,6 +99,8 @@ class FakeMattermost:
             raise self.failure
         if self.not_found:
             return httpx.Response(404, json={"message": "nothing here"})
+        if self.html:
+            return httpx.Response(200, text="<html>sign in</html>")
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         me = self.tokens.get(token)
         if me is None:
@@ -393,6 +396,11 @@ async def test_transport_failures_are_platform_errors_and_a_missing_file_a_key_e
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
         await connector.post("laomei_bot", "c01", "x", None)
+    mm.failure, mm.html = None, True  # a 200 that is not JSON is the platform not answering, not a ValueError
+    with pytest.raises(PlatformError):
+        await connector.room("c01")
+    mm.html = False
+    mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
         await connector.fetch_file("laomei_bot", "f1")
     with pytest.raises(PlatformError):

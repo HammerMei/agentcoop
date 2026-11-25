@@ -242,6 +242,16 @@ class Reply:
 
 
 @dataclass(frozen=True)
+class Sent:
+    """What a ``send`` came to: the post, or ``None`` when a control resolved to nothing
+    and there was no text; and the rules the send broke that the room, not enforcing,
+    let through, each worded as enforce mode's refusal would be (design §3.5)."""
+
+    post: Post | None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Decision:
     """A classifier answer (section 5.1): usernames to add, usernames it would remove."""
 

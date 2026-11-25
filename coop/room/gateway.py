@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, replace
 from ..errors import NoLiveLease, RoomUnresolved
 from .clock import Clock
 from .core import RoomCore
-from .model import Attachment, Post, Reply, Wake
+from .model import Attachment, Post, Reply, Sent, Wake
 from .trace import Trace
 
 Listener = Callable[[Wake], Awaitable[None]]
@@ -32,7 +32,7 @@ Listener = Callable[[Wake], Awaitable[None]]
 # The version of the room-rules document (``coop/rules.md``) every wake carries
 # (design §3.3): an agent refetches the document when a wake carries a newer one.
 # Bumped with every change to the document; a test pins the pair.
-RULES_VERSION = 2
+RULES_VERSION = 3
 
 
 @dataclass
@@ -224,7 +224,7 @@ class Gateway:
             raise PermissionError(f"{agent} is not in the roster of room {room!r}")
         return core.read_room(bot, after)
 
-    async def send(self, agent: str, reply: Reply, room: str | None = None) -> Post | None:
+    async def send(self, agent: str, reply: Reply, room: str | None = None) -> Sent:
         core, bot = self.room_for(agent, reply, room)
         return await core.send(bot, reply)
 
