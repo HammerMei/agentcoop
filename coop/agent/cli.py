@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import mimetypes
 import os
 import secrets
+import shutil
 import signal
 import sys
 import tomllib
@@ -61,7 +63,7 @@ def defaults() -> dict[str, str]:
     found: dict[str, str] = {}
     try:
         section = tomllib.loads(AGENT_TOML.read_text()).get("connection", {})
-    except (OSError, ValueError):
+    except OSError:  # no file: nothing to read; a malformed one is an error, not silence
         section = {}
     for key in ("gateway", "token", "fingerprint", "transfer_timeout"):
         value = os.environ.get(f"COOP_{key.upper()}")
@@ -121,8 +123,8 @@ def parser() -> argparse.ArgumentParser:
     run_.add_argument("--kind", required=True, choices=sorted(ADAPTERS), help="which CLI drives the turns")
     run_.add_argument("--program", help="the CLI's program (default: its name on PATH)")
     run_.add_argument("--workdir", type=Path, default=Path.cwd(), help="the command's working directory (default: here)")
-    run_.add_argument("--state", type=Path, default=Path.home() / ".coop" / "agents" / "default",
-                      help="where the sessions and the rules are kept (default: ~/.coop/agents/default)")
+    run_.add_argument("--state", type=Path, help="where the sessions and the rules are kept "
+                      "(default: ~/.coop/agents/<id>, the id derived from the connection, so two agents on one host do not share)")
     run_.add_argument("--wait", type=float, default=30.0, metavar="S", help="the long-poll wait (default 30)")
     return top
 
@@ -253,12 +255,16 @@ async def cmd_agent(doorbell: HttpDoorbell, args) -> int:
     from .run import Runner
 
     adapter = ADAPTERS[args.kind](args.program or DEFAULT_PROGRAM[args.kind])
-    here = str(Path(sys.argv[0]).resolve().parent)
     env = {"COOP_GATEWAY": args.gateway, "COOP_TOKEN": args.token, "COOP_TRANSFER_TIMEOUT": str(args.transfer_timeout),
-           "PATH": f"{here}{os.pathsep}{os.environ.get('PATH', '')}"}
+           "PATH": os.environ.get("PATH", "")}
+    if shutil.which("coop") is None:  # the child runs a bare ``coop``: this interpreter's scripts directory has it
+        env["PATH"] = f"{Path(sys.executable).resolve().parent}{os.pathsep}{env['PATH']}"
+        if shutil.which("coop", path=env["PATH"]) is None:
+            print("[WARNING] no `coop` on PATH: the agent's `coop read` will not run", file=sys.stderr)
     if args.fingerprint:
         env["COOP_FINGERPRINT"] = args.fingerprint
-    runner = Runner(doorbell, adapter, args.state.expanduser(), args.workdir.expanduser(), env)
+    state = args.state or Path.home() / ".coop" / "agents" / hashlib.sha256(f"{args.gateway}\n{args.token}".encode()).hexdigest()[:12]
+    runner = Runner(doorbell, adapter, state.expanduser(), args.workdir.expanduser(), env)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, runner.stop)

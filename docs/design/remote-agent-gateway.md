@@ -482,8 +482,12 @@ How the utility runs, `coop agent run`:
   atomically, so a command started mid-write reads whole files.
 - The command runs in its own process group, and the lease ends the group a
   second before `lease_expires_at`, so the utility's `done --failed "lease
-  expired"` lands under the lease: terminate, five seconds, kill. A CLI spawns tools, and a tool left
-  running could `send` after the lease. The deadline is the gateway's clock; the
+  expired"` lands under the lease when the command goes within the second
+  (otherwise the gateway's own expiry has failed the turn first, the same
+  outcome): terminate, five seconds, kill — the kill to the whole group, for a
+  tool that outlived the command. A CLI spawns tools, and a tool left running
+  could `send` after the lease. What the command printed before it was stopped
+  is read after the kill, so a session a lease-ended first turn named is kept. The deadline is the gateway's clock; the
   utility's host is assumed within a few seconds of it (NTP), and a larger skew
   shows as leases that end early or late by that much — measured, not corrected.
 - Whether the agent sent `done` is the gateway's answer, not the utility's
@@ -491,19 +495,22 @@ How the utility runs, `coop agent run`:
   and a wake the agent already closed answers `false` (the gateway traces it as
   `done_stale`, which is the normal end of a turn under the utility, not an
   error). The reason names what ended the command: `no done from agent (exit N)`,
-  `lease expired`, `command failed to start: …`, `resume failed`.
+  `lease expired`, `command failed to start: …`, `command could not be built: …`,
+  `rules could not be fetched: …`, `utility stopped`.
 - A session that will not resume (deleted by the CLI, a changed working
   directory, a CLI upgrade) would fail every later wake and keep the bot in
   backoff. The utility treats a non-zero exit on a resumed session whose output
   carries no session id as a resume failure: it says so (`[WARNING] … session
   <id> for <room> did not resume; dropped — the next wake starts a new session,
   or run coop reset <agent> <room> to reset the room too`), drops the id, and the
-  next wake starts fresh. The command's stderr goes to the utility's log, never
-  into the room.
+  next wake starts fresh; not for OpenCode, whose `--session` creates what it does
+  not find, so a failure there is never a missing session. The command's stderr
+  goes to the utility's own stderr, never into the room.
 - The loop: one wake at a time; the gateway unreachable → wait and poll again
-  (doubling to a minute); a 401 → stop, the token is wrong; a lost response on
-  `done` → the next wake's `read` shows what happened; SIGTERM → the child's group
-  is ended and the pending wake fails with `utility stopped`.
+  (doubling to a minute); a 401 → stop, the token is wrong; `rules` or `done`
+  refused or unanswered → said, the turn is the gateway's lease expiry's to fail;
+  SIGTERM → the poll in flight is cancelled, the child's group is ended and its
+  wake fails with `utility stopped`.
 
 ### 3.5 Enforce mode
 

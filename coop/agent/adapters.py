@@ -40,6 +40,9 @@ class Adapter:
     session_in: Callable[[str], str | None]
     # The rules travel in the prompt (OpenCode, Codex) or through a flag (Claude Code).
     rules_in_text: bool = False
+    # A resume that cannot fail for a missing session (OpenCode's ``--session`` creates
+    # one): a non-zero exit then is never read as "did not resume".
+    resume_creates: bool = False
 
     def command(self, turn: Turn) -> list[str]:
         if self.rules_in_text:
@@ -118,7 +121,7 @@ def _codex_session_in(stdout: str) -> str | None:
 ADAPTERS: dict[str, Callable[[str], Adapter]] = {
     "claude": lambda program: Adapter("claude", program, lambda: str(uuid.uuid4()), _claude_argv, _claude_session_in),
     "opencode": lambda program: Adapter("opencode", program, lambda: f"ses_coop{secrets.token_hex(8)}", _opencode_argv,
-                                        _opencode_session_in, rules_in_text=True),
+                                        _opencode_session_in, rules_in_text=True, resume_creates=True),
     "codex": lambda program: Adapter("codex", program, None, _codex_argv, _codex_session_in, rules_in_text=True),
 }
 DEFAULT_PROGRAM = {"claude": "claude", "opencode": "opencode", "codex": "codex"}

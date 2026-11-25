@@ -92,9 +92,16 @@ if mode == "answers":
 elif mode == "silent":
     print(json.dumps({"type": "result", "session_id": "x", "result": "forgot"}))
 elif mode == "sleeps":
+    print(json.dumps({"type": "result", "session_id": "named-before-the-sleep"}), flush=True)
     child = subprocess.Popen([sys.executable, "-c", "import time\\nwhile True:\\n open(%r, 'a').write('.')\\n time.sleep(0.1)" % str(here / "heartbeat")])
     (here / "child.pid").write_text(str(child.pid))
     time.sleep(30)
+elif mode == "stubborn":
+    # exits at once; its grandchild ignores SIGTERM and holds stdout open
+    subprocess.Popen([sys.executable, "-c", "import signal, time\\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\\ntime.sleep(60)"])
+elif mode == "codex":
+    print(json.dumps({"type": "thread.started", "thread_id": "thread-" + ("resumed" if sys.argv[1:3] == ["exec", "resume"] else "fresh")}))
+    print(json.dumps({"type": "turn.completed"}))
 elif mode == "fails":
     sys.exit(2)
 '''
@@ -109,9 +116,11 @@ def fake_cli(tmp_path: Path, mode: str) -> str:
     return str(script)
 
 
-@pytest.fixture
-async def served():
-    sb = Sandbox(clock=AsyncioClock(), attach_agent=False, params=replace(FAST, lease_seconds=2))
+@pytest.fixture(params=[2])
+async def served(request):
+    """A doorbell on a real port; the lease is the test's (2 s: the ``sleeps`` fake is
+    cut short; 10 s: a fake that runs two ``coop`` commands finishes on a loaded runner)."""
+    sb = Sandbox(clock=AsyncioClock(), attach_agent=False, params=replace(FAST, lease_seconds=request.param))
     async with Doorbell(sb.gateway, TOKENS, cancel_handlers=False) as server:
         url = f"http://{server.server.host}:{server.server.port}"
         async with HttpDoorbell(url, "tok-a") as doorbell:
@@ -127,6 +136,7 @@ def runner_for(doorbell: HttpDoorbell, url: str, tmp_path: Path, mode: str, kind
     return Runner(doorbell, adapter, tmp_path / "state", tmp_path, env)
 
 
+@pytest.mark.parametrize("served", [10], indirect=True)
 async def test_a_turn_the_agent_closes_itself_is_normal_and_its_session_is_kept(served, tmp_path, capsys):
     sb, doorbell, url = served
     runner = runner_for(doorbell, url, tmp_path, "answers")
@@ -169,9 +179,11 @@ async def test_the_lease_ends_the_command_and_its_process_group(served, tmp_path
     assert "lease expired" in capsys.readouterr().err
     assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure"
     heartbeat = tmp_path / "sleeps" / "heartbeat"
-    size = heartbeat.stat().st_size if heartbeat.exists() else 0
+    assert heartbeat.exists()  # the grandchild ran
+    size = heartbeat.stat().st_size
     await asyncio.sleep(0.5)
-    assert (heartbeat.stat().st_size if heartbeat.exists() else 0) == size  # the grandchild stopped with the group
+    assert heartbeat.stat().st_size == size  # and stopped with the group
+    assert json.loads((tmp_path / "state" / "sessions.json").read_text()) == {"team": "named-before-the-sleep"}  # what the command printed before it was stopped is kept
 
 
 async def test_a_session_that_did_not_resume_is_dropped_and_said(served, tmp_path, capsys):
@@ -181,14 +193,88 @@ async def test_a_session_that_did_not_resume_is_dropped_and_said(served, tmp_pat
     await sb.human("@a hello", "t1")
     await runner.take(await doorbell.poll())
     err = capsys.readouterr().err
-    assert "session stale-session for team did not resume; dropped" in err and "coop reset a team" in err
+    assert "session stale-session for team did not resume; dropped" in err and "coop reset <agent> team" in err
     assert "team" not in runner.sessions and json.loads((tmp_path / "state" / "sessions.json").read_text()) == {}
     assert "no done from agent (exit 2)" in err
+
+
+async def test_a_stubborn_grandchild_holding_stdout_is_killed_with_the_group_and_the_utility_moves_on(served, tmp_path, capsys):
+    sb, doorbell, url = served
+    runner = runner_for(doorbell, url, tmp_path, "stubborn")
+    await sb.human("@a hello", "t1")
+    started = time.monotonic()
+    await runner.take(await doorbell.poll())
+    assert time.monotonic() - started < 20  # the lease (2 s) + the grace (5 s) + the bounded read (5 s), never 60
+    assert "lease expired" in capsys.readouterr().err  # the kill reached the grandchild: the pipes closed, the read ended
+
+
+async def test_codex_names_its_thread_on_the_first_turn_resumes_it_and_a_reset_forgets_it(served, tmp_path):
+    sb, doorbell, url = served
+    runner = runner_for(doorbell, url, tmp_path, "codex", kind="codex")
+    await sb.human("@a hello", "t1")
+    await runner.take(await doorbell.poll())
+    argv = json.loads((tmp_path / "codex" / "argv.json").read_text())
+    assert argv[:2] == ["exec", "--json"] and runner.sessions == {"team": "thread-fresh"}
+    await sb.human("@a more", "t1")
+    await runner.take(await doorbell.poll())
+    argv = json.loads((tmp_path / "codex" / "argv.json").read_text())
+    assert argv[:3] == ["exec", "resume", "--json"] and "thread-fresh" in argv and runner.sessions == {"team": "thread-resumed"}
+    sb.gw.reset("a")
+    await sb.human("@a again", "t1")
+    wake = await doorbell.poll()
+    assert wake.reset
+    runner.adapter = replace(runner.adapter, argv=lambda p, t: [sys.executable, "-c", "import sys; sys.exit(3)"])
+    await runner.take(wake)  # the reset's turn fails before a thread is named: the old one is gone all the same
+    assert runner.sessions == {} and json.loads((tmp_path / "state" / "sessions.json").read_text()) == {}
+
+
+async def test_stop_cancels_the_poll_ends_the_command_and_fails_its_wake_as_stopped(served, tmp_path, capsys):
+    sb, doorbell, url = served
+    runner = runner_for(doorbell, url, tmp_path, "sleeps")
+    await sb.human("@a hello", "t1")
+    serving = asyncio.ensure_future(runner.serve(wait=5))
+    await asyncio.sleep(0.8)  # the wake is taken, the command sleeping
+    assert runner._process is not None
+    runner.stop()
+    assert await asyncio.wait_for(serving, 10) == 0
+    assert "utility stopped" in capsys.readouterr().err
+    assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure"
+
+
+async def test_a_refused_done_is_said_and_does_not_stop_the_utility(served, tmp_path, capsys, monkeypatch):
+    sb, doorbell, url = served
+    runner = runner_for(doorbell, url, tmp_path, "silent")
+
+    async def refused(*a, **kw):
+        raise DoorbellError(504, "the platform did not answer")
+
+    monkeypatch.setattr(doorbell, "done", refused)
+    await sb.human("@a hello", "t1")
+    await runner.take(await doorbell.poll())  # does not raise
+    assert "was refused (504" in capsys.readouterr().err
+
+
+async def test_rules_that_cannot_be_fetched_fail_the_wake_and_do_not_stop_the_utility(served, tmp_path, capsys, monkeypatch):
+    sb, doorbell, url = served
+    runner = runner_for(doorbell, url, tmp_path, "silent")
+
+    async def down(*a, **kw):
+        import httpx
+
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(doorbell, "rules", down)
+    await sb.human("@a hello", "t1")
+    await runner.take(await doorbell.poll())
+    assert "rules could not be fetched" in capsys.readouterr().err
+    assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure"
 
 
 # ── the runner's parts, with a stub doorbell ────────────────────────────────
 
 
+# The doubles below serve this file only (a stub doorbell and a wake with defaults for
+# the runner's parts, a fake CLI script): no other suite drives the utility.
 class StubDoorbell:
     def __init__(self) -> None:
         self.rules_calls = 0
