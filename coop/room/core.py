@@ -35,6 +35,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
 from ..errors import InvalidReply, NoLiveLease, RefusedSend
+from .attachments import AttachmentRefused, TransferTimeout
 from .classifier import Classifier, ClassifierRequest, ClassifierResult, fallback_decision
 from .clock import Clock, Handle
 from .controls import is_control_only
@@ -1165,7 +1166,7 @@ class RoomCore:
         entry = None if new_thread else self._count_own_post(bot, reply.thread, self.now(), words)
         try:
             post = await self.platform.post(bot, text, reply.thread, kind="bot", files=reply.files)
-        except (RefusedPost, RefusedAttachment, PlatformError) as exc:
+        except (RefusedPost, RefusedAttachment, AttachmentRefused, TransferTimeout, PlatformError) as exc:
             if not new_thread:
                 self._uncount_own_post(bot, reply.thread, entry, previous_last)
             self._post_failed(bot, reply, run, exc)
@@ -1177,14 +1178,15 @@ class RoomCore:
         return post
 
     def _post_failed(self, bot: str, reply: Reply, run: TurnRun | None, exc: Exception) -> None:
-        """A refused post closes the thread for the turn; a refused file posted nothing
-        and leaves the thread open; a platform error is unknown either way, counted as
-        not posted, and the agent reads the room (design §3.3)."""
+        """A refused post closes the thread for the turn; a refused file, by the platform
+        or by the gateway's limits while it was read, posted nothing and leaves the
+        thread open; a platform error is unknown either way, counted as not posted, and
+        the agent reads the room (design §3.3)."""
         if isinstance(exc, RefusedPost):
             self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
             if run is not None and reply.thread is not None:
                 run.refused.append(reply.thread)
-        elif isinstance(exc, RefusedAttachment):
+        elif isinstance(exc, (RefusedAttachment, AttachmentRefused, TransferTimeout)):
             self.trace.add(self.now(), "attachment_refused", gateway=self.name, bot=bot, thread=reply.thread, name=exc.name)
         else:
             self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)

@@ -44,7 +44,11 @@ class Limits:
 
 class AttachmentRefused(Exception):
     """A file the gateway's limits refuse, before or during its transfer; the doorbell
-    answers 413 and nothing was posted."""
+    answers 413 and nothing was posted. ``name`` is the file's, or its handle."""
+
+    def __init__(self, reason: str, name: str = "") -> None:
+        super().__init__(reason)
+        self.name = name
 
 
 class TransferTimeout(Exception):
@@ -78,7 +82,7 @@ async def bounded(chunks: AsyncIterator[bytes], name: str, limits: Limits, *, ex
         total += len(chunk)
         problem = limits.over_size(name, total)
         if problem is not None:
-            raise AttachmentRefused(problem)
+            raise AttachmentRefused(problem, name)
         if expected is not None and total > expected:
-            raise AttachmentRefused(f"attachment {name} is longer than the {expected} bytes declared")
+            raise AttachmentRefused(f"attachment {name} is longer than the {expected} bytes declared", name)
         yield chunk

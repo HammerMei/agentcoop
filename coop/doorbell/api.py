@@ -191,7 +191,7 @@ async def send(request: web.Request) -> web.Response:
     body, parts = await _send_body(request)
     if body is None:
         return _error(400, "send: a JSON reply")
-    problem = (_typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str, files=list)
+    problem = (_typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str)
                or _control_typed(body) or _files_typed(body))
     if problem is not None:
         return _error(400, f"send: {problem}")
@@ -252,6 +252,8 @@ async def _file_part(parts: MultipartReader, name: str) -> AsyncIterator[bytes]:
 
 
 def _files_typed(body: dict) -> str | None:
+    if body.get("files") is not None and not isinstance(body["files"], list):
+        return "files must be a list"
     for entry in body.get("files") or ():
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not entry["name"]:
             return "each file needs a name"

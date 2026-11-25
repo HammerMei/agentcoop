@@ -4,6 +4,7 @@ client class: a gateway the fake agent can drive must answer these on its own.""
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 
 import httpx
@@ -304,6 +305,90 @@ async def test_an_attachment_is_fetched_by_the_handle_read_printed(api, sb):
     assert f.headers["Content-Disposition"] == 'attachment; filename="report.pdf"'
     assert (await api.get("/v1/agents/me/attachments/f1", headers=as_("a"))).status_code == 404
     assert (await api.get("/v1/agents/me/attachments/a1", headers=as_("z"))).status_code == 403
+
+
+async def test_a_multipart_send_posts_its_files_streamed_past_aiohttps_body_limit(api, sb):
+    await sb.human("@a the data?", "t1")
+    wake = await wake_for(api, "a")
+    big = b"x" * (2 * 1024 * 1024)  # over aiohttp's 1 MiB ``client_max_size``: the parts are streamed, not read whole
+    reply = {"thread": "t1", "to": ["H"], "text": "here", "wake_id": wake["wake_id"],
+             "files": [{"name": "data.bin", "content_type": "application/octet-stream", "size": len(big)},
+                       {"name": "note.txt", "content_type": "text/plain", "size": 2}]}
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), data={"reply": json.dumps(reply)},
+                       files=[("file", ("data.bin", big, "application/octet-stream")), ("file", ("note.txt", b"hi", "text/plain"))])
+    assert r.status_code == 200, r.text
+    [data, note] = r.json()["post"]["attachments"]
+    assert (data["name"], data["size"], note["name"], note["size"]) == ("data.bin", len(big), "note.txt", 2)
+    assert data["id"].startswith("a") and sb.room.files[sb.room.posts[-1].attachments[0].id] == big
+
+
+async def test_a_file_over_the_limits_is_413_and_nothing_is_posted(api, sb):
+    from coop.room.attachments import Limits
+
+    sb.gateway.limits = Limits(max_size_mb=1, max_per_post=1)
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+    reply = {"thread": "t1", "to": ["H"], "text": "x", "wake_id": wake["wake_id"],
+             "files": [{"name": "big.bin", "size": 2_000_000}]}
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), data={"reply": json.dumps(reply)},
+                       files=[("file", ("big.bin", b"x", "application/octet-stream"))])
+    assert r.status_code == 413 and "big.bin is 1.9 MB, over the 1 MB limit" in r.json()["error"]
+    reply["files"] = [{"name": "a", "size": 1}, {"name": "b", "size": 1}]
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), data={"reply": json.dumps(reply)},
+                       files=[("file", ("a", b"x")), ("file", ("b", b"y"))])
+    assert r.status_code == 413 and "2 attachments on one post" in r.json()["error"]
+    reply["files"] = [{"name": "lie.bin", "size": 1}]
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), data={"reply": json.dumps(reply)},
+                       files=[("file", ("lie.bin", b"xx", "application/octet-stream"))])
+    assert r.status_code == 413 and "longer than the 1 bytes declared" in r.json()["error"]
+    assert sb.room.files == {} and sb.gw.status()["threads"]["t1"]["recent_posts"] == 0
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), json=dict(reply))
+    assert r.status_code == 400 and "multipart" in r.json()["error"]
+
+
+async def test_a_file_the_platform_refuses_is_502_with_the_file_named_and_the_thread_open(api, sb, monkeypatch):
+    from coop.room.platform import RefusedAttachment
+
+    await sb.human("@a hello", "t1")
+    wake = await wake_for(api, "a")
+
+    async def refuse(*a, **kw):
+        raise RefusedAttachment("huge.iso", "413: too large")
+
+    monkeypatch.setattr(sb.room, "post", refuse)
+    reply = {"thread": "t1", "to": ["H"], "text": "x", "wake_id": wake["wake_id"], "files": [{"name": "huge.iso", "size": 1}]}
+    r = await api.post("/v1/agents/me/posts", headers=as_("a"), data={"reply": json.dumps(reply)},
+                       files=[("file", ("huge.iso", b"x"))])
+    assert r.status_code == 502 and r.json()["file"] == "huge.iso" and "refused the file huge.iso" in r.json()["error"]
+    assert sb.gw.volatile["a"].turn.refused == []
+
+
+async def test_a_download_is_streamed_with_its_length_and_a_broken_one_ends_short(api, sb, monkeypatch):
+    from coop.room.platform import PlatformError
+
+    post = await sb.human("@a see", "t1", attachments=(("big.bin", "application/octet-stream", b"0123456789" * 100),))
+    wake = await wake_for(api, "a")
+    r = await api.get("/v1/agents/me/posts", params={"wake": wake["wake_id"]}, headers=as_("a"))
+    handle = next(p for p in r.json()["posts"] if p["id"] == post.id)["attachments"][0]["id"]
+    async with api.stream("GET", f"/v1/agents/me/attachments/{handle}", headers=as_("a")) as f:
+        assert f.status_code == 200 and f.headers["Content-Length"] == "1000"
+        chunks = [c async for c in f.aiter_raw()]
+    assert b"".join(chunks) == b"0123456789" * 100
+    real = sb.room.fetch_attachment
+
+    async def breaks(file_id):
+        yield b"0123"
+        raise PlatformError("mm: the connection dropped")
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", breaks)
+    with pytest.raises(httpx.RemoteProtocolError):  # the body ends before its length: no file
+        await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+    monkeypatch.setattr(sb.room, "fetch_attachment", real)
+    from coop.room.attachments import Limits
+
+    sb.gateway.limits = Limits(max_size_mb=0.0001)
+    r = await api.get(f"/v1/agents/me/attachments/{handle}", headers=as_("a"))
+    assert r.status_code == 413 and "over the 0.0001 MB limit" in r.json()["error"]
 
 
 # ── done, bio, rules ────────────────────────────────────────────────────────

@@ -256,7 +256,7 @@ class Gateway:
             raise PermissionError(f"{agent} is not in the roster of room {entry.room!r}")
         problem = self.limits.over_size(handle, entry.attachment.size)
         if problem is not None:
-            raise AttachmentRefused(problem)
+            raise AttachmentRefused(problem, handle)
         state = core.volatile.get(bot)
         run = state.turn if state is not None else None
         if run is not None and run.leased and handle in run.handles:
@@ -267,11 +267,12 @@ class Gateway:
     def check_files(self, reply: Reply) -> None:
         """The limits a send's files must fit before a byte reaches the platform
         (design §3.3); each file's stream is then bounded by them as it is read."""
-        problem = self.limits.over_count(len(reply.files))
+        problem, name = self.limits.over_count(len(reply.files)), ""
         for upload in reply.files:
-            problem = problem or self.limits.over_size(upload.name, upload.size)
+            if problem is None and (problem := self.limits.over_size(upload.name, upload.size)) is not None:
+                name = upload.name
         if problem is not None:
-            raise AttachmentRefused(problem)
+            raise AttachmentRefused(problem, name)
         reply.files = tuple(replace(u, chunks=bounded(u.chunks, u.name, self.limits, expected=u.size, clock=self.clock.now))
                             for u in reply.files)
 

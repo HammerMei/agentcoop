@@ -152,6 +152,55 @@ async def test_read_lists_attachments_and_attachment_downloads_one(sb, coop, cap
     assert "handle" in capsys.readouterr().err
 
 
+async def test_send_attach_posts_the_files_with_the_text_as_caption(sb, coop, capsys, tmp_path):
+    (tmp_path / "graph.png").write_bytes(b"PNG" * 1000)
+    (tmp_path / "notes.txt").write_text("n")
+    await sb.human("@a the graph?", "t1")
+    w = await wake_id(sb)
+    assert await coop("send", "--wake", w, "--to", "H", "--attach", str(tmp_path / "graph.png"),
+                      "--attach", str(tmp_path / "notes.txt"), "here") == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "[t1] #p2 a (agent): @H here"
+    [graph, notes] = sb.room.posts[-1].attachments
+    assert (graph.name, graph.content_type, graph.size, notes.name, notes.content_type) == (
+        "graph.png", "image/png", 3000, "notes.txt", "text/plain")
+    assert sb.room.files[graph.id] == b"PNG" * 1000
+    assert await coop("send", "--wake", w, "--attach", str(tmp_path / "notes.txt")) == 0  # a file alone needs no --to
+    assert sb.room.posts[-1].attachments[0].name == "notes.txt" and sb.room.posts[-1].text == ""
+    with pytest.raises(SystemExit):
+        await coop("send", "--wake", w, "--attach", str(tmp_path / "missing.txt"))
+
+
+async def test_send_attach_over_the_limit_is_an_error_line_and_posts_nothing(sb, coop, capsys, tmp_path):
+    from coop.room.attachments import Limits
+
+    sb.gateway.limits = Limits(max_size_mb=0.001)
+    (tmp_path / "big.bin").write_bytes(b"x" * 2000)
+    await sb.human("@a hello", "t1")
+    w = await wake_id(sb)
+    assert await coop("send", "--wake", w, "--to", "H", "--attach", str(tmp_path / "big.bin"), "here") == 1
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "[ERROR] attachment big.bin is 0.0 MB, over the 0.001 MB limit (gateway.attachments.max_size_mb)")
+    assert len(sb.room.posts) == 1
+
+
+async def test_a_broken_download_leaves_no_file_behind(sb, coop, capsys, tmp_path, monkeypatch):
+    from coop.room.platform import PlatformError
+
+    await sb.human("@a see", "t1", attachments=(("report.pdf", "application/pdf", b"x" * 3300),))
+    w = await wake_id(sb)
+    assert await coop("read", "--wake", w) == 0
+
+    async def breaks(file_id):
+        yield b"xxxx"
+        raise PlatformError("mm: the connection dropped")
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", breaks)
+    monkeypatch.chdir(tmp_path)
+    assert await coop("attachment", "a1") == 1
+    assert capsys.readouterr().err.splitlines()[-1].startswith("[ERROR]")
+    assert list(tmp_path.iterdir()) == []  # neither report.pdf nor a .part
+
+
 async def test_a_wrong_token_is_an_error_line(sb, coop, capsys):
     assert await coop("read", "--room", "team", agent="nope") == 1
     assert "401" in capsys.readouterr().err.splitlines()[-1]

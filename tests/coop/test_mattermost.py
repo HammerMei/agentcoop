@@ -18,7 +18,9 @@ from coop.config import parse
 from coop.connectors.base import Membership, Posted
 from coop.connectors.mattermost.connector import MattermostConnector
 from coop.connectors.mattermost.normalize import normalize
-from coop.room.platform import PlatformError, RefusedPost
+from coop.room.attachments import AttachmentRefused
+from coop.room.model import Upload
+from coop.room.platform import PlatformError, RefusedAttachment, RefusedPost
 from coop.room.roster import Roster
 
 SERVER = parse(yaml.safe_load("""
@@ -51,7 +53,9 @@ class FakeMattermost:
         self.members: dict[str, list[str]] = {}
         self.posts: dict[str, list[dict]] = {}
         self.files: dict[str, bytes] = {}
+        self.uploads: list[dict] = []  # what ``POST /files`` received: the headers and query a real server sees
         self.refuse_posts = False
+        self.refuse_files = False
         self.failure: Exception | None = None  # raised by every request while set: the server is unreachable
         self.not_found = False  # every request answers 404
         self.html = False  # every request answers 200 with a page, as a proxy in the way does
@@ -112,15 +116,36 @@ class FakeMattermost:
         if parts[0] == "channels":
             return self._channels(parts, dict(request.url.params))
         if path == "/posts" and request.method == "POST":
-            if self.refuse_posts:
-                return httpx.Response(403, json={"message": "no"})
-            body = json.loads(request.content)
-            post = self.post(body["channel_id"], me, body["message"], body.get("root_id", ""))
-            asyncio.get_running_loop().create_task(self.deliver(post))
-            return httpx.Response(201, json=post)
+            return self._create_post(request, me)
+        if path == "/files" and request.method == "POST":
+            return self._upload(request)
         if parts[0] == "files" and len(parts) == 2:
             return httpx.Response(200, content=self.files[parts[1]])
         return httpx.Response(404, json={"message": f"no route {path}"})
+
+    def _create_post(self, request: httpx.Request, me: str) -> httpx.Response:
+        if self.refuse_posts:
+            return httpx.Response(403, json={"message": "no"})
+        body = json.loads(request.content)
+        files = [{"id": fid, "name": self.uploads[int(fid[1:]) - 1]["filename"]} for fid in body.get("file_ids", [])]
+        post = self.post(body["channel_id"], me, body["message"], body.get("root_id", ""), files=files)
+        asyncio.get_running_loop().create_task(self.deliver(post))
+        return httpx.Response(201, json=post)
+
+    def _upload(self, request: httpx.Request) -> httpx.Response:
+        """The simple form of ``POST /files``: the file as the body, ``channel_id`` and
+        ``filename`` as query parameters, a ``Content-Length`` the server insists on."""
+        if self.refuse_files:
+            return httpx.Response(413, json={"message": "Unable to upload file. File is too large."})
+        params = dict(request.url.params)
+        if "Content-Length" not in request.headers or request.headers.get("Transfer-Encoding") == "chunked":
+            return httpx.Response(400, json={"message": "content length required"})
+        fid = f"f{len(self.uploads) + 1}"
+        self.files[fid] = request.content
+        self.uploads.append({"filename": params.get("filename"), "channel_id": params.get("channel_id"),
+                             "content_type": request.headers.get("Content-Type"),
+                             "content_length": request.headers.get("Content-Length")})
+        return httpx.Response(201, json={"file_infos": [{"id": fid, "name": params.get("filename"), "size": len(request.content)}]})
 
     def _users(self, path: str, parts: list[str], request: httpx.Request, me: str) -> httpx.Response:
         if path == "/users/me":
@@ -219,6 +244,36 @@ async def connected(mm):
     await connector.members("c01")
     yield connector, mm, seen, rooms
     await connector.stop()
+
+
+async def test_a_post_with_files_uploads_each_streamed_with_its_length_then_posts_their_ids(connected):
+    connector, mm, seen, _ = connected
+
+    async def two_chunks():
+        yield b"hel"
+        yield b"lo"
+
+    post = await connector.post("laomei_bot", "c01", "the file", None,
+                                files=(Upload("a.txt", "text/plain", 5, two_chunks()), Upload.of("b.bin", b"zz")))
+    assert [(u["filename"], u["channel_id"], u["content_type"], u["content_length"]) for u in mm.uploads] == [
+        ("a.txt", "c01", "text/plain", "5"), ("b.bin", "c01", "application/octet-stream", "2")]
+    assert mm.files["f1"] == b"hello" and [a.name for a in post.attachments] == ["a.txt", "b.bin"]
+    mm.refuse_files = True
+    with pytest.raises(RefusedAttachment, match="refused the file c.txt: 413"):
+        await connector.post("laomei_bot", "c01", "again", None, files=(Upload.of("c.txt", b"c"),))
+    assert len(mm.posts["c01"]) == 1  # nothing posted for a refused file
+
+
+async def test_what_the_gateways_limits_raise_while_a_file_is_read_passes_through_the_upload(connected):
+    connector, mm, seen, _ = connected
+
+    async def over():
+        yield b"x"
+        raise AttachmentRefused("attachment x.bin is over the limit")
+
+    with pytest.raises(AttachmentRefused):
+        await connector.post("laomei_bot", "c01", "x", None, files=(Upload("x.bin", "", 2, over()),))
+    assert mm.uploads == [] and len(mm.posts["c01"]) == 0
 
 
 async def test_add_bot_lists_the_teams_rooms_and_dms_with_the_counterparts_name(connected):
