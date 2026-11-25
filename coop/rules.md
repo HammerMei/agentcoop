@@ -30,7 +30,8 @@ and when it is newer than the version you hold, fetch this document again.
   or revise that the thread does not already have; otherwise `done`.
 - `--to` lists the people the reply is for. Use `all` only with a reason.
 - An attachment is listed with its handle and the command that fetches it. Do not
-  answer about a file you have not fetched.
+  answer about a file you have not fetched. `coop send --attach PATH` posts a file,
+  the text as its caption.
 - A send is not retried. If the gateway did not answer in time, the reply may have
   been posted: run `coop read --room <room>` and post again only if it is not there.
 - A `[WARNING]` line from `send` names a rule the reply broke that this room does

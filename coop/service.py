@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -105,7 +106,9 @@ class Service:
         self.clock = clock or AsyncioClock()
         self.trace = trace or Trace()
         self.wake_seed = int(time.time() * 1000) if wake_seed is None else wake_seed
-        self.gateway = Gateway(self.clock, self.trace, name="coop", rules_version=rules_version)
+        # the handle prefix is this run's: a handle from before a restart names nothing (design §3.3)
+        self.gateway = Gateway(self.clock, self.trace, name="coop", rules_version=rules_version,
+                               handle_prefix=f"a{secrets.token_hex(2)}-", limits=self.config.gateway.attachments)
         self.gateway.on_bio = self._save_agents
         self.tokens: dict[str, str] = {}  # bearer token -> agent, shared with the doorbell app
         self.connectors: dict[str, Connector] = {}
@@ -435,6 +438,7 @@ class Service:
         notes: list[str] = []
         self.notes = notes
         self._note_listener_changes(config, notes)
+        self.gateway.limits = config.gateway.attachments  # applied: the next transfer runs under them
         old, self.config = self.config, config
         for server in config.servers.values():
             self.connectors[server.name].configure(server)  # the bots and usernames it holds now

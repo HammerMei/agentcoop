@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import heapq
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from coop.room.classifier import Classifier, ClassifierRequest, ClassifierResult
 from coop.room.controls import is_control_line, parse_controls
 from coop.room.core import RoomCore
-from coop.room.model import ALL, MAIN_THREAD, Attachment, Decision, Member, Post, PostKind
+from coop.room.model import ALL, MAIN_THREAD, Attachment, Decision, Member, Post, PostKind, Upload
 from coop.room.platform import RefusedPost
 from coop.room.trace import Trace
 from coop.room.words import count_words
@@ -167,16 +167,21 @@ class FakePlatform:
             await core.on_post(post)
 
     async def post(self, author: str, text: str, thread: str | None = MAIN_THREAD, kind: PostKind | None = None,
-                   attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
-        post = self.append(author, text, thread, kind, attachments)
+                   files: tuple[Upload, ...] = (), attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
+        """``files`` are a send's uploads, read here as the platform would take them;
+        ``attachments`` are files already on the platform (a person's post)."""
+        stored = [(u.name, u.content_type, b"".join([c async for c in u.chunks])) for u in files]
+        post = self.append(author, text, thread, kind, attachments + tuple(stored))
         await self.deliver(post)
         return post
 
     async def typing(self, author: str, thread: str) -> None:
         self.typed.append((author, thread))
 
-    async def fetch_attachment(self, file_id: str) -> bytes:
-        return self.files[file_id]
+    async def fetch_attachment(self, file_id: str) -> AsyncIterator[bytes]:
+        data = self.files[file_id]
+        for start in range(0, len(data), 4):  # small chunks, so a test sees a stream
+            yield data[start:start + 4]
 
     def _kind_of(self, author: str) -> PostKind:
         role = self.role_of(author)

@@ -180,6 +180,7 @@ def encode_reply(reply: Reply) -> Json:
         "text": reply.text,
         "control": reply.control,
         "wake_id": reply.wake_id,
+        "files": [{"name": u.name, "content_type": u.content_type, "size": u.size} for u in reply.files],
     }
 
 

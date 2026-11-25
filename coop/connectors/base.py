@@ -17,12 +17,12 @@ in a room the daemon receives N copies and the room log keeps one.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from ..config import Server
-from ..room.model import Position, Post
+from ..room.model import Position, Post, Upload
 from ..room.roster import Roster
 
 RoomKind = Literal["channel", "dm", "group"]
@@ -157,15 +157,19 @@ class Connector(Protocol):
         page held only posts the core does not see (system posts)."""
         ...
 
-    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
-        """Post as the bot ``username``; ``thread`` ``None`` is a new top-level post. Raises
-        :class:`~coop.room.platform.RefusedPost` when the platform refuses it and
-        :class:`~coop.room.platform.PlatformError` when it did not answer."""
+    async def post(self, username: str, room_id: str, text: str, thread: str | None,
+                   files: tuple[Upload, ...] = ()) -> Post:
+        """Post as the bot ``username``; ``thread`` ``None`` is a new top-level post;
+        ``files`` are uploaded first and posted with the text as their caption. Raises
+        :class:`~coop.room.platform.RefusedPost` when the platform refuses the post,
+        :class:`~coop.room.platform.RefusedAttachment` when it refuses a file (nothing
+        is posted then) and :class:`~coop.room.platform.PlatformError` when it did not
+        answer."""
         ...
 
-    async def fetch_file(self, username: str, file_id: str) -> bytes:
-        """``KeyError`` for a file the platform does not have, ``PlatformError`` when it
-        did not answer."""
+    def fetch_file(self, username: str, file_id: str) -> AsyncIterator[bytes]:
+        """The file's bytes, streamed. ``KeyError`` for a file the platform does not
+        have and ``PlatformError`` when it did not answer are raised by the first chunk."""
         ...
 
     async def typing(self, username: str, room_id: str, thread: str | None) -> None:

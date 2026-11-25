@@ -58,7 +58,7 @@ from .model import (
     Wake,
     after,
 )
-from .platform import Platform, PlatformError, RefusedPost
+from .platform import Platform, PlatformError, RefusedAttachment, RefusedPost
 from .replies import Problem, ValidationContext, canonical_text, check_reply, resolve_control
 from .roster import Roster
 from .trace import Trace
@@ -145,6 +145,10 @@ class TurnRun:
     # Reasons of the sends enforce mode refused: one such send makes the turn invalid
     # at ``done`` (design §3.1, the 5.10 row).
     rejected: list[str] = field(default_factory=list)
+    # Attachment handles the wake's read printed, and those fetched before ``done``:
+    # an agent that answers about a file it did not fetch shows here (design §3.3).
+    handles: set[str] = field(default_factory=set)
+    fetched: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -1150,7 +1154,7 @@ class RoomCore:
         if reply.control:
             settings = self._thread(reply.thread)
             reply.control = resolve_control(reply.control, self._bots_in_room(), set(settings.muted), settings.orchestrator)
-            if not reply.control and reply.text is None:
+            if not reply.control and reply.text is None and not reply.files:
                 return None  # ``all`` resolved to nobody and nothing else remains: post nothing (8.3)
         text = canonical_text(reply)
         words = count_words(text)
@@ -1160,25 +1164,30 @@ class RoomCore:
         previous_last = None if new_thread else self.volatile[bot].last_post.get(reply.thread)
         entry = None if new_thread else self._count_own_post(bot, reply.thread, self.now(), words)
         try:
-            post = await self.platform.post(bot, text, reply.thread, kind="bot")
-        except RefusedPost:
+            post = await self.platform.post(bot, text, reply.thread, kind="bot", files=reply.files)
+        except (RefusedPost, RefusedAttachment, PlatformError) as exc:
             if not new_thread:
                 self._uncount_own_post(bot, reply.thread, entry, previous_last)
-            self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
-            if run is not None and reply.thread is not None:
-                run.refused.append(reply.thread)
-            raise
-        except PlatformError:
-            # whether it landed is unknown; counted as not, the agent reads the room (design §3.3)
-            if not new_thread:
-                self._uncount_own_post(bot, reply.thread, entry, previous_last)
-            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
+            self._post_failed(bot, reply, run, exc)
             raise
         if new_thread:
             self._count_own_post(bot, post.thread, self.now(), words)
         if run is not None:
             run.posts += 1
         return post
+
+    def _post_failed(self, bot: str, reply: Reply, run: TurnRun | None, exc: Exception) -> None:
+        """A refused post closes the thread for the turn; a refused file posted nothing
+        and leaves the thread open; a platform error is unknown either way, counted as
+        not posted, and the agent reads the room (design §3.3)."""
+        if isinstance(exc, RefusedPost):
+            self.trace.add(self.now(), "platform_refused", gateway=self.name, bot=bot, thread=reply.thread)
+            if run is not None and reply.thread is not None:
+                run.refused.append(reply.thread)
+        elif isinstance(exc, RefusedAttachment):
+            self.trace.add(self.now(), "attachment_refused", gateway=self.name, bot=bot, thread=reply.thread, name=exc.name)
+        else:
+            self.trace.add(self.now(), "platform_error", gateway=self.name, bot=bot, thread=reply.thread)
 
     async def done(self, bot: str, wake_id: str, answered: tuple[str, ...] = (), failed: str | None = None) -> bool:
         """Close the turn. Returns ``False`` for a wake with no live lease: logged, and
@@ -1248,14 +1257,21 @@ class RoomCore:
         self._evict_decisions()
         self._changed()
 
+    def cursor_floor(self) -> Position | None:
+        """The position every hosted bot's cursor has passed, or ``None`` while a bot's
+        cursor is null (its backlog is the whole room) or nobody is hosted."""
+        cursors = [self.persisted[b].cursor for b in self.hosted]
+        if not cursors or any(c is None for c in cursors):
+            return None
+        return min(cursors)
+
     def _evict_decisions(self) -> None:
         """Decided entries every hosted cursor has passed: no backlog holds their post, so
         no sweep or start reads them again (a restart drops the whole cache). A bot whose
         cursor is null, paused or away keeps them, as it keeps the backlog itself."""
-        cursors = [self.persisted[b].cursor for b in self.hosted]
-        if not cursors or any(c is None for c in cursors):
+        floor = self.cursor_floor()
+        if floor is None:
             return
-        floor = min(cursors)
         gone = [pid for pid, c in self.decisions.items()
                 if c.decision is not None and c.position is not None and not after(c.position, floor)]
         for pid in gone:
@@ -1274,7 +1290,7 @@ class RoomCore:
             state.previous_failure = None
             state.idle_since = self.now()
         self.trace.add(self.now(), "turn_end", gateway=self.name, bot=bot, wake=run.wake.wake_id,
-                       outcome=outcome, posts=run.posts, **more)
+                       outcome=outcome, posts=run.posts, attachments=len(run.handles), fetched=len(run.fetched), **more)
         self._request_sweep(bot, "turn end")
 
     # ── FAILURE_NOTICE ──────────────────────────────────────────────────────

@@ -390,7 +390,12 @@ async def test_a_platform_that_does_not_answer_is_504_and_a_turn_still_ends(api,
     assert r.status_code == 200 and r.json()["done"] is True  # the failure notice could not post; the turn ended
     assert sb.trace.last("turn_end", bot="a").outcome == "backend_failure" and not sb.gateway.holds_lease("a")
     monkeypatch.undo()
-    monkeypatch.setattr(sb.room, "fetch_attachment", down)
+
+    async def down_stream(*a, **kw):
+        raise PlatformError("mm: down")
+        yield b""  # an async generator, as the platform's fetch is
+
+    monkeypatch.setattr(sb.room, "fetch_attachment", down_stream)
     post = await sb.human("see", attachments=(("a.txt", "text/plain", b"x"),))
     await sb.human("@a look", "t1")
     wake = await wake_for(api, "a")

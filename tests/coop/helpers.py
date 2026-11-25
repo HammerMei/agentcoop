@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import ssl
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 from aiohttp.test_utils import TestServer
 
@@ -28,8 +28,8 @@ from coop.room.clock import Clock
 from coop.room.controls import parse_controls
 from coop.room.core import RoomCore
 from coop.room.gateway import Gateway
-from coop.room.model import MAIN_THREAD, Attachment, Member, Params, Post, PostKind
-from coop.room.platform import RefusedPost
+from coop.room.model import MAIN_THREAD, Attachment, Member, Params, Post, PostKind, Upload
+from coop.room.platform import PlatformError, RefusedAttachment, RefusedPost
 from coop.room.roster import Roster
 from coop.room.trace import Trace
 from coop.room.words import count_words
@@ -140,7 +140,7 @@ class Sandbox:
 
     async def post(self, author: str, text: str, thread: str = MAIN_THREAD, kind: PostKind | None = None,
                    attachments: tuple[tuple[str, str, bytes], ...] = ()) -> Post:
-        return await self.room.post(author, text, thread, kind, attachments)
+        return await self.room.post(author, text, thread, kind, attachments=attachments)
 
     async def archive(self, thread: str) -> None:
         await self.room.archive(thread)
@@ -239,6 +239,9 @@ class FakeConnector:
         self.membership: dict[str, list[MemberInfo]] = {}
         self.posts: dict[str, list[Post]] = {}
         self.files: dict[str, bytes] = {}
+        self.file_limit: int = 0  # the platform's own size limit, 0 = none
+        self.chunk_size: int = 4  # a fetch streams in small chunks, so a test sees several
+        self.break_fetch_after: int | None = None  # a fetch fails after this many bytes
         self.bots: dict[str, str] = {}  # username -> token
         self.rosters: dict[str, Roster] = {}
         self.refusing: set[str] = set()
@@ -339,17 +342,28 @@ class FakeConnector:
                  if (after is None or p.position > after) and (before is None or p.position < before)]
         return posts[-limit:]
 
-    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
+    async def post(self, username: str, room_id: str, text: str, thread: str | None,
+                   files: tuple[Upload, ...] = ()) -> Post:
         if username not in self.bots:
             raise PermissionError(username)
         if thread in self.refusing:
             raise RefusedPost(thread)
-        post = self.make_post(room_id, username, text, thread)
+        stored = []
+        for upload in files:  # uploaded first, as the platforms do: a refused file posts nothing
+            data = b"".join([chunk async for chunk in upload.chunks])
+            if self.file_limit and len(data) > self.file_limit:
+                raise RefusedAttachment(upload.name, f"{len(data)} bytes is over the platform's limit")
+            stored.append((upload.name, upload.content_type, data))
+        post = self.make_post(room_id, username, text, thread, tuple(stored))
         await self._deliver(room_id, post)  # the echo, like the platform's
         return post
 
-    async def fetch_file(self, username: str, file_id: str) -> bytes:
-        return self.files[file_id]
+    async def fetch_file(self, username: str, file_id: str) -> AsyncIterator[bytes]:
+        data = self.files[file_id]
+        for start in range(0, len(data), self.chunk_size):
+            if self.break_fetch_after is not None and start >= self.break_fetch_after:
+                raise PlatformError(f"fake: file {file_id}: the connection dropped")
+            yield data[start:start + self.chunk_size]
 
     async def typing(self, username: str, room_id: str, thread: str | None) -> None:
         self.typed.append((username, room_id, thread))

@@ -91,10 +91,10 @@ async def test_a_file_is_fetched_through_the_first_hosted_bot():
     fc, log = make_log()
     post = fc.make_post("c1", "H", "see file", files=(("a.txt", "text/plain", b"hello"),))
     log.ingest(post)
-    assert await log.fetch_attachment(post.attachments[0].id) == b"hello"
+    assert b"".join([c async for c in log.fetch_attachment(post.attachments[0].id)]) == b"hello"
     _, bare = make_log(hosted=())
     with pytest.raises(KeyError):
-        await bare.fetch_attachment(post.attachments[0].id)
+        await anext(bare.fetch_attachment(post.attachments[0].id))
 
 
 async def test_the_fake_connector_delivers_one_copy_per_bot_connection_in_the_room():

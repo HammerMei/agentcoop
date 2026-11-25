@@ -353,7 +353,7 @@ async def test_room_wraps_a_platform_failure(connected):
 async def test_files_are_fetched_and_the_dm_room_is_described_by_id(connected):
     connector, mm, seen, _ = connected
     mm.files["f1"] = b"hello"
-    assert await connector.fetch_file("laomei_bot", "f1") == b"hello"
+    assert b"".join([c async for c in connector.fetch_file("laomei_bot", "f1")]) == b"hello"
     info = await connector.room("c03")
     assert info.name == "glin" and info.is_dm
     post = mm.post("c01", mm.ids["glin"], "see", files=({"id": "f1", "name": "a.txt"},))
@@ -402,12 +402,12 @@ async def test_transport_failures_are_platform_errors_and_a_missing_file_a_key_e
     mm.html = False
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
-        await connector.fetch_file("laomei_bot", "f1")
+        await anext(connector.fetch_file("laomei_bot", "f1"))
     with pytest.raises(PlatformError):
         await connector.history("c01")
     mm.failure, mm.not_found = None, True
     with pytest.raises(KeyError):
-        await connector.fetch_file("laomei_bot", "f1")
+        await anext(connector.fetch_file("laomei_bot", "f1"))
 
 
 async def test_resync_starts_after_the_startup_history_when_no_live_post_came_yet(connected):

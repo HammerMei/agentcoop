@@ -25,7 +25,7 @@ class TestInvalidCombinations:
     @pytest.mark.parametrize(
         "reply,reason",
         [
-            (Reply("main"), "neither text nor control"),
+            (Reply("main"), "neither text, control nor a file"),
             (Reply("main", to=["H"], text="   "), "empty text"),
             (Reply("opt", control={"mute": []}), "mute list is empty"),
             (Reply("opt", control={"orchestrator": "a"}), "unsupported control ['orchestrator']"),

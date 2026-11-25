@@ -14,7 +14,8 @@ Kinds and their fields:
 - ``lease_started``   — gateway, bot, wake, expires_at (an agent's poll picked the wake up)
 - ``typing``          — gateway, bot, thread (an addressed wake's pick-up sends the indicator)
 - ``turn_held``       — gateway, bot, source, thread, gate
-- ``turn_end``        — gateway, bot, wake, outcome (normal | backend_failure | invalid), posts
+- ``turn_end``        — gateway, bot, wake, outcome (normal | backend_failure | invalid), posts,
+                       attachments (handles the wake's read printed), fetched (of those, fetched before done)
 - ``invalid``         — gateway, bot, wake, reason
 - ``done_stale``      — gateway, bot, wake (a ``done`` for a wake with no live lease)
 - ``read``            — gateway, bot, wake, delivered
@@ -27,6 +28,7 @@ Kinds and their fields:
 - ``backoff``         — gateway, bot, until; ``degraded`` — gateway, bot, streak
 - ``rule``            — gateway, bot, thread, mechanism, outcome (held | rejected | violated | complied | held_complied | held_violated)
 - ``platform_refused`` — gateway, bot, thread (the platform refused an outbound post)
+- ``attachment_refused`` — gateway, bot, thread, name (the platform refused a file a send carried; nothing posted)
 - ``paused`` / ``resumed`` — gateway, bot
 """
 

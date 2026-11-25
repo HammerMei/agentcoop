@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 import httpx
 
 from ...config import Server
-from ...room.model import Position, Post
-from ...room.platform import PlatformError, RefusedPost
+from ...room.model import Position, Post, Upload
+from ...room.platform import PlatformError, RefusedAttachment, RefusedPost
 from ...room.roster import Roster
 from ..base import MemberInfo, Membership, OnEvent, Posted, RoomInfo
 from .normalize import display_name, normalize
@@ -189,10 +189,12 @@ class MattermostConnector:
         except httpx.HTTPError as exc:
             raise PlatformError(f"{self.name}: history of {room_id}: {exc}") from exc
 
-    async def post(self, username: str, room_id: str, text: str, thread: str | None) -> Post:
+    async def post(self, username: str, room_id: str, text: str, thread: str | None,
+                   files: tuple[Upload, ...] = ()) -> Post:
         bot = self._bots[username]
+        file_ids = tuple([await self._upload(bot, room_id, upload) for upload in files])  # in order, each streamed
         try:
-            raw = await bot.rest.create_post(room_id, text, thread)
+            raw = await bot.rest.create_post(room_id, text, thread, file_ids)
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 logger.warning("%s: post refused (%s): %s", self.name, exc.response.status_code, exc.response.text[:200])
@@ -205,13 +207,29 @@ class MattermostConnector:
             raise RefusedPost(thread)
         return post
 
-    async def fetch_file(self, username: str, file_id: str) -> bytes:
+    async def _upload(self, bot: _Bot, room_id: str, upload: Upload) -> str:
+        """The platform's file id for one upload. A 4xx is the platform refusing the file
+        (its own size limit, a blocked type): nothing is posted. What the gateway's
+        limits raise while the chunks are read passes through untouched."""
         try:
-            return await self._bots[username].rest.file(file_id)
+            info = await bot.rest.upload(room_id, upload.name, upload.content_type, upload.size, upload.chunks)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (403, 404):
-                raise KeyError(file_id) from exc
-            raise PlatformError(f"{self.name}: file {file_id}: {exc}") from exc
+            if 400 <= exc.response.status_code < 500:
+                raise RefusedAttachment(upload.name, f"{exc.response.status_code}: {exc.response.text[:200]}") from exc
+            raise PlatformError(f"{self.name}: upload {upload.name}: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"{self.name}: upload {upload.name}: {exc}") from exc
+        return str(info.get("id", ""))
+
+    async def fetch_file(self, username: str, file_id: str) -> AsyncIterator[bytes]:
+        rest = self._bots[username].rest
+        try:
+            async with rest.stream_file(file_id) as r:
+                if r.status_code in (403, 404):
+                    raise KeyError(file_id)
+                r.raise_for_status()
+                async for chunk in r.aiter_bytes():
+                    yield chunk
         except httpx.HTTPError as exc:
             raise PlatformError(f"{self.name}: file {file_id}: {exc}") from exc
 

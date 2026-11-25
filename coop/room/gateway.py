@@ -18,13 +18,14 @@ agent's there, whatever it is called.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
 from ..errors import NoLiveLease, RoomUnresolved
+from .attachments import AttachmentRefused, Limits, bounded
 from .clock import Clock
 from .core import RoomCore
-from .model import Attachment, Post, Reply, Sent, Wake
+from .model import Attachment, Position, Post, Reply, Sent, Wake, after
 from .trace import Trace
 
 Listener = Callable[[Wake], Awaitable[None]]
@@ -32,7 +33,7 @@ Listener = Callable[[Wake], Awaitable[None]]
 # The version of the room-rules document (``coop/rules.md``) every wake carries
 # (design §3.3): an agent refetches the document when a wake carries a newer one.
 # Bumped with every change to the document; a test pins the pair.
-RULES_VERSION = 3
+RULES_VERSION = 4
 
 
 @dataclass
@@ -43,14 +44,29 @@ class AgentState:
     listeners: list[Listener] = field(default_factory=list)
 
 
+# A handle whose post every hosted cursor has passed is kept this long after a read last
+# printed it: a ``read --room --after`` can print one for an older post (design §3.3).
+HANDLE_GRACE_SECONDS = 3600.0
+
+
+@dataclass
+class _Handle:
+    room: str
+    attachment: Attachment
+    position: Position
+    printed_at: float
+
+
 class Gateway:
     def __init__(self, clock: Clock, trace: Trace | None = None, name: str = "g1",
-                 rules_version: int = RULES_VERSION) -> None:
+                 rules_version: int = RULES_VERSION, handle_prefix: str = "a", limits: Limits = Limits()) -> None:
         self.clock = clock
         self.trace = trace if trace is not None else Trace()
         self.name = name
         # The version of the room-rules document every wake carries (design §3.3).
         self.rules_version = rules_version
+        # ``gateway.attachments`` (design §3.3); the daemon replaces it on a reload.
+        self.limits = limits
         self.rooms: dict[str, RoomCore] = {}
         self.agents: dict[str, AgentState] = {}
         # Bios by agent; each room's core holds its copy by username (``_push_bio``).
@@ -60,8 +76,12 @@ class Gateway:
         self._agent: dict[tuple[str, str], str] = {}
         # Attachment handles (design §3.3): one per (room, platform file id), minted when a
         # read first delivers the post; a fetch names the handle, never the platform id.
-        self._handles: dict[str, tuple[str, Attachment]] = {}
+        # The counter only grows, and the prefix is the daemon run's, so a handle from
+        # before a restart or an eviction never names another file.
+        self._handles: dict[str, _Handle] = {}
         self._handle_of: dict[tuple[str, str], str] = {}
+        self._handle_prefix = handle_prefix
+        self._handle_seq = 0
         # Told after every bio push: the daemon saves the agents' document then.
         self.on_bio: Callable[[], None] | None = None
 
@@ -182,31 +202,78 @@ class Gateway:
 
     # ── attachments ─────────────────────────────────────────────────────────
 
-    def deliverable(self, agent: str, room: str, post: Post) -> Post:
+    def deliverable(self, agent: str, room: str, post: Post, wake_id: str | None = None) -> Post:
         """The post as the doorbell delivers it to ``agent``: its author labelled as that
-        agent sees them, its attachments named by handle."""
+        agent sees them, its attachments named by handle. With ``wake_id``, the read is
+        that wake's and the handles are counted on its turn (design §3.3)."""
         core = self._room(room)
         bot = self._bot(core, agent)
         if bot is None:
             raise PermissionError(f"{agent} is not in the roster of room {room!r}")
-        attachments = tuple(replace(a, id=self._handle(room, a)) for a in post.attachments)
+        self._evict_handles(core)
+        attachments = tuple(replace(a, id=self._handle(room, a, post.position)) for a in post.attachments)
+        if wake_id is not None and attachments:
+            state = core.volatile.get(bot)
+            run = state.turn if state is not None else None
+            if run is not None and run.leased and run.wake.wake_id == wake_id:
+                run.handles.update(a.id for a in attachments)
         return replace(post, author_role=core.role_label(bot, post.author), attachments=attachments)
 
-    def _handle(self, room: str, attachment: Attachment) -> str:
+    def _handle(self, room: str, attachment: Attachment, position: Position) -> str:
         key = (room, attachment.id)
         handle = self._handle_of.get(key)
         if handle is None:
-            handle = self._handle_of[key] = f"a{len(self._handle_of) + 1}"
-            self._handles[handle] = (room, attachment)
+            self._handle_seq += 1
+            handle = self._handle_of[key] = f"{self._handle_prefix}{self._handle_seq}"
+            self._handles[handle] = _Handle(room, attachment, position, self.clock.now())
+        else:
+            self._handles[handle].printed_at = self.clock.now()
         return handle
 
-    async def fetch_attachment(self, agent: str, handle: str) -> tuple[Attachment, bytes]:
-        """``KeyError`` for a handle no read minted, ``PermissionError`` when the room's
-        roster does not list the agent."""
-        room, attachment = self._handles[handle]
-        if not self.hosts(agent, room):
-            raise PermissionError(f"{agent} is not in the roster of room {room!r}")
-        return attachment, await self._room(room).platform.fetch_attachment(attachment.id)
+    def _evict_handles(self, core: RoomCore) -> None:
+        """Handles of ``core``'s room whose post every hosted cursor has passed and that
+        no read printed within the grace: no backlog delivers the post again, and the
+        agent that was printed it has had its hour (design §3.3)."""
+        floor = core.cursor_floor()
+        if floor is None:
+            return
+        cutoff = self.clock.now() - HANDLE_GRACE_SECONDS
+        gone = [h for h, entry in self._handles.items()
+                if entry.room == core.room and not after(entry.position, floor) and entry.printed_at <= cutoff]
+        for handle in gone:
+            entry = self._handles.pop(handle)
+            del self._handle_of[(entry.room, entry.attachment.id)]
+
+    def fetch_attachment(self, agent: str, handle: str) -> tuple[Attachment, AsyncIterator[bytes]]:
+        """The file and its bytes, streamed from the platform under the limits.
+        ``KeyError`` for a handle no read minted, ``PermissionError`` when the room's
+        roster does not list the agent, :class:`AttachmentRefused` for a file over
+        ``max_size_mb``; what the platform raises comes with the first chunk."""
+        entry = self._handles[handle]
+        core = self._room(entry.room)
+        bot = self._bot(core, agent)
+        if bot is None or bot not in core.hosted:
+            raise PermissionError(f"{agent} is not in the roster of room {entry.room!r}")
+        problem = self.limits.over_size(handle, entry.attachment.size)
+        if problem is not None:
+            raise AttachmentRefused(problem)
+        state = core.volatile.get(bot)
+        run = state.turn if state is not None else None
+        if run is not None and run.leased and handle in run.handles:
+            run.fetched.add(handle)
+        chunks = core.platform.fetch_attachment(entry.attachment.id)
+        return entry.attachment, bounded(chunks, handle, self.limits, clock=self.clock.now)
+
+    def check_files(self, reply: Reply) -> None:
+        """The limits a send's files must fit before a byte reaches the platform
+        (design §3.3); each file's stream is then bounded by them as it is read."""
+        problem = self.limits.over_count(len(reply.files))
+        for upload in reply.files:
+            problem = problem or self.limits.over_size(upload.name, upload.size)
+        if problem is not None:
+            raise AttachmentRefused(problem)
+        reply.files = tuple(replace(u, chunks=bounded(u.chunks, u.name, self.limits, expected=u.size, clock=self.clock.now))
+                            for u in reply.files)
 
     def starting_thread(self, agent: str, wake_id: str) -> str:
         """Where a wake's send goes when the agent names no thread (design §3.3)."""
@@ -226,6 +293,7 @@ class Gateway:
 
     async def send(self, agent: str, reply: Reply, room: str | None = None) -> Sent:
         core, bot = self.room_for(agent, reply, room)
+        self.check_files(reply)
         return await core.send(bot, reply)
 
     def room_for(self, agent: str, reply: Reply, room: str | None = None) -> tuple[RoomCore, str]:

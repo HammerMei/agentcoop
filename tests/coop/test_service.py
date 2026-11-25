@@ -346,8 +346,8 @@ async def test_an_attachment_is_fetched_through_a_hosted_bot(running):
     _, posts = svc.gateway.read("a", wake.wake_id)
     delivered = svc.gateway.deliverable("a", "fake:team", next(p for p in posts if p.id == post.id))
     handle = delivered.attachments[0].id  # the handle a read over the doorbell prints
-    found, data = await svc.gateway.fetch_attachment("a", handle)
-    assert found.name == "a.txt" and data == b"hello"
+    found, chunks = svc.gateway.fetch_attachment("a", handle)
+    assert found.name == "a.txt" and b"".join([c async for c in chunks]) == b"hello"
 
 
 async def test_malformed_saved_threads_start_the_room_fresh_loudly(tmp_path):

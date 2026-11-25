@@ -7,37 +7,49 @@ The endpoints and what each answers:
 GET  /v1/agents/me/wake?wait=S          {"wake": <wake> | null}; waits up to S seconds
 GET  /v1/agents/me/posts?wake=W         {"wake": <wake>, "posts": [<post>]}
 GET  /v1/agents/me/posts?room=R         {"posts": [<post>]}
-POST /v1/agents/me/posts                {"post": <post> | null, "warnings": [..]}; body is a reply, plus "room"
+POST /v1/agents/me/posts                {"post": <post> | null, "warnings": [..]}; body is a reply, plus "room";
+                                        or multipart: the reply as the part "reply", then one "file" part per
+                                        entry of its "files" list ({name, content_type, size}), in order
 POST /v1/agents/me/done                 {"done": true | false}; body {wake_id, answered, failed}
 POST /v1/agents/me/bio                  {"version": N}; body {text}
 GET  /v1/rules                          {"version": N, "text": "..."}
-GET  /v1/agents/me/attachments/{id}     the file, by the handle a read printed
+GET  /v1/agents/me/attachments/{id}     the file, streamed, by the handle a read printed
 ```
 
 Errors answer ``{"error": "..."}``: 401 for a missing or unknown token, 403 for a room
 whose roster does not list the agent, 404 for a room the gateway does not watch, 409
 for a wake id with no live lease, 400 for a reply with nothing postable, 422 for a
-send the gateway refused (``reasons`` beside ``error``), 502 for a post the platform
-refused, 504 when the platform did not answer and the outcome is unknown (the client
-treats it as a lost response, design §3.3). The token is compared in constant time and
-never logged.
+send the gateway refused (``reasons`` beside ``error``), 413 for a file over
+``gateway.attachments`` (nothing posted), 408 for a file whose transfer ran past the
+timeout (nothing posted), 502 for a post the platform refused or, with ``file`` beside
+``error``, a file it refused (nothing posted), 504 when the platform did not answer
+and the outcome is unknown (the client treats it as a lost response, design §3.3). A
+download that fails once its headers are sent ends short of its length: the client
+sees a truncated body, never a file. The token is compared in constant time and never
+logged.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hmac
+import json
+import logging
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aiohttp import web
+from aiohttp import BodyPartReader, MultipartReader, web
 
 from ..errors import InvalidReply, NoLiveLease, RefusedSend, RoomUnresolved
+from ..room.attachments import AttachmentRefused, TransferTimeout
 from ..room.gateway import Gateway
-from ..room.model import Post, Wake
-from ..room.platform import PlatformError, RefusedPost
+from ..room.model import Post, Upload, Wake
+from ..room.platform import PlatformError, RefusedAttachment, RefusedPost
 from ..wire import decode_reply, encode_post, encode_wake
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_WAIT = 30.0
 MAX_WAIT = 120.0
@@ -112,8 +124,8 @@ def _error(status: int, message: str, **more) -> web.Response:
     return web.json_response({"error": message, **more}, status=status)
 
 
-def _posts(gateway: Gateway, agent: str, room: str, posts: list[Post]) -> list[dict]:
-    return [encode_post(gateway.deliverable(agent, room, p)) for p in posts]
+def _posts(gateway: Gateway, agent: str, room: str, posts: list[Post], wake_id: str | None = None) -> list[dict]:
+    return [encode_post(gateway.deliverable(agent, room, p, wake_id)) for p in posts]
 
 
 # ── handlers ────────────────────────────────────────────────────────────────
@@ -160,7 +172,8 @@ async def read(request: web.Request) -> web.Response:
             found, posts = gateway.read(agent, wake_id)
         except NoLiveLease as exc:
             return _error(409, str(exc))
-        return web.json_response({"wake": encode_wake(found), "posts": _posts(gateway, agent, found.room, posts)})
+        return web.json_response({"wake": encode_wake(found),
+                                  "posts": _posts(gateway, agent, found.room, posts, wake_id)})
     refused = _room_refusal(gateway, agent, room)
     if refused is not None:
         return refused
@@ -175,10 +188,11 @@ async def read(request: web.Request) -> web.Response:
 async def send(request: web.Request) -> web.Response:
     doorbell: _Doorbell = request.app[DOORBELL]
     gateway, agent = doorbell.gateway, request[AGENT]
-    body = await _json(request)
+    body, parts = await _send_body(request)
     if body is None:
         return _error(400, "send: a JSON reply")
-    problem = _typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str) or _control_typed(body)
+    problem = (_typed(body, thread=str, to=list, text=str, control=dict, wake_id=str, room=str, files=list)
+               or _control_typed(body) or _files_typed(body))
     if problem is not None:
         return _error(400, f"send: {problem}")
     refused = _default_thread(gateway, agent, body)
@@ -187,17 +201,63 @@ async def send(request: web.Request) -> web.Response:
     if refused is not None:
         return refused
     reply, room = decode_reply(body), body.get("room")
+    if body.get("files"):
+        if parts is None:
+            return _error(400, "send: files travel as the parts of a multipart request")
+        reply.files = tuple(Upload(f["name"], f.get("content_type") or "application/octet-stream", int(f["size"]),
+                                   _file_part(parts, f["name"])) for f in body["files"])
     try:
         core, bot = gateway.room_for(agent, reply, room)
+        gateway.check_files(reply)
         sent = await core.send(bot, reply)
-    except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost) as exc:
-        return _send_refusal(exc)
-    except PlatformError as exc:
-        return _error(504, f"the platform did not answer: {exc}", thread=reply.thread)
+    except (NoLiveLease, RoomUnresolved, InvalidReply, RefusedSend, RefusedPost,
+            AttachmentRefused, TransferTimeout, RefusedAttachment, PlatformError) as exc:
+        return _send_refusal(exc, reply.thread)
     post = sent.post
     # ``warnings``: the rules a room that does not enforce let the send break (design §3.5)
     return web.json_response({"post": None if post is None else encode_post(gateway.deliverable(agent, core.room, post)),
                               "warnings": list(sent.warnings)})
+
+
+async def _send_body(request: web.Request) -> tuple[dict | None, MultipartReader | None]:
+    """The reply document, and the multipart reader when the send carries files."""
+    if request.content_type != "multipart/form-data":
+        return await _json(request), None
+    parts = await request.multipart()
+    return await _reply_part(parts), parts
+
+
+async def _reply_part(parts: MultipartReader) -> dict | None:
+    """The ``reply`` part of a multipart send, first in the body; the file parts stay
+    unread for :func:`_file_part`, so a file is streamed to the platform as it arrives."""
+    part = await parts.next()
+    if not isinstance(part, BodyPartReader) or part.name != "reply":
+        return None
+    try:
+        body = json.loads(await part.text())
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+async def _file_part(parts: MultipartReader, name: str) -> AsyncIterator[bytes]:
+    """The bytes of the next ``file`` part, read as the platform takes them. The parts
+    arrive in the order the ``files`` list declares, which is the order a connector
+    uploads them in."""
+    part = await parts.next()
+    if not isinstance(part, BodyPartReader) or part.name != "file":
+        raise AttachmentRefused(f"attachment {name}: no file part where one was declared")
+    while chunk := await part.read_chunk():
+        yield chunk
+
+
+def _files_typed(body: dict) -> str | None:
+    for entry in body.get("files") or ():
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not entry["name"]:
+            return "each file needs a name"
+        if not isinstance(entry.get("size"), int) or isinstance(entry["size"], bool) or entry["size"] < 0:
+            return f"file {entry['name']}: a size in bytes"
+    return None
 
 
 def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | None:
@@ -215,7 +275,7 @@ def _default_thread(gateway: Gateway, agent: str, body: dict) -> web.Response | 
     return None
 
 
-def _send_refusal(exc: Exception) -> web.Response:
+def _send_refusal(exc: Exception, thread: str | None = None) -> web.Response:
     if isinstance(exc, NoLiveLease):
         return _error(409, f"{exc}; a late send names its room and thread")
     if isinstance(exc, RoomUnresolved):
@@ -224,6 +284,14 @@ def _send_refusal(exc: Exception) -> web.Response:
         return _error(400, str(exc))
     if isinstance(exc, RefusedSend):
         return _error(422, "refused", reasons=exc.reasons)
+    if isinstance(exc, AttachmentRefused):
+        return _error(413, str(exc), thread=thread)
+    if isinstance(exc, TransferTimeout):
+        return _error(408, str(exc), thread=thread)
+    if isinstance(exc, RefusedAttachment):
+        return _error(502, str(exc), thread=thread, file=exc.name)
+    if isinstance(exc, PlatformError):
+        return _error(504, f"the platform did not answer: {exc}", thread=thread)
     return _error(502, str(exc), thread=getattr(exc, "thread", None))
 
 
@@ -257,20 +325,39 @@ async def rules(request: web.Request) -> web.Response:
     return web.json_response({"version": doorbell.gateway.rules_version, "text": doorbell.rules_text})
 
 
-async def attachment(request: web.Request) -> web.Response:
+async def attachment(request: web.Request) -> web.StreamResponse:
     doorbell: _Doorbell = request.app[DOORBELL]
     handle = request.match_info["handle"]
     try:
-        found, data = await doorbell.gateway.fetch_attachment(request[AGENT], handle)
+        found, chunks = doorbell.gateway.fetch_attachment(request[AGENT], handle)
+        first = await anext(chunks, b"")  # what the platform refuses, it refuses here, before any header
     except KeyError:
         return _error(404, f"no attachment {handle!r}: fetch by the handle a read printed")
     except PermissionError as exc:
         return _error(403, str(exc))
+    except AttachmentRefused as exc:
+        return _error(413, str(exc))
+    except TransferTimeout as exc:
+        return _error(408, str(exc))
     except PlatformError as exc:
         return _error(504, f"the platform did not answer: {exc}")
     name = _HEADER_UNSAFE.sub("", found.name)  # a control character or a quote would break the header
-    return web.Response(body=data, content_type=found.content_type or "application/octet-stream",
-                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    response = web.StreamResponse(headers={"Content-Type": found.content_type or "application/octet-stream",
+                                           "Content-Disposition": f'attachment; filename="{name}"'})
+    if found.size:
+        response.content_length = found.size  # a short body is then a truncation the client can see
+    await response.prepare(request)
+    await response.write(first)
+    try:
+        async for chunk in chunks:
+            await response.write(chunk)
+    except (PlatformError, TransferTimeout, AttachmentRefused) as exc:
+        # the headers are out: the body ends short, and the client discards it
+        logger.warning("attachment %s: the transfer broke: %s", handle, exc)
+        response.force_close()
+        raise
+    await response.write_eof()
+    return response
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

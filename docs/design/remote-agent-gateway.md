@@ -188,8 +188,9 @@ POST /v1/agents/me/bio                 {text}
 GET  /v1/rules                         the room-rules skill, with its version
 GET  /v1/agents/me/posts?wake=W        what coop read --wake calls; the gateway derives [cursor, hwm] from the lease and records the read on it
 GET  /v1/agents/me/posts?room[&after=ID]      a read outside a wake, from the cursor (or the post ID) to the latest; records nothing
-POST /v1/agents/me/posts               what coop send calls, in both modes; wake_id required (null = unsolicited)
-GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway fetches from the platform
+POST /v1/agents/me/posts               what coop send calls, in both modes; wake_id required (null = unsolicited);
+                                       JSON, or multipart with the JSON as `reply` and each file as a `file` part
+GET  /v1/agents/me/attachments/{id}    what coop attachment calls; the gateway streams it from the platform
 ```
 
 Authentication: a bearer token per agent, issued by configuration (`coop config add
@@ -279,16 +280,18 @@ coop read  [--room R] [--wake W]   with --wake: prints the hint, then every post
                                    with --room alone: the posts after the cursor through the
                                    latest, which is how an agent checks whether its own reply landed;
                                    --after ID starts after that post instead of the cursor
-coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [TEXT]
+coop send  (--wake W | --unsolicited) [--room R | --thread T] [--to a,b] [--control mute=a,b] [--attach PATH]... [TEXT]
                                    one of --wake or --unsolicited, always: omitting both is a usage error;
                                    --thread for a reply, --room for a new top-level post; a wake's send
                                    defaults to the wake's starting thread (a top-level trigger post is
                                    its own thread root), so a reply threads the conversation unless the
                                    agent asks for the root;
-                                   text needs --to; at least one of text or --control
+                                   text needs --to; at least one of text, --control or --attach;
+                                   --attach posts the file, the text as its caption
 coop done  --wake W [--answered T1,T2] [--failed REASON]
 coop bio   --file bio.md
-coop attachment ID [--out PATH]    downloads one attachment through the gateway into the working directory
+coop attachment ID [--out PATH]    downloads one attachment through the gateway into the working directory;
+                                   written under a temporary name and renamed when complete
 ```
 
 `read` fetches from the platform through the gateway's history path
@@ -330,13 +333,40 @@ id, name, type, size and the exact command to fetch it
 (`attachment a1: report.pdf application/pdf 3.1 MB -> coop attachment a1`). The
 gateway downloads nothing on receipt and nothing on `read`: `coop attachment`
 asks the gateway, which fetches the file from the platform with the bot's
-account and streams it to the agent. The size limit applies at that fetch. A
+account and streams it to the agent, chunk by chunk, holding nothing in memory
+or on disk at either end; the utility writes under a temporary name and renames
+when the transfer completes, so a transfer that broke leaves no partial file. A
 file is transferred only to the agents that ask for it, once each, so a large
 file in a room with several agents is not copied to every one of them. The
 skill states that an agent does not answer about a file it has not fetched. The
-gateway counts, per agent, the attachments delivered in a wake's range and
-whether each was fetched before `done`, so an agent that answers without reading
-is visible in the counters rather than in a wrong reply.
+gateway counts, per agent, the attachments a wake delivered and how many were
+fetched before `done` (both on the wake's `turn_end` trace event), so an agent
+that answers without reading is visible in the counters rather than in a wrong
+reply.
+
+A handle is the gateway's name for one file in one room, minted when a `read`
+first prints it, and it lives while the gateway can still deliver the post: it
+is dropped once every hosted bot's cursor in the room has passed the post and an
+hour has gone by since a `read` last printed it (a `read --room --after` can
+print a handle for an older post; the hour is for that). Handles carry a prefix
+chosen when the daemon starts, so a handle from before a restart names nothing
+rather than another file.
+
+An agent posts a file with `coop send --attach PATH`, repeated for several files,
+the text as their caption. The send is one request with the files in it: the
+room's rules are checked before a byte reaches the platform, and a refused send
+uploads nothing. `gateway.attachments` holds the limits: `max_size_mb` bounds a
+file in either direction, `max_per_post` the files on one send, and both default
+to `0`, which leaves the platform's own limits in force (Mattermost's
+`FileSettings.MaxFileSize`, Rocket.Chat's `FileUpload_MaxFileSize`); set either
+only to be stricter than the platform. Over a limit the gateway answers 413 and the utility prints
+`[ERROR] attachment a1 is 12.3 MB, over the 10 MB limit (gateway.attachments.max_size_mb)`;
+for a send, before anything is posted. A file the platform itself refuses (over
+its own limit, a type it blocks) is `[ERROR] the platform refused the file: …`:
+the send posted nothing, and the thread is not marked refused, since the room
+did not refuse the reply. `transfer_timeout_seconds` (default 120) bounds one
+file's transfer in either direction, apart from the REST client's request
+timeout, which is sized for a JSON answer and would cut a large file short.
 
 The room-rules skill is one document whose master copy lives in the gateway
 (`/v1/rules`). The gateway is the only place the rules are edited, so a change
@@ -512,6 +542,7 @@ agents:
 gateway:
   listen: 127.0.0.1:7474         # the doorbell API; set per deployment
   tls: {cert: gateway/cert.pem, key: gateway/key.pem}   # required off loopback, unless a proxy terminates TLS
+  attachments: {max_size_mb: 0, max_per_post: 0, transfer_timeout_seconds: 120}   # 0 = the platform's own limit
 classifier:
   command: [claude, -p, --output-format, text]   # one fresh process per call, the prompt on stdin
 rooms:                           # keys are patterns over the room's handle (below);

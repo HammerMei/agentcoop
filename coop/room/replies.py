@@ -55,8 +55,8 @@ def check_reply(reply: Reply, ctx: ValidationContext) -> tuple[list[Problem], li
 
 
 def _shape_ok(reply: Reply, structural: list[Problem]) -> bool:
-    if reply.text is None and reply.control is None:
-        structural.append(Problem("schema", reply.thread, "neither text nor control"))
+    if reply.text is None and reply.control is None and not reply.files:
+        structural.append(Problem("schema", reply.thread, "neither text, control nor a file"))
     elif reply.text is not None and not str(reply.text).strip():
         structural.append(Problem("schema", reply.thread, "empty text"))
     elif reply.text is not None and END_TOKEN in reply.text:

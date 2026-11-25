@@ -9,9 +9,10 @@ Rocket.Chat, where a position is a ``(timestamp, post id)`` pair.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Protocol
 
-from .model import Member, Position, Post, PostKind
+from .model import Member, Position, Post, PostKind, Upload
 
 
 class PlatformError(Exception):
@@ -26,6 +27,15 @@ class RefusedPost(Exception):
     def __init__(self, thread: str) -> None:
         super().__init__(f"platform refused a post in thread {thread!r}")
         self.thread = thread
+
+
+class RefusedAttachment(Exception):
+    """The platform refused a file a send carried (over its own size limit, a type it
+    blocks): nothing was posted, and the thread is not refused (design §3.3)."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(f"the platform refused the file {name}: {reason}")
+        self.name = name
 
 
 class Platform(Protocol):
@@ -57,15 +67,19 @@ class Platform(Protocol):
         Mattermost shows it for a few seconds and clears it itself."""
         ...
 
-    async def fetch_attachment(self, file_id: str) -> bytes:
-        """The bytes of one attachment by its platform file id, fetched now with the
-        bot's account (design §3.3: nothing is downloaded on receipt). Raises
-        ``KeyError`` for an id the platform does not know."""
+    def fetch_attachment(self, file_id: str) -> AsyncIterator[bytes]:
+        """The bytes of one attachment by its platform file id, streamed now with the
+        bot's account (design §3.3: nothing is downloaded on receipt). ``KeyError`` for
+        an id the platform does not know and :class:`PlatformError` are raised by the
+        first chunk, so a caller takes one before it commits to an answer."""
         ...
 
-    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None) -> Post:
+    async def post(self, author: str, text: str, thread: str | None, kind: PostKind | None = None,
+                   files: tuple[Upload, ...] = ()) -> Post:
         """Post as ``author`` (a bot the gateway holds the account for); ``thread``
         ``None`` posts at the top level, and the returned post's ``thread`` is then its
-        own id. Raises :class:`RefusedPost` when the platform refuses it. The post
-        reaches the core again as an inbound post, like every other post in the room."""
+        own id. ``files`` are posted with the text as their caption. Raises
+        :class:`RefusedPost` when the platform refuses the post and
+        :class:`RefusedAttachment` when it refuses a file. The post reaches the core
+        again as an inbound post, like every other post in the room."""
         ...
