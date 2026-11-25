@@ -215,7 +215,7 @@ class Wake:
     ``lease_expires_at`` is ``None`` until an agent's poll picks the wake up."""
 
     wake_id: str
-    room: str
+    room: str  # the room's handle: what the operator and the rules name it by
     bot: str
     source: TurnSource
     starting_thread: str
@@ -226,6 +226,9 @@ class Wake:
     lease_expires_at: float | None = None
     # ``coop reset``: the agent starts a fresh session for this room (design §3.4).
     reset: bool = False
+    # The room's stable id, ``<server>:<platform room id>``: what survives a rename, and
+    # what an agent keys its per-room state by (design §3.4). The handle in the simulations.
+    room_id: str = ""
 
 
 @dataclass

@@ -33,6 +33,7 @@ def encode_wake(wake: Wake) -> Json:
         "rules_version": wake.rules_version,
         "lease_expires_at": wake.lease_expires_at,
         "reset": wake.reset,
+        "room_id": wake.room_id,
     }
 
 
@@ -50,6 +51,7 @@ def decode_wake(doc: Json) -> Wake:
         rules_version=doc.get("rules_version", 0),
         lease_expires_at=doc.get("lease_expires_at"),
         reset=bool(doc.get("reset", False)),
+        room_id=str(doc.get("room_id", "")),
     )
 
 

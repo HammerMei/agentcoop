@@ -344,6 +344,7 @@ async def test_an_attachment_is_fetched_through_a_hosted_bot(running):
     post = await fc.human("c1", "H", "@a_bot see this", files=(("a.txt", "text/plain", b"hello"),))
     await settle()
     wake = svc.gateway.poll("a")
+    assert wake.room_id == "fake:c1" and wake.room == "fake:team"  # the stable id beside the handle
     _, posts = svc.gateway.read("a", wake.wake_id)
     delivered = svc.gateway.deliverable("a", "fake:team", next(p for p in posts if p.id == post.id))
     handle = delivered.attachments[0].id  # the handle a read over the doorbell prints

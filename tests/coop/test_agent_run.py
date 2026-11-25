@@ -328,6 +328,16 @@ async def test_a_reset_wake_starts_a_new_session_and_a_newer_rules_version_refet
     assert again.sessions["team"] == chosen and again.rules_version == 7  # the state file survives a restart
 
 
+async def test_a_renamed_room_keeps_its_session_the_handle_is_never_the_key(tmp_path):
+    stub = StubDoorbell()
+    runner = Runner(stub, ADAPTERS["claude"]("claude"), tmp_path / "state", tmp_path)  # type: ignore[arg-type]
+    chosen, first = runner._session_for(a_wake(room="lab:team", room_id="lab:c01"))
+    assert first and runner.sessions == {"lab:c01": chosen}  # keyed by the stable id
+    assert runner._session_for(a_wake(room="lab:team-renamed", room_id="lab:c01")) == (chosen, False)
+    other, _ = runner._session_for(a_wake(room="lab:team", room_id="lab:c02"))  # another room that took the old name
+    assert other != chosen
+
+
 async def test_a_stop_during_the_backoff_ends_the_wait_at_once(tmp_path, capsys):
     stub = StubDoorbell()
     stub.polls = [OSError("connection refused")]  # then a 60 s wait, were it not for the stop

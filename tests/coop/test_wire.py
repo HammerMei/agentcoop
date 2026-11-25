@@ -25,7 +25,7 @@ HINT = Hint(
 )
 TRIGGER = Trigger(post_id="p7", author="H", author_id="u_H", author_role="owner", thread_root="t1")
 WAKE = Wake(wake_id="w-team-3", room="team", bot="a", source="addressed", starting_thread="t1",
-            hwm=7, hint=HINT, trigger=TRIGGER, rules_version=2, lease_expires_at=99.0)
+            hwm=7, hint=HINT, trigger=TRIGGER, rules_version=2, lease_expires_at=99.0, room_id="lab:c01")
 POST = Post(id="p7", position=7, time=12.5, thread="t1", author="H", text="@a hello", kind="human",
             mentions=frozenset({"a"}), words=2, author_id="u_H", author_role="owner",
             attachments=(Attachment("a1", "report.pdf", "application/pdf", 3_250_000),))
