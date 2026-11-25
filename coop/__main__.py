@@ -1,7 +1,5 @@
-"""``python -m coop``: the operator's commands (S3-1; the ``coop`` entry point flips here in S3-2)."""
+"""``python -m coop``: the same command as the ``coop`` binary."""
 
-import sys
+from .entry import main
 
-from .cli import main
-
-sys.exit(main())
+raise SystemExit(main())

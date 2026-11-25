@@ -1,6 +1,6 @@
 """Operator-run migrations for `jobs.json`.
 
-`coop schedule migrate` runs these. Deliberately not automatic,
+`coop legacy schedule migrate` runs these. Deliberately not automatic,
 and not lazy at fire time: the 1→2 step reads each job's watcher HANDLE to find
 its room, and a handle only names the right room while nobody has renamed it.
 The operator is the one who can choose a moment when that holds — right after an

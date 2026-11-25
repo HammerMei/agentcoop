@@ -3,7 +3,7 @@
 `install_keeper_dir` is sourced out of install.sh and run against temp
 directories (`tests.helpers.run_install_sh_function`), so the rule is tested
 without running the installer. It runs the same manifest-driven sync as
-`coop upgrade` through the repo's venv, so a re-run of the installer over an
+`coop legacy upgrade` through the repo's venv, so a re-run of the installer over an
 existing install writes the owned paths and leaves everything else alone.
 """
 

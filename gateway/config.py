@@ -290,7 +290,7 @@ class GatewayConfig:
         # An empty deployment — no connector, agent or rule — is a valid file:
         # it is the state between installing and the first bot, and after
         # removing the last one (coop-keeper design §3.10). Whether there is
-        # anything to RUN is the daemon's question, asked by `coop start`.
+        # anything to RUN is the daemon's question, asked by `coop legacy start`.
         connectors_raw = raw.get("connectors")
         if connectors_raw is None:
             connectors_raw = []
@@ -343,7 +343,7 @@ class GatewayConfig:
         # every FALSY non-list through: a bare `watchers:` (explicit null,
         # the natural way to empty the block) then reached `enumerate(None)`
         # and raised a raw TypeError, so the daemon failed to start and
-        # `coop config validate` crashed instead of reporting — on a config an
+        # `coop legacy config validate` crashed instead of reporting — on a config an
         # operator writes by deleting their rules. `0`/`""` took the same
         # path and now get the clean message.
         if watchers_raw is None:
@@ -656,7 +656,7 @@ def config_base_dir() -> Path:
 def _expand_user(p: str, label: str) -> str:
     """`Path.expanduser()`, with `~nosuchuser` reported as a config problem:
     it raises `RuntimeError`, which `collect_config` does not catch (it catches
-    `ValueError`), so `coop config validate` would traceback on one bad entry."""
+    `ValueError`), so `coop legacy config validate` would traceback on one bad entry."""
     try:
         return str(Path(p).expanduser())
     except RuntimeError as exc:
@@ -798,7 +798,7 @@ def _parse_one_connector(  # noqa: C901
         raise ValueError(
             f"Connector name '{name}' contains one of '*', '?', '[' — those "
             f"are glob characters in watcher-name patterns "
-            f"(coop reset 'mm-*'), so a connector carrying one "
+            f"(coop legacy reset 'mm-*'), so a connector carrying one "
             f"could never be addressed literally. Rename the connector."
         )
     if name in seen_connector_names:
@@ -1349,7 +1349,7 @@ def _parse_rule_ttl(wc: Mapping, where: str, field_name: str) -> int | None:
 
 # Every key a rule entry may carry. Kept in step with $defs/watcherRule in
 # gateway/schema/config.schema.json by tests/unit/test_watcher_rule.py, because
-# `coop config validate` never runs the schema and would otherwise accept typos the
+# `coop legacy config validate` never runs the schema and would otherwise accept typos the
 # schema rejects.
 WATCHER_RULE_KEYS: frozenset[str] = frozenset({
     "description",
@@ -1421,7 +1421,7 @@ def _parse_one_watcher_rule(  # noqa: C901
     # also callable directly (the config tool calls
     # the static parser that way), so it is checked rather than asserted — an
     # assert would vanish under -O and leave a TypeError instead.
-    # The schema sets additionalProperties: false on a rule, but `coop config
+    # The schema sets additionalProperties: false on a rule, but `coop legacy config
     # validate` runs collect_config() rather than the JSON Schema, so a typo like
     # `session_expire_day: 30` would otherwise be silently ignored and the rule
     # would quietly have no expiry. Checked here so both paths agree; a test pins
@@ -1813,7 +1813,7 @@ def collect_config(path: str | Path) -> tuple["GatewayConfig | None", list[Confi
     base_dir = config_base_dir()
     issues: list[ConfigIssue] = []
 
-    # Same check as from_file(), reported rather than raised: `coop config validate`
+    # Same check as from_file(), reported rather than raised: `coop legacy config validate`
     # and the config TUI both come through here, so an old `watchers:` block has
     # to be named on THIS path or it reads as a clean config with no rules.
     unknown_top = unknown_top_level_keys(raw)

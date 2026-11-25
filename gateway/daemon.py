@@ -26,7 +26,7 @@ def _harden_config_permissions(config_path: str) -> None:
     """Chmod config.yaml to 0600, unconditionally.
 
     config.yaml holds plaintext secrets, and the documented guarantee is that
-    `coop start` protects it whether or not anything else ever did. Extracted
+    `coop legacy start` protects it whether or not anything else ever did. Extracted
     as its own function so it's unit-testable without going through
     `os.fork()` (this whole module's docstring already notes `start_daemon()`
     itself isn't unit-testable that way).

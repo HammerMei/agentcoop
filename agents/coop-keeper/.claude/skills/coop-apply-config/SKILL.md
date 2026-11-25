@@ -33,7 +33,7 @@ same.
 ## 2. Dry run — the plan's configuration section
 
 ```
-coop config patch --file ./.plans/<step>.yaml --dry-run --json
+coop legacy config patch --file ./.plans/<step>.yaml --dry-run --json
 ```
 
 Read the result:
@@ -111,7 +111,7 @@ keepers honour it; the config TUI and hand edits are caught by the digest.
 ## 5. Write
 
 ```
-coop config patch --file ./.plans/<step>.yaml --if-digest <file_digest> --json
+coop legacy config patch --file ./.plans/<step>.yaml --if-digest <file_digest> --json
 ```
 
 - `ok: true` → written; one timestamped backup was taken under
@@ -125,7 +125,7 @@ coop config patch --file ./.plans/<step>.yaml --if-digest <file_digest> --json
 ## 6. Guard
 
 ```
-coop config reload --dry-run --json
+coop legacy config reload --dry-run --json
 ```
 
 This is the gateway's own account of what the write will do — connectors
@@ -139,13 +139,13 @@ and leave the operator to decide. The file is already written; say so.
 
 Exactly one of, as the plan said:
 
-- gateway running → `coop config reload`
-- gateway stopped, deployment has rules → `coop start`
-- the plan ends with an empty deployment → `coop config reload` (it stops the
-  last connector and expires its records), then `coop stop`, and say the
-  deployment is empty; `coop start` would refuse it.
+- gateway running → `coop legacy config reload`
+- gateway stopped, deployment has rules → `coop legacy start`
+- the plan ends with an empty deployment → `coop legacy config reload` (it stops the
+  last connector and expires its records), then `coop legacy stop`, and say the
+  deployment is empty; `coop legacy start` would refuse it.
 
-`coop status` says which state the gateway is in; `coop list --all` shows the
+`coop legacy status` says which state the gateway is in; `coop legacy list --all` shows the
 watcher records a reload changed.
 
 ## 8. Release and clean up
@@ -177,8 +177,8 @@ using the same commands.
 A change to an agent's `AGENTS.md` under `~/.agentcoop/agents/user/<agent>/`
 is a plan of its own with no configuration write: show the new text, ask, take
 the lock (step 4 — a removal may be deleting that very directory), write the
-file, release the lock. Then offer `coop reset '<connector>:*'` for each connector of the
-agent (from `coop config show --json`: connectors named by rules whose `agent`
+file, release the lock. Then offer `coop legacy reset '<connector>:*'` for each connector of the
+agent (from `coop legacy config show --json`: connectors named by rules whose `agent`
 is this agent) as an optional step: bots on either backend read the rewritten
 file on their next turn without it, and the plan says so; the reset gives a
 bot a clean session instead of a mid-conversation change of voice. An agent whose

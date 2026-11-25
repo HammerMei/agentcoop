@@ -901,7 +901,7 @@ class TestEnsureLocalBinSymlinks:
         rich's Console.print() raises SystemExit(1) when stdout is a broken pipe.
         SystemExit is a BaseException, so `except (OSError, RuntimeError)` does not
         catch it and the rollback does not run. With a print between rename() and
-        symlink_to(), `coop upgrade | head -4` left the user's own
+        symlink_to(), `coop legacy upgrade | head -4` left the user's own
         wrapper in a .bak with nothing on PATH — silently, because SystemExit(1)
         prints nothing. Hence all filesystem work happens before any output.
 

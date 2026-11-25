@@ -172,7 +172,7 @@ class TestCLIInstructions(_CLITestBase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertIn("# AgentCoop Scheduling Commands", stdout)
-        self.assertIn("coop schedule create", stdout)
+        self.assertIn("coop legacy schedule create", stdout)
 
     def test_instructions_fetch_history_prints_fetch_history_doc(self):
         stdout, stderr, code = self._run(["instructions", "fetch-history"])
@@ -180,7 +180,7 @@ class TestCLIInstructions(_CLITestBase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertIn("# fetch-history", stdout)
-        self.assertIn("coop fetch-history", stdout)
+        self.assertIn("coop legacy fetch-history", stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ class TestCLIConfigLaunchesTUI(_CLITestBase):
         usage string and exited 1 — it must now attempt to launch the TUI
         (and hit the TTY guard under test) instead."""
         stdout, stderr, code = self._run(["config"])
-        self.assertNotIn("Usage: coop config", stdout + stderr)
+        self.assertNotIn("Usage: coop legacy config", stdout + stderr)
 
     def test_config_and_lint_flags_are_forwarded_to_run_app(self):
         with patch("gateway.configtool.run_app") as mock_run_app:
@@ -1652,7 +1652,7 @@ class TestCLIConfigReload(_ConfigCLIBase):
             ["config", "reload", "--config", self.cfg_path], running=False)
         self.assertEqual(code, 1)
         self.assertIn("not running", stderr)
-        self.assertIn("coop start", stderr)
+        self.assertIn("coop legacy start", stderr)
 
     def test_offline_dry_run_keeps_the_validation_warnings(self):
         self._write_config(rules=(  # w2 is shadowed by w1 — a warning, not an error
@@ -2377,7 +2377,7 @@ class _PreflightBase(unittest.TestCase):
 
     `start` used to hand the path straight to `start_daemon()`, whose only check
     is `GatewayConfig.from_file()` — parsing, not the cross-checks. A config the
-    operator could watch `coop config validate` reject still started a gateway.
+    operator could watch `coop legacy config validate` reject still started a gateway.
     """
 
     # A connector that can discover rooms, which the shared `gateway_config_text`

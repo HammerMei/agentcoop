@@ -13,7 +13,7 @@ its backend session by design. Removing both in one edit takes the second path.
 
 ## Identify the bot
 
-From `coop config show --json`: the agent; the connector(s) named by its rules
+From `coop legacy config show --json`: the agent; the connector(s) named by its rules
 whose `server.url` (canonicalised as AGENTS.md says) and, on Mattermost, `server.team` match the
 profile; the rule(s) naming them. From `show --raw --json`: the file as
 written, so you see `inherits:` and entry-level `agent_chain` lists.
@@ -22,7 +22,7 @@ written, so you see `inherits:` and entry-level `agent_chain` lists.
 
 Count, in the resolved configuration:
 
-- other rules naming the connector → the connector stays (`coop config remove`
+- other rules naming the connector → the connector stays (`coop legacy config remove`
   refuses it anyway); the plan says so, or offers the wider plan that removes
   those rules too;
 - other rules naming the agent (its bots on other servers) → the agent, its
@@ -49,7 +49,7 @@ after step 3 — the account and directory steps are part of the plan.
 
 ## Step 1 — detach the runtime
 
-If `coop status` says the gateway is not running, `coop start` (the file still
+If `coop legacy status` says the gateway is not running, `coop legacy start` (the file still
 holds the bot, so it starts). Then one fragment through `coop-apply-config`
 that removes **the rule and only the rule**:
 
@@ -59,7 +59,7 @@ watcher_rules:
     op: remove
 ```
 
-`coop config reload` reclaims the room's records in full. With no rule
+`coop legacy config reload` reclaims the room's records in full. With no rule
 claiming the room, a message arriving now creates nothing.
 
 ## Step 2 — remove the configuration
@@ -100,8 +100,8 @@ deployment is that operator's, and dropping it would silence that bot's loop
 protection. Lists are replaced wholesale: write each complete new list.
 
 If this leaves the deployment empty (presets and templates only), `reload`
-accepts it and stops the last connector; then `coop stop`, and say the
-deployment is empty — `coop start` would refuse it.
+accepts it and stops the last connector; then `coop legacy stop`, and say the
+deployment is empty — `coop legacy start` would refuse it.
 
 ## Step 3 — remove what lives outside config.yaml
 

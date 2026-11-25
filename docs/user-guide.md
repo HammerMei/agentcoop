@@ -1,5 +1,11 @@
 # AgentCoop User Guide
 
+> **`coop legacy`** — the commands in this document are the current gateway's and
+> are run as `coop legacy <command>` (`coop legacy start`, `coop legacy send …`):
+> the `coop` binary now serves the remote-agent daemon and its agent commands
+> (`docs/design/remote-agent-gateway.md`), and the bare `coop start` / `coop send`
+> are that daemon's. The prefix goes with the old package (design §7 step 6).
+
 ## What is AgentCoop?
 
 Inspired by [OpenClaw](https://github.com/openclaw/openclaw)'s vision of making AI agents accessible from any messaging app, AgentCoop (previously known as agent-chat-gateway, or ACG) bridges your existing AI agent tools — Claude CLI, OpenCode, or any custom backend — to your team's chat platform. When someone messages the bot in a watched room, the message is forwarded to the configured agent and the response is posted back.

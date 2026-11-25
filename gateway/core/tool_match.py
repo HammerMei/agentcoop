@@ -19,8 +19,8 @@ Security notes:
     into individual sub-commands; ALL sub-commands must satisfy the params regex.
     Command substitutions ($(...) / backticks) and process substitutions
     (<(...) / >(...)) are recursed into: the nested command is returned as its
-    own sub-command and must match a rule too, so "coop fetch-history $(rm -rf x)"
-    needs both "coop fetch-history $(rm -rf x)" and "rm -rf x" to be allowed.
+    own sub-command and must match a rule too, so "coop legacy fetch-history $(rm -rf x)"
+    needs both "coop legacy fetch-history $(rm -rf x)" and "rm -rf x" to be allowed.
   - File paths: os.path.normpath() is applied before matching to prevent
     path-traversal bypasses ("/project/../../../etc/passwd").
   - WebFetch: avoid ".*" as params — it allows fetching internal network addresses
@@ -96,8 +96,8 @@ def _get_bash_parser():
 # returned as a sub-command starting at its opener.**  Nothing before the opener
 # is included, so a rule anchored on a command name (every built-in rule, and
 # every sensible user rule) can never match it; only an allow-everything rule
-# does.  Returning the whole leaf instead would let ``coop fetch-history `rm x```
-# on a heredoc line satisfy the ``coop fetch-history`` rule.
+# does.  Returning the whole leaf instead would let ``coop legacy fetch-history `rm x```
+# on a heredoc line satisfy the ``coop legacy fetch-history`` rule.
 #
 # Process substitution (``<(...)`` / ``>(...)``) is not a marker: bash performs
 # it only as a bare word, which the parser does structure, and not inside

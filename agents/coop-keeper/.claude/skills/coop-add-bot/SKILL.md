@@ -11,12 +11,12 @@ description: Create a bot — a new agent with its persona and server account, o
   Refuse anything else (a `/`, `..`, upper case) before creating anything.
 - **profile** — the server. If no profile matches, offer `coop-bootstrap` first.
 - Only when the agent does not exist yet: **backend** (choose from
-  `coop config backends --json`; refuse one whose `found` is false) and
+  `coop legacy config backends --json`; refuse one whose `found` is false) and
   **persona** (see below).
 
-Read first: `coop config show --json` (resolved), `coop config show --raw --json`
+Read first: `coop legacy config show --json` (resolved), `coop legacy config show --raw --json`
 (what the file holds — templates present? `file_digest`), `coop-provision
-profiles --json`, `coop config backends --json`.
+profiles --json`, `coop legacy config backends --json`.
 
 ## Decide what this bot is
 
@@ -33,7 +33,7 @@ profiles --json`, `coop config backends --json`.
   login. No account is
   created; the new connector takes its credentials with `--credentials-from`
   (below).
-- **Name taken in config**: `coop config add`/`op: add` refuses it. Report the
+- **Name taken in config**: `coop legacy config add`/`op: add` refuses it. Report the
   conflict and ask for another name.
 
 ## Defaults (each overridable by the operator's wording)
@@ -161,7 +161,7 @@ account whose password nobody has. There is no rollback of a created account.
 Generate the password file first (below) — the dry run reads `{from_file:}`
 too and refuses an absent or empty file.
 
-Run the fragment through `coop config patch --file … --dry-run --json` to get
+Run the fragment through `coop legacy config patch --file … --dry-run --json` to get
 the plan's configuration section (see `coop-apply-config`). For a **new**
 agent this dry run reports exactly one expected error — the agent's
 `working_directory` does not exist yet, and the rule that names the agent
@@ -250,7 +250,7 @@ it is released after step 6):
    **Second team on one installation** is the one case that takes two writes
    (`coop-apply-config`, "a plan with more than one write"):
    a fragment cannot copy another connector's credentials, so the connector is
-   added with `coop config add connector <name> --type … --server-url … --team …
+   added with `coop legacy config add connector <name> --type … --server-url … --team …
    --credentials-from <existing> --owner <operator> --inherits default` (dry
    run, digest, write — same discipline), and the rule and agent-chain change go
    in one fragment after it — and that fragment also merges the connector's

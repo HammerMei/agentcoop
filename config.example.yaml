@@ -4,11 +4,11 @@
 #
 # Secrets (passwords, tokens) go directly in this file as plain values below —
 # config.yaml is chmod'd 0600 automatically (by the config TUI on every save,
-# and by `coop start`), so this is safe as long as you don't
+# and by `coop legacy start`), so this is safe as long as you don't
 # commit your filled-in copy to version control.
 #
-# Comments in your config.yaml are NOT preserved by `coop config` (the TUI) or
-# by `coop config add/remove/patch` — every save re-serializes the file. Use
+# Comments in your config.yaml are NOT preserved by `coop legacy config` (the TUI) or
+# by `coop legacy config add/remove/patch` — every save re-serializes the file. Use
 # the `description:` field on an entry or template for a note that survives.
 #
 # $VAR / ${VAR} is NOT expanded — a value that happens to look like one is
@@ -206,10 +206,10 @@ agents:
     owner_allowed_tools:
       # ── Built-in gateway commands (auto-included — no config needed) ────
       # These are ALWAYS auto-approved for owners, regardless of what you list here:
-      #   coop send ...      — send messages / attach files to RC rooms
-      #   coop schedule ...  — create/list/delete/pause/resume scheduled jobs
-      #   coop fetch-history ... — read filtered channel history
-      #   coop instructions ...  — read bundled tool instructions
+      #   coop legacy send ...      — send messages / attach files to RC rooms
+      #   coop legacy schedule ...  — create/list/delete/pause/resume scheduled jobs
+      #   coop legacy fetch-history ... — read filtered channel history
+      #   coop legacy instructions ...  — read bundled tool instructions
 
       # ── Read-only built-in tools: preset defined above, safe, never need approval ──
       - readonly-builtins
@@ -246,7 +246,7 @@ agents:
         params: "https?://[^/]*\\.wikipedia\\.org/.*"  # guests: Wikipedia only
       - tool: "mcp__rocketchat__get_.*"
       - tool: "Bash"
-        params: "coop\\s+send\\s+.*"     # agent-initiated file/message send to RC
+        params: "coop\\s+legacy\\s+send\\s+.*"     # agent-initiated file/message send to RC
 
     timeout: 360                     # seconds to wait for agent response; must be > permissions.timeout
     permissions:
@@ -287,13 +287,13 @@ agents:
   #     - tool: "webfetch"
   #       params: "https?://[^/]*\\.github\\.com/.*"
   #     - tool: "bash"
-  #       params: "coop\\s+send\\s+.*"  # agent-initiated file/message send to RC
+  #       params: "coop\\s+legacy\\s+send\\s+.*"  # agent-initiated file/message send to RC
   #   guest_allowed_tools:
   #     - tool: "read"
   #     - tool: "glob"
   #     - tool: "grep"
   #     - tool: "bash"
-  #       params: "coop\\s+send\\s+.*"  # agent-initiated file/message send to RC
+  #       params: "coop\\s+legacy\\s+send\\s+.*"  # agent-initiated file/message send to RC
   #
   #   timeout: 360
   #   permissions:
@@ -311,11 +311,11 @@ watcher_rules:
   # a further `session_expire_days`.
   #
   # CLI controls:
-  #   coop list                  — show watcher records and their state
-  #   coop pause  <watcher-name> — stop processing messages temporarily
-  #   coop resume <watcher-name> — re-enable a paused watcher
-  #   coop reset  <watcher-name> — clear runtime state, start a fresh session
-  #   coop expire <watcher-name> — reclaim a room's record and session now
+  #   coop legacy list                  — show watcher records and their state
+  #   coop legacy pause  <watcher-name> — stop processing messages temporarily
+  #   coop legacy resume <watcher-name> — re-enable a paused watcher
+  #   coop legacy reset  <watcher-name> — clear runtime state, start a fresh session
+  #   coop legacy expire <watcher-name> — reclaim a room's record and session now
   #
   # name (required):
   #   The RULE's identity — rules are not auto-named. Each created watcher gets
@@ -433,11 +433,11 @@ watcher_rules:
 # so this entire section can be omitted if you do not use scheduling.
 #
 # CLI usage:
-#   coop schedule create WATCHER MESSAGE --every 1d --at 09:00
-#   coop schedule list
-#   coop schedule delete JOB_ID
-#   coop schedule pause JOB_ID
-#   coop schedule resume JOB_ID
+#   coop legacy schedule create WATCHER MESSAGE --every 1d --at 09:00
+#   coop legacy schedule list
+#   coop legacy schedule delete JOB_ID
+#   coop legacy schedule pause JOB_ID
+#   coop legacy schedule resume JOB_ID
 #
 # Jobs are stored in ~/.agentcoop/data/jobs.json.
 # The daemon must be running for schedule commands to work (they use the control socket).
@@ -445,7 +445,7 @@ watcher_rules:
 # scheduler:
 #   completed_job_ttl_days: 7         # How long completed jobs are kept in data/jobs.json before purge.
 #                                     # 0 = delete immediately when a job completes.
-#                                     # Use "coop schedule list --all" to see
+#                                     # Use "coop legacy schedule list --all" to see
 #                                     # completed jobs. (The installed command is
 #                                     # `coop`; there is no `acg` binary.)
 #

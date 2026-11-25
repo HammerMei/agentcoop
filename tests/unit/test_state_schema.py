@@ -307,7 +307,7 @@ class TestLegacyRefusal(_RealStateFileTestCase):
         with self.assertRaises(LegacyStateError) as cm:
             load_state("rc")
         msg = str(cm.exception)
-        self.assertIn("coop list", msg)
+        self.assertIn("coop legacy list", msg)
         self.assertNotIn("'acg list'", msg)
 
     def test_both_refusals_share_a_catchable_base(self):
@@ -319,7 +319,7 @@ class TestLegacyRefusal(_RealStateFileTestCase):
     def test_the_recovery_advice_is_followable_in_the_situation_it_describes(self):
         """Third round on this one message, and the sharpest of the three.
 
-        It previously told the operator to run `coop list` to take an
+        It previously told the operator to run `coop legacy list` to take an
         inventory. That command queries the running daemon — and the daemon is what
         just refused to start, so the instruction is impossible *by construction* in
         the only situation that produces this error. Not mis-ordered: unfollowable.
@@ -335,7 +335,7 @@ class TestLegacyRefusal(_RealStateFileTestCase):
         self.assertIn("paused flag", msg)
         # It may *mention* the command in order to warn against it, but must not
         # prescribe it as a step.
-        self.assertNotIn("run 'coop list'", msg)
+        self.assertNotIn("run 'coop legacy list'", msg)
 
     def test_deeply_nested_json_is_corruption_not_a_refusal(self):
         """`json.loads` raises RecursionError, not ValueError, on ~100k nesting. With

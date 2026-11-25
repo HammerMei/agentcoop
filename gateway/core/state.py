@@ -76,7 +76,7 @@ class LegacyStateError(StateFormatError):
             f"To proceed: move '{path}' aside — keep the copy, because the file IS "
             "the inventory: it lists each watcher's name, session id, paused flag and "
             "message watermark in plain JSON. Then start again. Do not reach for "
-            "'coop list' at this point: it queries the running daemon, "
+            "'coop legacy list' at this point: it queries the running daemon, "
             "and the daemon is what just refused to start. Your config.yaml does NOT need "
             "rewriting for this: rule-shaped watchers are not active yet, so the "
             "§5.3 procedure's config rewrite belongs to the later cutover, not to "

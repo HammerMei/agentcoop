@@ -54,16 +54,16 @@ def read_gateway_log() -> str:
 def gateway_pid() -> int | None:
     """The running daemon's pid, or None if it is not running.
 
-    Read from `status`' TEXT, not its exit code: `coop status`
+    Read from `status`' TEXT, not its exit code: `coop legacy status`
     exits 0 while printing "Gateway: not running" (issue #134), which is why a
     readiness check gated on the returncode admits a dead daemon.
     """
-    match = re.search(r"running \(pid=(\d+)\)", _exec("coop", "status").stdout)
+    match = re.search(r"running \(pid=(\d+)\)", _exec("coop", "legacy", "status").stdout)
     return int(match.group(1)) if match else None
 
 
 def watcher_list() -> str:
-    """`coop list --all` as seen inside the container.
+    """`coop legacy list --all` as seen inside the container.
 
     `--all` matters: idle watchers are hidden by default, so a plain `list` can
     report "No watchers" for a room that has one.
@@ -74,7 +74,7 @@ def watcher_list() -> str:
     for a reason unrelated to what they check, which is the one direction a
     guard must never fail in.
     """
-    result = _exec("coop", "list", "--all")
+    result = _exec("coop", "legacy", "list", "--all")
     if result.returncode != 0:
         raise RuntimeError(
             f"`list --all` failed inside {CONTAINER} (exit {result.returncode}). "

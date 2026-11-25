@@ -222,20 +222,20 @@ class TestExtractBashSubcommands(unittest.TestCase):
 class TestExtractBashSubcommandsSubstitutions(unittest.TestCase):
     """A command nested in a substitution is a sub-command of its own.
 
-    Before #171 substitutions were opaque: ``coop fetch-history --room r $(rm -rf
+    Before #171 substitutions were opaque: ``coop legacy fetch-history --room r $(rm -rf
     /tmp/x)`` came back as one string, which the built-in fetch-history guest rule (it ends
     in ``.*``) matched, and the nested ``rm`` ran for a guest.  Every case here
     asserts the nested command is present so a rule set has to allow it explicitly.
     """
 
-    FETCH = "coop fetch-history --room r"
+    FETCH = "coop legacy fetch-history --room r"
 
     def test_dollar_paren_substitution_yields_nested_command(self):
         result = extract_bash_subcommands(f"{self.FETCH} $(rm -rf /tmp/x)")
         self.assertEqual(result, [f"{self.FETCH} $(rm -rf /tmp/x)", "rm -rf /tmp/x"])
 
     def test_substitution_inside_double_quotes(self):
-        result = extract_bash_subcommands('coop fetch-history --room "$(rm -rf /tmp/x)"')
+        result = extract_bash_subcommands('coop legacy fetch-history --room "$(rm -rf /tmp/x)"')
         self.assertIn("rm -rf /tmp/x", result)
 
     def test_backtick_substitution(self):
@@ -247,7 +247,7 @@ class TestExtractBashSubcommandsSubstitutions(unittest.TestCase):
         self.assertEqual(result, ["diff <(sort a) <(sort b)", "sort a", "sort b"])
 
     def test_substitution_inside_parameter_expansion(self):
-        result = extract_bash_subcommands("coop fetch-history --room ${X:-$(id)}")
+        result = extract_bash_subcommands("coop legacy fetch-history --room ${X:-$(id)}")
         self.assertIn("id", result)
 
     def test_substitution_in_variable_assignment_prefix(self):
@@ -299,15 +299,15 @@ class TestExtractBashSubcommandsSubstitutions(unittest.TestCase):
         )
 
     def test_owner_send_with_date_substitution_still_passes(self):
-        """The owner ``date`` rule covers the nested ``date``; ``coop send … $(date)`` stays approved."""
+        """The owner ``date`` rule covers the nested ``date``; ``coop legacy send … $(date)`` stays approved."""
         owner_rules = AgentConfig().effective_owner_allowed_tools()
-        params = extract_bash_subcommands('coop send --room r "now: $(date +%s)"')
-        self.assertEqual(params, ['coop send --room r "now: $(date +%s)"', "date +%s"])
+        params = extract_bash_subcommands('coop legacy send --room r "now: $(date +%s)"')
+        self.assertEqual(params, ['coop legacy send --room r "now: $(date +%s)"', "date +%s"])
         self.assertTrue(all_params_match_any(owner_rules, "Bash", params))
 
     def test_owner_send_with_non_date_substitution_is_not_auto_approved(self):
         owner_rules = AgentConfig().effective_owner_allowed_tools()
-        params = extract_bash_subcommands("coop send --room r $(cat /etc/passwd)")
+        params = extract_bash_subcommands("coop legacy send --room r $(cat /etc/passwd)")
         self.assertFalse(all_params_match_any(owner_rules, "Bash", params))
 
 
@@ -323,7 +323,7 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
     ``coop`` rules never do.
     """
 
-    FETCH = "coop fetch-history --room r"
+    FETCH = "coop legacy fetch-history --room r"
     GUEST = AgentConfig().effective_guest_allowed_tools()
 
     # Every placement bash expands but the parser does not structure. Adding a
@@ -332,9 +332,9 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
         "indented heredoc line (<<)": f"{FETCH} << EOF\n\t$(rm -rf /tmp/x)\nEOF",
         "indented heredoc line (<<-)": f"{FETCH} <<-EOF\n\t$(rm -rf /tmp/x)\nEOF",
         "indented second heredoc line": f"{FETCH} << EOF\nline1\n  $(rm -rf /tmp/x)\nEOF",
-        "backtick in ${x:-…}": "coop fetch-history --room ${x:-`rm -rf /tmp/x`}",
-        "backtick in quoted ${x:-…}": 'coop fetch-history --room "${x:-`rm -rf /tmp/x`}"',
-        "backtick in ${x#…} pattern": "coop fetch-history --room ${x#`rm -rf /tmp/x`}",
+        "backtick in ${x:-…}": "coop legacy fetch-history --room ${x:-`rm -rf /tmp/x`}",
+        "backtick in quoted ${x:-…}": 'coop legacy fetch-history --room "${x:-`rm -rf /tmp/x`}"',
+        "backtick in ${x#…} pattern": "coop legacy fetch-history --room ${x#`rm -rf /tmp/x`}",
         "backtick in unquoted heredoc body": f"{FETCH} << EOF\n`rm -rf /tmp/x`\nEOF",
         # Codex round 3: the leaf itself begins with allow-listed text.
         "heredoc line prefixed with an allowed command": f"{FETCH} << EOF\n{FETCH} `rm -rf /tmp/x`\nEOF",
@@ -362,8 +362,8 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
                 self.assertFalse(all_params_match_any(self.GUEST, "Bash", params), params)
 
     def test_backtick_in_expansion_returns_the_raw_text(self):
-        result = extract_bash_subcommands("coop fetch-history --room ${x:-`id`}")
-        self.assertEqual(result, ["coop fetch-history --room ${x:-`id`}", "`id`"])
+        result = extract_bash_subcommands("coop legacy fetch-history --room ${x:-`id`}")
+        self.assertEqual(result, ["coop legacy fetch-history --room ${x:-`id`}", "`id`"])
 
     def test_indented_heredoc_returns_from_the_opener(self):
         cmd = f"{self.FETCH} <<-EOF\n\t$(id)\nEOF"
@@ -391,15 +391,15 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
         "partly quoted heredoc delimiter": f'{FETCH} << E"OF"\n$(id)\nEOF',
         "backslash inside heredoc delimiter": f"{FETCH} << E\\OF\n$(id)\nEOF",
         "ansi-c quoted heredoc delimiter": f"{FETCH} << $'EOF'\n$(id)\nEOF",
-        "single-quoted word": "coop fetch-history --room '$(id)'",
-        "ansi-c string": "coop fetch-history --room $'$(id)'",
+        "single-quoted word": "coop legacy fetch-history --room '$(id)'",
+        "ansi-c string": "coop legacy fetch-history --room $'$(id)'",
         "arithmetic expansion": f"{FETCH} $((1+1))",
         "arithmetic expansion in heredoc": f"{FETCH} << EOF\ntotal $((1+2))\nEOF",
         # bash performs process substitution only as a bare word (which the
         # parser structures), never inside double quotes or a heredoc body.
         "process-substitution text in double quotes": f'{FETCH} "compare <(old)"',
         "process-substitution text in heredoc": f"{FETCH} << EOF\ncompare <(old) >(new)\nEOF",
-        "process-substitution text in ${{x:-…}}": "coop fetch-history --room ${x:-<(id)}",
+        "process-substitution text in ${{x:-…}}": "coop legacy fetch-history --room ${x:-<(id)}",
     }
 
     def test_never_expanded_places_stay_a_single_sub_command(self):
@@ -413,12 +413,12 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
         self.assertEqual(extract_bash_subcommands(f"{self.FETCH} # $(id)"), [self.FETCH])
 
     def test_escaped_markers_are_literal(self):
-        """``coop send … "use \\`ls\\`"`` is markdown, not a substitution — bash does not run it."""
+        """``coop legacy send … "use \\`ls\\`"`` is markdown, not a substitution — bash does not run it."""
         cases = {
-            "escaped backtick in double quotes": 'coop send --room r "use \\`ls\\` here"',
-            "escaped dollar-paren in double quotes": 'coop send --room r "costs \\$(5)"',
-            "escaped backtick in bare word": "coop send --room r use\\ \\`ls\\`",
-            "escaped backtick in unquoted heredoc": "coop send --room r --file - << EOF\nuse \\`ls\\` here\nEOF",
+            "escaped backtick in double quotes": 'coop legacy send --room r "use \\`ls\\` here"',
+            "escaped dollar-paren in double quotes": 'coop legacy send --room r "costs \\$(5)"',
+            "escaped backtick in bare word": "coop legacy send --room r use\\ \\`ls\\`",
+            "escaped backtick in unquoted heredoc": "coop legacy send --room r --file - << EOF\nuse \\`ls\\` here\nEOF",
         }
         owner = AgentConfig().effective_owner_allowed_tools()
         for label, cmd in cases.items():
@@ -433,7 +433,7 @@ class TestUnparsedSubstitutionsFailClosed(unittest.TestCase):
         The parser leaves a backtick in a heredoc body unparsed (only ``$(…)``
         gets a node there), so this is the raw-text path, not the AST path.
         """
-        cmd = "coop send --room r --file - << EOF\nuse `ls` here\nEOF"
+        cmd = "coop legacy send --room r --file - << EOF\nuse `ls` here\nEOF"
         self.assertEqual(extract_bash_subcommands(cmd), [cmd, "`ls` here\n"])
 
 
@@ -444,11 +444,11 @@ class TestRedirectTargets(unittest.TestCase):
     """A ``> file`` redirect is a consequence of its own and must match a rule.
 
     Before #173 the redirect was dropped from the returned strings, so
-    ``coop fetch-history --room r > ~/.ssh/authorized_keys`` matched the
+    ``coop legacy fetch-history --room r > ~/.ssh/authorized_keys`` matched the
     built-in guest rule and truncated the file under the gateway account.
     """
 
-    FETCH = "coop fetch-history --room r"
+    FETCH = "coop legacy fetch-history --room r"
     GUEST = AgentConfig().effective_guest_allowed_tools()
     OWNER = AgentConfig().effective_owner_allowed_tools()
 
@@ -593,8 +593,8 @@ class TestRedirectTargets(unittest.TestCase):
 
     def test_process_substitution_target_is_not_a_file(self):
         """`> >(cmd)` opens a pipe, not a path; the nested command is what must match."""
-        params = extract_bash_subcommands(f"{self.FETCH} > >(coop send --room r -)")
-        self.assertEqual(params, [self.FETCH, "coop send --room r -"])
+        params = extract_bash_subcommands(f"{self.FETCH} > >(coop legacy send --room r -)")
+        self.assertEqual(params, [self.FETCH, "coop legacy send --room r -"])
         self.assertTrue(all_params_match_any(self.OWNER, "Bash", params))
 
     def test_prefixed_process_substitution_is_a_path(self):
@@ -675,17 +675,17 @@ class TestRedirectTargets(unittest.TestCase):
         opposite: a nested `$(id)` next to it must still be collected, and
         `python3` alone must never approve a script body.
         """
-        cmd = 'coop send --room r - << E"OF"\nhello\nEOF'
+        cmd = 'coop legacy send --room r - << E"OF"\nhello\nEOF'
         params = extract_bash_subcommands(cmd)
         self.assertFalse(all_params_match_any(self.OWNER, "Bash", params), params)
         script = 'python3 << E"OF"\nimport os; os.remove("/important")\nEOF'
         self.assertFalse(all_params_match_any([ToolRule(tool="Bash", params="python3")], "Bash", extract_bash_subcommands(script)))
-        nested = 'coop fetch-history --room r $(id) << E"OF"\nhello\nEOF'
+        nested = 'coop legacy fetch-history --room r $(id) << E"OF"\nhello\nEOF'
         params = extract_bash_subcommands(nested)
         self.assertIn("id", params)
         self.assertFalse(all_params_match_any(self.GUEST, "Bash", params), params)
         # a redirect nested in the failed parse is still a redirect
-        self.assertIn("> out", extract_bash_subcommands('coop send --room r - << E"OF" > out\nhello\nEOF'))
+        self.assertIn("> out", extract_bash_subcommands('coop legacy send --room r - << E"OF" > out\nhello\nEOF'))
 
     def test_here_string_after_another_redirect_is_an_accepted_over_denial(self):
         """`2>/dev/null <<< hi` is valid bash the grammar fails on; it fails closed rather than being guessed at."""
@@ -721,7 +721,7 @@ class TestRedirectTargets(unittest.TestCase):
         self.assertFalse(all_params_match_any(self._preset(), "Bash", params))
 
     def test_owner_coop_send_with_stderr_to_dev_null_still_passes(self):
-        params = extract_bash_subcommands('coop send --room r "hi" 2>/dev/null')
+        params = extract_bash_subcommands('coop legacy send --room r "hi" 2>/dev/null')
         self.assertTrue(all_params_match_any(self.OWNER, "Bash", params))
 
 
@@ -819,7 +819,7 @@ class TestGetParamStringsForOpencode(unittest.TestCase):
 
     # ── bash: the gateway splits metadata["command"] itself (#175) ───────────
 
-    HEREDOC_GAP = "coop fetch-history --room r <<EOF\n\t$(rm -rf /tmp/x)\nEOF"
+    HEREDOC_GAP = "coop legacy fetch-history --room r <<EOF\n\t$(rm -rf /tmp/x)\nEOF"
 
     def test_bash_command_is_split_by_the_gateway_too(self):
         """The sidecar's grammar emits one pattern for an indented heredoc `$(…)`; ours adds the opener."""
@@ -839,7 +839,7 @@ class TestGetParamStringsForOpencode(unittest.TestCase):
         self.assertFalse(all_params_match_any(guest, "bash", with_cmd))  # closed
 
     def test_bash_gateway_split_is_a_union_without_duplicates(self):
-        cmd = 'coop send --room r "now: $(date +%s)"'
+        cmd = 'coop legacy send --room r "now: $(date +%s)"'
         result = get_param_strings_for_opencode([cmd, "date +%s"], "bash", {"command": cmd})
         self.assertEqual(result, [cmd, "date +%s"])
         owner = AgentConfig().effective_owner_allowed_tools()

@@ -260,7 +260,7 @@ class WatcherLifecycle:
           has no owner left: config.yaml cannot name it and no rule will
           recreate it. Pruned, with a log line each — per the clean-break
           migration ruling, and warned about ahead of time by
-          `coop config validate`'s orphan check. Both fields, not one (Codex
+          `coop legacy config validate`'s orphan check. Both fields, not one (Codex
           round 22): the static path never wrote a materialized config, so a
           record whose `rule_name` alone was hand-damaged still carries
           everything sticky recreation needs — one corrupted attribution
@@ -2258,8 +2258,8 @@ class WatcherLifecycle:
         if agent_name in self._blocked_agents:
             raise RuntimeError(
                 f"Watcher '{wc.name}' cannot start because agent '{agent_name}' is "
-                f"unavailable. 'coop status' has its start error; once that is fixed, "
-                f"'resume' or 'reset' retries the agent, and 'coop config reload' "
+                f"unavailable. 'coop legacy status' has its start error; once that is fixed, "
+                f"'resume' or 'reset' retries the agent, and 'coop legacy config reload' "
                 f"re-evaluates every agent."
             )
 

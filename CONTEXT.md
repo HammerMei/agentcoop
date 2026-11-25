@@ -15,7 +15,7 @@ The short, spoken form of AgentCoop. Also the CLI command (`coop`) and the envir
 _Avoid_: acg, coop-ai
 
 **gateway**:
-The AgentCoop daemon process — the thing `coop start` starts, that holds watcher records and talks to connectors. A component of AgentCoop, not a synonym for it. The Python package of the current daemon is `gateway`, frozen until cutover; the remote-agent daemon's package is `coop` (`docs/design/remote-agent-gateway.md` §5).
+The AgentCoop daemon process — the thing `coop legacy start` starts (the current daemon) or `coop start` starts (the remote-agent daemon), that holds watcher records and talks to connectors. A component of AgentCoop, not a synonym for it. The Python package of the current daemon is `gateway`, frozen until cutover and reached as `coop legacy …`; the remote-agent daemon's package is `coop`, and the `coop` binary is its (`docs/design/remote-agent-gateway.md` §5, §7).
 _Avoid_: the server, the service (in prose), "the coop" (for the process)
 
 **runtime directory**:

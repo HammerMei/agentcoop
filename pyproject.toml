@@ -39,7 +39,7 @@ Issues = "https://github.com/HammerMei/agentcoop/issues"
 Changelog = "https://github.com/HammerMei/agentcoop/releases"
 
 [project.scripts]
-coop = "gateway.cli:main"
+coop = "coop.entry:main"
 coop-provision = "gateway.admin.cli:main"
 gateway-tui = "gateway.tools.tui:main"
 # Not an alias: prints why the old name no longer works and exits 1 (#154).

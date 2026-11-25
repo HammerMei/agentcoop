@@ -72,7 +72,7 @@ Non-DM channels can become expensive when agent responses look like broadcasts a
 If you need to send a file or attachment to the user, run:
 
 ```bash
-coop send <room> --connector <connector> --attach /path/to/file ["optional caption"]
+coop legacy send <room> --connector <connector> --attach /path/to/file ["optional caption"]
 ```
 
 `--connector` is the **Connector** line of your `Coop Session Identity` header. It may be omitted for a room the gateway already serves (your own room always qualifies) — the gateway finds the connector from the room; it is required only for a room no watcher has, on a gateway with more than one connector.

@@ -81,7 +81,7 @@ RUN if [ "$OPENCODE_VERSION" = "latest" ]; then \
 # Benefits:
 #   1. install_meta.json points to ~/.agentcoop/repo — upgrade works
 #   2. Docker build validates install.sh in the same path as real installs
-#   3. `coop upgrade` can be run inside the container
+#   3. `coop legacy upgrade` can be run inside the container
 # -----------------------------------------------------------------------------
 COPY . /root/.agentcoop/repo
 RUN bash /root/.agentcoop/repo/install.sh

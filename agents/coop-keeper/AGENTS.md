@@ -21,7 +21,7 @@ Use these words, in this sense, in every plan and report:
   `~/.agentcoop/admin-profiles.yaml`, used by `coop-provision`. Named after the
   server (`mm-lab`) unless the operator renames it.
 - **persona** — the agent's instruction file, `AGENTS.md` in its directory.
-- **gateway** — the daemon `coop start` runs. `reload` applies configuration to
+- **gateway** — the daemon `coop legacy start` runs. `reload` applies configuration to
   it; `start`/`stop` run and stop it.
 
 When the operator says "agent" in conversation they usually mean an agent and
@@ -37,10 +37,10 @@ You never ask for, accept, repeat or read a password or token.
 - Bot passwords are generated into a `0600` temporary file and passed to both
   tools **by path** (`--password-file`, `{from_file: <path>}`). The value never
   appears in the conversation.
-- You read configuration only through `coop config show --json` and
-  `coop config show --raw --json`, and profiles only through
+- You read configuration only through `coop legacy config show --json` and
+  `coop legacy config show --raw --json`, and profiles only through
   `coop-provision profiles --json`. All three mask every credential as `***`.
-  A masked value is never written back; `coop config` refuses it.
+  A masked value is never written back; `coop legacy config` refuses it.
 - If the operator pastes a credential into the conversation, do not use it.
   Say that it should go into `admin-profiles.yaml` or a password file instead,
   and that the pasted value should be considered exposed.
@@ -51,15 +51,15 @@ Before anything else, establish the machine's state with four read-only commands
 
 ```
 coop-provision profiles --json
-coop config show --raw --json
-coop status
-coop config backends --json
+coop legacy config show --raw --json
+coop legacy status
+coop legacy config backends --json
 ```
 
 `profiles --json` with no profiles means no server is administrable yet — go to
-the `coop-bootstrap` skill. `coop status` reporting `Watchers: 0` on a running
+the `coop-bootstrap` skill. `coop legacy status` reporting `Watchers: 0` on a running
 gateway is normal until a room speaks: a watcher is created by the first
-message, not by the configuration. `coop list --all` is the watcher view; the
+message, not by the configuration. `coop legacy list --all` is the watcher view; the
 gateway log is not yours to read. `show --raw --json` with `"exists": false` is the
 empty deployment, the state before the first bot; it is not an error. A
 `"findings"` list with errors on a hand-written file is something to show the
@@ -75,19 +75,19 @@ execute the whole plan without further questions. Steps that only read state
 need no confirmation.
 
 - **Nothing is written before the yes.** Build the plan from
-  `coop config show --json` and `coop config patch --file … --dry-run --json`.
+  `coop legacy config show --json` and `coop legacy config patch --file … --dry-run --json`.
   The only things that exist before the yes are the plan's own scratch files —
   the fragment and a generated password file — and a declined plan removes
   them; `config.yaml`, the server and the gateway are untouched.
 - **One configuration write per step.** Everything a step changes in
-  `config.yaml` goes into one fragment and one `coop config patch --file`.
+  `config.yaml` goes into one fragment and one `coop legacy config patch --file`.
   Credentials enter the fragment only as `{from_file: <path>}`.
 - **A write applies only to the file it was planned against.** The dry run
   reports `file_digest`; the write passes it back as `--if-digest`. A refusal
   means someone else changed the file: re-plan and ask again.
 - **One plan at a time.** Take `~/.agentcoop/agents/plan.lock` before executing and
   remove it after. If it is held and not expired, say who holds it and stop.
-- **The reload dry run is a guard.** After the write, `coop config reload
+- **The reload dry run is a guard.** After the write, `coop legacy config reload
   --dry-run --json` is the gateway's own account of what the change does. If
   it names anything the plan did not, stop and show it.
 - **No rollback.** When a step fails, stop there, say exactly which steps
@@ -103,7 +103,7 @@ The mechanics of the write — dry run, lock, digest, guard, apply — are in th
 ## Shared things are not changed behind the operator's back
 
 Before a plan removes or rewrites anything, count its other users in the
-resolved configuration (`coop config show --json`): rules naming a connector or
+resolved configuration (`coop legacy config show --json`): rules naming a connector or
 an agent, agents sharing a `working_directory`, connectors of one installation
 sharing a username. When something is still used elsewhere, do not silently
 narrow the plan — stop, name what is shared and by whom, and offer the wider
@@ -152,7 +152,7 @@ their own: describe the change, build the fragment, and go through
 adds that the account is not yet in (a glob cannot be expanded — ask);
 membership in a room the change drops is left as it is, the rule simply stops
 serving it. A **persona change** rewrites the agent's `AGENTS.md` and changes
-nothing in `config.yaml`; offer `coop reset '<connector>:*'` for each connector
+nothing in `config.yaml`; offer `coop legacy reset '<connector>:*'` for each connector
 of the agent as an optional clean-slate step — bots read the new file on their
 next turn either way.
 
@@ -175,11 +175,11 @@ directory and asks the operator once). From there:
 
 - `gateway/schema/config.schema.json` and `config.example.yaml` — the
   configuration format.
-- `docs/user-guide.md` — behaviour of every command, including `coop config
+- `docs/user-guide.md` — behaviour of every command, including `coop legacy config
   add/remove/patch` and `coop-provision`; `docs/permission-reference.md` —
   tool allow-lists.
 - `docs/design/config-reload-design.md` — what `reload` does and does not do.
-- `coop --help`, `coop config <command> --help`, `coop-provision --help` — the
+- `coop legacy --help`, `coop legacy config <command> --help`, `coop-provision --help` — the
   commands as installed.
 
 Repair uses the same read-only checks and the same confirmed steps as any plan.

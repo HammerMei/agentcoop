@@ -110,7 +110,7 @@ jobs:
             > e2e-logs/acg-gateway.log 2>&1 || true
           # --all, because idle watchers are hidden by default and a plain
           # list can say "No watchers" for a room that has one.
-          docker exec acg-e2e coop list --all > e2e-logs/acg-list.txt 2>&1 || true
+          docker exec acg-e2e coop legacy list --all > e2e-logs/acg-list.txt 2>&1 || true
           # Keep a short tail inline too, so an obvious failure is readable
           # without downloading anything.
           echo "=== AgentCoop (last 50) ==="

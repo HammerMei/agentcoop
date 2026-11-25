@@ -270,7 +270,7 @@ class TestSendTextAndMedia(unittest.IsolatedAsyncioTestCase):
 
 class TestSendToRoom(unittest.IsolatedAsyncioTestCase):
     """Regression tests for a bug found post-review: send_to_room() (the
-    CLI `coop send <room> --attach ...` path, per
+    CLI `coop legacy send <room> --attach ...` path, per
     mm-gateway-context.md) discarded upload_file()'s returned file_ids and
     called post_message() without them — the uploaded file never got linked
     to any post and rendered as an invisible orphan in the channel."""

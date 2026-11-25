@@ -180,7 +180,7 @@ class TestGuestEnforcement(unittest.IsolatedAsyncioTestCase):
         """#175: opencode's own grammar emits one pattern for `$(…)` on an indented heredoc line.
 
         Matching the sidecar's patterns alone approves it under the built-in
-        `coop fetch-history` guest rule; the broker also splits
+        `coop legacy fetch-history` guest rule; the broker also splits
         ``metadata.command`` itself, which returns the substitution from its
         opener, and that string matches nothing.
         """
@@ -193,7 +193,7 @@ class TestGuestEnforcement(unittest.IsolatedAsyncioTestCase):
         broker._guest_allowed_tools = AgentConfig().effective_guest_allowed_tools()
         broker._reply_to_opencode = AsyncMock()
 
-        cmd = "coop fetch-history --room r <<EOF\n\t$(rm -rf /tmp/x)\nEOF"
+        cmd = "coop legacy fetch-history --room r <<EOF\n\t$(rm -rf /tmp/x)\nEOF"
         payload = {
             "type": "permission.asked",
             "properties": {
@@ -218,7 +218,7 @@ class TestGuestEnforcement(unittest.IsolatedAsyncioTestCase):
         broker._guest_allowed_tools = AgentConfig().effective_guest_allowed_tools()
         broker._reply_to_opencode = AsyncMock()
 
-        cmd = "coop fetch-history --room r --limit 5"
+        cmd = "coop legacy fetch-history --room r --limit 5"
         payload = {
             "type": "permission.asked",
             "properties": {
@@ -988,7 +988,7 @@ class TestHumanApprovalDisabled(unittest.IsolatedAsyncioTestCase):
             human_approval=False,
         )
         broker._owner_allowed_tools = AgentConfig().effective_owner_allowed_tools()
-        await self._run(broker, self._payload("per_3", "bash", "ses_o", ["coop send --room r hi"]))
+        await self._run(broker, self._payload("per_3", "bash", "ses_o", ["coop legacy send --room r hi"]))
         broker._reply_to_opencode.assert_called_once_with("per_3", approved=True)
 
     async def test_guest_policy_unchanged(self):

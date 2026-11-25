@@ -3027,9 +3027,9 @@ class TestBuildSafeOpencodeConfig(unittest.TestCase):
     def test_no_gateway_allow_patterns(self):
         """The gateway adds no bash allow patterns of its own — the ruleset is
         the catch-all plus whatever the user wrote. The old read-only set
-        (`git … *`, `coop send *`) would let a guest run `coop send` on the
+        (`git … *`, `coop legacy send *`) would let a guest run `coop legacy send` on the
         role-blind sidecar and any git command overwrite a file via
-        `--output=<path>` (#167 review). `coop send` is allowed by the broker's
+        `--output=<path>` (#167 review). `coop legacy send` is allowed by the broker's
         built-in owner rule instead."""
         existing = json.dumps({"permission": {"bash": {"my-custom *": "allow"}}})
         bash = json.loads(self.fn({"OPENCODE_CONFIG_CONTENT": existing}))["permission"]["bash"]

@@ -8,7 +8,7 @@ fails here instead of in a review or on an operator's machine.
 
 Design: docs/design/coop-keeper-design.md §3.1 (layout, pairing), §3.9
 (permissions derived from the skills), §3.11 (skills), and the manifest rule
-`coop upgrade` follows (`gateway/upgrade.py`, `_sync_keeper_dir`).
+`coop legacy upgrade` follows (`gateway/upgrade.py`, `_sync_keeper_dir`).
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _commands(text: str) -> list[tuple[str, bool]]:
     Fenced blocks not tagged as prose (yaml/text/json) are commands the keeper
     is told to run verbatim — strict. Inline code spans are strict when they
     carry a flag or four or more words; a two- or three-word span
-    (`coop status`, `coop-provision init`) is a mention and is only checked
+    (`coop legacy status`, `coop-provision init`) is a mention and is only checked
     against the allow rules.
     """
     out: list[tuple[str, bool]] = []
@@ -85,7 +85,8 @@ def _commands(text: str) -> list[tuple[str, bool]]:
             words = span.split()
             if not words or words[0] not in SHELL_PROGRAMS:
                 continue
-            strict = any(w.startswith("--") for w in words) or len(words) >= 4
+            # `legacy` is routing, not an argument: it does not make a mention a command
+            strict = any(w.startswith("--") for w in words) or len([w for w in words if w != "legacy"]) >= 4
             out.append((span.strip(), strict))
     return out
 
@@ -245,8 +246,11 @@ class TestSkillCommandsParse(unittest.TestCase):
         # `<placeholder>` stands for a value the keeper fills in; `…` likewise.
         argv = [re.sub(r"[<>]", "", a) for a in shlex.split(cmd)]
         if argv[0] == "coop":
+            # the old tree is reached as `coop legacy …` (coop/entry.py); a bare `coop <cmd>` is the new daemon's
+            self.assertEqual(argv[1], "legacy", f"`{cmd}`: the keeper runs the current gateway through `coop legacy`")
             from gateway.cli import _build_parser
             parse = _build_parser().parse_args
+            argv = argv[1:]
         elif argv[0] == "coop-provision":
             # `init`/`profiles` take the place of the profile word and are
             # routed before argparse; parse_argv is the entry main() uses.

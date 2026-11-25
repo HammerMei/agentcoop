@@ -46,7 +46,7 @@ JOBS_FILE = DATA_DIR / "jobs.json"
 #
 #   1 → 2  each job records the room it targets (`room_id`), so it survives a
 #          room rename and an `expire`. Filled in by
-#          `coop schedule migrate`.
+#          `coop legacy schedule migrate`.
 _SCHEMA_VERSION = 2
 
 
@@ -202,7 +202,7 @@ class JobStore:
             logger.warning(
                 "%s is at schema version %d; this AgentCoop uses %d. Scheduled jobs "
                 "keep working, with the behaviour of the older version. Run "
-                "'coop schedule migrate' to bring them up to date "
+                "'coop legacy schedule migrate' to bring them up to date "
                 "— do it before renaming any rooms, since the migration reads "
                 "each job's watcher name to find its room.",
                 self._file, self._file_version, _SCHEMA_VERSION,
@@ -217,7 +217,7 @@ class JobStore:
                 "%s declares schema version %d, but at least one scheduled job "
                 "has no recorded room. Such a job cannot bring its watcher back "
                 "once the room's record is reclaimed — it fails at every slot. "
-                "Run 'coop schedule migrate' to record the rooms; "
+                "Run 'coop legacy schedule migrate' to record the rooms; "
                 "it is safe to re-run.",
                 self._file, self._file_version,
             )

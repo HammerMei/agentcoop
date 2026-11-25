@@ -1,5 +1,5 @@
 """`gateway/config_edit.py`: the patch semantics and the plan-then-write path
-behind `coop config add/remove/patch` (coop-keeper design §3.10).
+behind `coop legacy config add/remove/patch` (coop-keeper design §3.10).
 
 The merge rules are pure and tested on plain dicts; `edit_document` is tested
 against a real file in a temp dir, because what it promises is about the file:

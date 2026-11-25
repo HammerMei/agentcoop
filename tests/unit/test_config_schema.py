@@ -179,7 +179,7 @@ class TestRuleShapedWatchersValidate:
 class TestEmptyDeploymentValidates:
     """The loaders accept a file with no connector, agent or rule (coop-keeper
     design §3.10); the schema must agree, or an editor would flag as invalid a
-    file `coop config validate` accepts."""
+    file `coop legacy config validate` accepts."""
 
     def test_an_empty_document_is_valid(self, validator):
         assert not list(validator.iter_errors({}))

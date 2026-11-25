@@ -574,7 +574,7 @@ class TestVerbRetriesUnavailableAgent(unittest.IsolatedAsyncioTestCase):
 
         msg = str(ctx.exception)
         self.assertIn("agent 'opencode' is unavailable", msg)
-        self.assertIn("coop status", msg)
+        self.assertIn("coop legacy status", msg)
         self.assertIn("config reload", msg)
         self.assertIn("opencode", lc._blocked_agents)
 

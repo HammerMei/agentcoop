@@ -2,12 +2,12 @@
   "agent": "claude",
   "permissions": {
     "allow": [
-      "Bash(coop config *)",
-      "Bash(coop status)",
-      "Bash(coop start)",
-      "Bash(coop stop)",
-      "Bash(coop reset *)",
-      "Bash(coop list *)",
+      "Bash(coop legacy config *)",
+      "Bash(coop legacy status)",
+      "Bash(coop legacy start)",
+      "Bash(coop legacy stop)",
+      "Bash(coop legacy reset *)",
+      "Bash(coop legacy list *)",
       "Bash(coop-provision *)",
       "Bash(mkdir *)",
       "Bash(mktemp)",
