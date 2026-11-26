@@ -33,8 +33,17 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .config import Config, ConfigError, RoomRule, Server
-from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo, handle_for
+from .config import Bot, Config, ConfigError, RoomRule, Server
+from .connectors.base import (
+    Connector,
+    Credential,
+    Event,
+    Membership,
+    OnEvent,
+    Posted,
+    RoomInfo,
+    handle_for,
+)
 from .connectors.roomlog import RoomLog
 from .doorbell.api import build_app
 from .doorbell.tls import server_context
@@ -58,11 +67,19 @@ ClassifierFactory = Callable[[Config, str], Classifier | None]
 MAX_BACKFILL_PAGES = 40
 
 
-def read_token(path: Path) -> str:
-    token = path.read_text(encoding="utf-8").strip()
-    if not token:
-        raise ConfigError(f"{path}: the token file is empty")
-    return token
+def read_secret(path: Path) -> str:
+    """A token or a password: the file's text, stripped."""
+    secret = path.read_text(encoding="utf-8").strip()
+    if not secret:
+        raise ConfigError(f"{path}: the file is empty")
+    return secret
+
+
+def credential_of(bot: Bot) -> Credential:
+    if bot.token_file is not None:
+        return Credential(token=read_secret(bot.token_file))
+    assert bot.password_file is not None  # ``hosted``: one of the two
+    return Credential(password=read_secret(bot.password_file))
 
 
 def default_classifier(config: Config, room: str) -> Classifier:
@@ -133,6 +150,8 @@ class Service:
             connector.transfer_timeout = self.config.gateway.attachments.transfer_timeout_seconds
             self.connectors[server.name] = connector
             self._connected[server.name] = {}
+            if not server.verify_tls:
+                self._note(f"[WARNING] {server.name}: TLS certificate verification is off (verify_tls: false)")
             await connector.start()
             for bot in server.bots.values():
                 if bot.hosted:
@@ -174,7 +193,7 @@ class Service:
     def _set_tokens(self, config: Config) -> None:
         fresh: dict[str, str] = {}
         for name, agent in config.agents.items():
-            token = read_token(agent.token_file)
+            token = read_secret(agent.token_file)
             if token in fresh:
                 raise ConfigError(f"agents.{name} and agents.{fresh[token]} hold the same token; "
                                   "one agent's client would act as the other")
@@ -185,7 +204,7 @@ class Service:
     async def _connect_bot(self, server: Server, agent: str) -> bool:
         bot = server.bots[agent]
         try:
-            rooms = await self.connectors[server.name].add_bot(bot.username, read_token(bot.token_file))
+            rooms = await self.connectors[server.name].add_bot(bot.username, credential_of(bot))
         except Exception as exc:  # noqa: BLE001 - one bot's failure degrades, never stops, the daemon
             self._note(f"[ERROR] {server.name}: bot {agent!r} not connected: {exc}")
             logger.exception("%s: bot %r not connected", server.name, agent)
@@ -497,7 +516,7 @@ class Service:
                 notes.append(f"{server.name}: bot {agent!r} connected")
         for agent in sorted(hosted_now & set(self._connected[server.name])):
             was, now = before.bots.get(agent), server.bots[agent]
-            if was is not None and was.token_file != now.token_file:
+            if was is not None and (was.token_file, was.password_file) != (now.token_file, now.password_file):
                 # the connection keeps the credentials it was opened with: said, not silently kept
                 self._note(f"[WARNING] {server.name}: bot {agent!r} has new credentials in the configuration; "
                            "the connection keeps the old ones until a restart")

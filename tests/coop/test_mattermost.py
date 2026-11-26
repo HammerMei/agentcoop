@@ -8,16 +8,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import ssl
 from pathlib import Path
 
 import httpx
 import pytest
+import websockets
 import yaml
+from aiohttp import web
 
 from coop.config import parse
-from coop.connectors.base import Membership, Posted
-from coop.connectors.mattermost.connector import MattermostConnector
+from coop.connectors.base import Credential, Membership, Posted
+from coop.connectors.mattermost.connector import MattermostConnector, insecure_context
 from coop.connectors.mattermost.normalize import normalize
+from coop.connectors.mattermost.rest import MattermostREST
+from coop.connectors.mattermost.websocket import MattermostWebSocket
+from coop.doorbell.tls import server_context
 from coop.room.attachments import AttachmentRefused
 from coop.room.model import Upload
 from coop.room.platform import PlatformError, RefusedAttachment, RefusedPost
@@ -49,6 +56,9 @@ class FakeMattermost:
     def __init__(self) -> None:
         self.users: dict[str, dict] = {}
         self.tokens: dict[str, str] = {}  # token -> user id
+        self.passwords: dict[str, str] = {}  # username -> password, for ``POST /users/login``
+        self.sessions: list[str] = []  # the session tokens logins handed out
+        self.logins = 0
         self.channels: dict[str, dict] = {}
         self.members: dict[str, list[str]] = {}
         self.posts: dict[str, list[dict]] = {}
@@ -98,14 +108,29 @@ class FakeMattermost:
                 await sock.feed({"event": "posted", "data": {"post": json.dumps(post), "channel_type": "O"},
                                  "broadcast": {"channel_id": post["channel_id"]}})
 
+    def expire_sessions(self) -> None:
+        """Every session token stops working: the next call with one answers 401."""
+        for token in self.sessions:
+            self.tokens.pop(token, None)
+        self.sessions.clear()
+
     # the transport
-    async def handle(self, request: httpx.Request) -> httpx.Response:
+    def _canned(self) -> httpx.Response | None:
+        """The whole server's state: unreachable, gone, or a proxy's page in the way."""
         if self.failure is not None:
             raise self.failure
         if self.not_found:
             return httpx.Response(404, json={"message": "nothing here"})
         if self.html:
             return httpx.Response(200, text="<html>sign in</html>")
+        return None
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        canned = self._canned()
+        if canned is not None:
+            return canned
+        if request.url.path == "/api/v4/users/login" and request.method == "POST":
+            return self._login(request)
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         me = self.tokens.get(token)
         if me is None:
@@ -123,6 +148,18 @@ class FakeMattermost:
         if parts[0] == "files" and len(parts) == 2:
             return httpx.Response(200, content=self.files[parts[1]])
         return httpx.Response(404, json={"message": f"no route {path}"})
+
+    def _login(self, request: httpx.Request) -> httpx.Response:
+        """The session token comes back in the ``Token`` header, as Mattermost's does."""
+        body = json.loads(request.content)
+        uid = next((u for u, d in self.users.items() if d["username"] == body.get("login_id")), None)
+        if uid is None or self.passwords.get(body["login_id"]) != body.get("password"):
+            return httpx.Response(401, json={"message": "Enter a valid email or username and/or password."})
+        self.logins += 1
+        token = f"sess-{self.logins}"
+        self.tokens[token] = uid
+        self.sessions.append(token)
+        return httpx.Response(200, headers={"Token": token}, json=self.users[uid])
 
     def _create_post(self, request: httpx.Request, me: str) -> httpx.Response:
         if self.refuse_posts:
@@ -200,8 +237,9 @@ class FakeSocket:
         self.typed: list[tuple[str, str | None]] = []
         self.stopped = False
 
-    def __call__(self, url, token, on_frame, on_reconnect=None):
-        self.user_id = self._server.tokens[token]
+    def __call__(self, url, token, on_frame, on_reconnect=None, tls=None):
+        self.token, self.tls = token, tls  # ``token`` is the provider the connector hands over
+        self.user_id = self._server.tokens[token()]
         self.on_frame, self.on_reconnect = on_frame, on_reconnect
         self._server.sockets.append(self)
         return self
@@ -243,7 +281,7 @@ async def connected(mm):
 
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle),
                                     websocket=FakeSocket(mm))
-    rooms = await connector.add_bot("laomei_bot", "tok-laomei")
+    rooms = await connector.add_bot("laomei_bot", Credential(token="tok-laomei"))
     connector.watch("c01", ROSTER)
     await connector.members("c01")
     yield connector, mm, seen, rooms
@@ -310,9 +348,9 @@ async def test_add_bot_lists_the_teams_rooms_and_dms_with_the_counterparts_name(
     connector, mm, seen, rooms = connected
     assert [(r.id, r.name, r.kind) for r in rooms] == [("c01", "team", "channel"), ("c03", "glin", "dm")]
     with pytest.raises(ValueError, match="not 'wavebro_bot'"):
-        await connector.add_bot("wavebro_bot", "tok-laomei")
+        await connector.add_bot("wavebro_bot", Credential(token="tok-laomei"))
     with pytest.raises(httpx.HTTPStatusError):
-        await connector.add_bot("wavebro_bot", "tok-nope")
+        await connector.add_bot("wavebro_bot", Credential(token="tok-nope"))
 
 
 async def test_a_posted_frame_becomes_a_normalised_post_delivered_as_written(connected):
@@ -391,7 +429,7 @@ async def test_a_new_direct_channel_is_the_bots_own_join_described_from_that_bot
     DM is named for the counterpart, not read through the first bot and named for the
     joining bot. The join is ``created``: the room was made around the bot."""
     connector, mm, seen, _ = connected
-    await connector.add_bot("wavebro_bot", "tok-wavebro")
+    await connector.add_bot("wavebro_bot", Credential(token="tok-wavebro"))
     glin, wavebro = mm.ids["glin"], mm.ids["wavebro"]
     dm = mm.channel(f"{wavebro}__{glin}", kind="D", members=[glin, wavebro])  # the joining bot's id first
     await mm.sockets[1].feed({"event": "direct_added", "data": {"creator_id": glin, "teammate_id": wavebro},
@@ -522,10 +560,131 @@ async def test_a_group_message_is_a_room_not_a_one_to_one_dm(mm):
     async def on_event(event):
         seen.append(event)
     connector = MattermostConnector(SERVER, on_event, transport=httpx.MockTransport(mm.handle), websocket=FakeSocket(mm))
-    rooms = await connector.add_bot("laomei_bot", "tok-laomei")
+    rooms = await connector.add_bot("laomei_bot", Credential(token="tok-laomei"))
     group = next(r for r in rooms if r.name == "glin, laomei_bot, wavebro_bot")
     assert group.kind == "group" and not group.is_dm and next(r for r in rooms if r.id == "c03").is_dm
     mm.failure = httpx.ConnectError("down")
     with pytest.raises(PlatformError):
         await connector.members("c01")
     await connector.stop()
+
+
+# ── credentials and TLS ─────────────────────────────────────────────────────
+
+
+def _connector(mm: FakeMattermost, server=SERVER) -> tuple[MattermostConnector, FakeSocket]:
+    async def on_event(event):
+        pass
+
+    socket = FakeSocket(mm)
+    return MattermostConnector(server, on_event, transport=httpx.MockTransport(mm.handle), websocket=socket), socket
+
+
+async def test_a_password_logs_in_and_the_socket_authenticates_with_the_session_token(mm):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, socket = _connector(mm)
+    rooms = await connector.add_bot("laomei_bot", Credential(password="hunter2"))
+    assert {r.name for r in rooms} == {"team", "glin"}  # the channel and the DM, as with a token
+    assert mm.logins == 1 and socket.token() == "sess-1"
+    await connector.stop()
+
+
+async def test_a_wrong_password_fails_the_bot_at_add_bot(mm):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, _ = _connector(mm)
+    with pytest.raises(httpx.HTTPStatusError, match="401"):
+        await connector.add_bot("laomei_bot", Credential(password="nope"))
+    assert mm.logins == 0 and connector._bots == {}
+
+
+async def test_an_expired_session_is_renewed_once_and_the_call_made_again(mm, caplog):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, socket = _connector(mm)
+    await connector.add_bot("laomei_bot", Credential(password="hunter2"))
+    connector.watch("c01", ROSTER)
+    mm.expire_sessions()
+    with caplog.at_level(logging.WARNING, logger="coop.connectors.mattermost.rest"):
+        members = await connector.members("c01")
+    assert {m.username for m in members} >= {"glin", "laomei_bot"}
+    assert mm.logins == 2 and socket.token() == "sess-2"  # the socket's next connect uses the new one
+    assert any("logging in again" in r.getMessage() for r in caplog.records)
+    await connector.stop()
+
+
+async def test_a_refused_bearer_token_is_not_retried(mm):
+    connector, _ = _connector(mm)
+    await connector.add_bot("laomei_bot", Credential(token="tok-laomei"))
+    connector.watch("c01", ROSTER)
+    del mm.tokens["tok-laomei"]  # revoked
+    with pytest.raises(Exception, match="401"):
+        await connector.members("c01")
+    assert mm.logins == 0
+    await connector.stop()
+
+
+def test_the_socket_gets_an_unverifying_context_only_for_an_unverified_https_server(mm):
+    text = yaml.safe_dump({"servers": {"lab": {"type": "mattermost", "url": "https://mm.example", "team": "lab",
+                                                "bots": {"laomei": {"username": "laomei_bot", "token_file": "a.tok"}},
+                                                "verify_tls": False}},
+                           "agents": {"laomei": {"type": "remote", "token_file": "a.agent"}}})
+    unverified = parse(yaml.safe_load(text), Path("/srv")).servers["lab"]
+    plain = parse(yaml.safe_load(text.replace("https://", "http://")), Path("/srv")).servers["lab"]
+
+    async def connect(server):
+        connector, socket = _connector(mm, server)
+        await connector.add_bot("laomei_bot", Credential(token="tok-laomei"))
+        await connector.stop()
+        return socket.tls
+
+    assert asyncio.run(connect(SERVER)) is None
+    context = asyncio.run(connect(unverified))
+    assert isinstance(context, ssl.SSLContext) and context.verify_mode == ssl.CERT_NONE and not context.check_hostname
+    assert asyncio.run(connect(plain)) is None  # an ``ssl`` argument is an error for ``ws://``
+
+
+@pytest.fixture
+async def https_mattermost(cert):
+    """A real TLS listener with the self-signed certificate, answering ``/users/me``."""
+    async def me(request):
+        return web.json_response({"id": "u1", "username": "laomei_bot"})
+
+    app = web.Application()
+    app.router.add_get("/api/v4/users/me", me)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=server_context(*cert))
+    await site.start()
+    host, port = runner.addresses[0][:2]
+    yield f"https://{host}:{port}"
+    await runner.cleanup()
+
+
+async def test_the_rest_client_refuses_a_self_signed_certificate_unless_told_not_to_verify(https_mattermost):
+    verifying = MattermostREST(https_mattermost, "laomei_bot", Credential(token="t"))
+    with pytest.raises(httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED|certificate verify failed"):
+        await verifying.me()
+    await verifying.close()
+    unverifying = MattermostREST(https_mattermost, "laomei_bot", Credential(token="t"), verify=False)
+    assert (await unverifying.me())["username"] == "laomei_bot"
+    await unverifying.close()
+
+
+async def test_the_websocket_refuses_a_self_signed_certificate_unless_given_the_unverifying_context(cert):
+    challenges: list[dict] = []
+
+    async def handler(connection):
+        challenges.append(json.loads(await connection.recv()))
+        await asyncio.sleep(5)
+
+    async def nothing(frame):
+        pass
+
+    async with websockets.serve(handler, "127.0.0.1", 0, ssl=server_context(*cert)) as server:
+        url = f"https://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        verifying = MattermostWebSocket(url, lambda: "t", nothing)
+        with pytest.raises(ssl.SSLCertVerificationError):
+            await verifying.start()
+        unverifying = MattermostWebSocket(url, lambda: "t", nothing, tls=insecure_context())
+        await unverifying.start()
+        await unverifying.stop()
+    assert challenges == [{"seq": 1, "action": "authentication_challenge", "data": {"token": "t"}}]

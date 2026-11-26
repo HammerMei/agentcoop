@@ -27,6 +27,16 @@ from ..room.roster import Roster
 
 RoomKind = Literal["channel", "dm", "group"]
 
+
+@dataclass(frozen=True)
+class Credential:
+    """How a bot account authenticates: a bearer ``token`` (a bot access token or a
+    personal access token), or the account's ``password`` for the platform's login
+    call. One of the two is set."""
+
+    token: str = ""
+    password: str = ""
+
 # the length of a group message's handle digest; the legacy gateway's choice, kept so a
 # room's handle reads the same under both
 _DIGEST_DIGITS = 16
@@ -132,9 +142,9 @@ class Connector(Protocol):
         before any bot the new configuration adds is connected."""
         ...
 
-    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
-        """Connect the bot account ``username`` with ``token`` and return the rooms it
-        is a member of. Opening a connection at runtime is the same call as at start.
+    async def add_bot(self, username: str, credential: Credential) -> list[RoomInfo]:
+        """Connect the bot account ``username`` with ``credential`` and return the rooms
+        it is a member of. Opening a connection at runtime is the same call as at start.
         A connector knows bots by their usernames; the agent an account belongs to is
         the gateway's binding (design §2)."""
         ...

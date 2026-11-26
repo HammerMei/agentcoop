@@ -1,29 +1,86 @@
-"""The Mattermost v4 REST calls the connector makes, as one bot account: a bearer
-token (a bot access token or a personal access token), no login call. Lifted from the
-frozen gateway's client and cut to what the room core needs. Errors are httpx's.
+"""The Mattermost v4 REST calls the connector makes, as one bot account. Lifted from
+the frozen gateway's client and cut to what the room core needs. Errors are httpx's.
+
+Auth is the credential's. A bearer token (a bot access token or a personal access
+token) is used as it is: no login call. A password is exchanged for a session token
+by ``POST /users/login`` (the token comes back in the ``Token`` response header, a
+Mattermost quirk) before the first call, and again when a call answers 401, since a
+session expires; that call is then made once more. A file call (:meth:`upload`,
+:meth:`stream_file`) is not retried: it fails once in that window, and the next JSON
+call logs in. ``verify=False`` skips the certificate check (``verify_tls`` in the
+configuration), for a lab's self-signed certificate.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
+from ..base import Credential
+
+logger = logging.getLogger(__name__)
+
 
 class MattermostREST:
-    def __init__(self, url: str, token: str, timeout: float = 30.0,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(self, url: str, username: str, credential: Credential, timeout: float = 30.0,
+                 transport: httpx.AsyncBaseTransport | None = None, verify: bool = True) -> None:
         self.url = url.rstrip("/")
-        self._client = httpx.AsyncClient(base_url=f"{self.url}/api/v4", timeout=timeout,
-                                         headers={"Authorization": f"Bearer {token}"}, transport=transport)
+        self.username = username
+        self._credential = credential
+        self._client = httpx.AsyncClient(base_url=f"{self.url}/api/v4", timeout=timeout, transport=transport,
+                                         verify=verify)
+        self._token = ""
+        if credential.token:
+            self._use(credential.token)
+        self._login_lock = asyncio.Lock()
         self._users: dict[str, dict] = {}  # by id
 
     async def close(self) -> None:
         await self._client.aclose()
 
+    # ── auth ────────────────────────────────────────────────────────────────
+
+    @property
+    def token(self) -> str:
+        """The bearer token in use: the configured one, or the session's after a login.
+        The websocket reads it at every (re)connect."""
+        return self._token
+
+    def _use(self, token: str) -> None:
+        self._token = token
+        self._client.headers["Authorization"] = f"Bearer {token}"
+
+    async def login(self) -> None:
+        """``POST /users/login`` with the password; the session token in the ``Token``
+        header becomes the bearer."""
+        r = await self._client.post("/users/login", json={"login_id": self.username,
+                                                          "password": self._credential.password})
+        r.raise_for_status()
+        token = r.headers.get("Token", "")
+        if not token:
+            raise httpx.DecodingError("POST /users/login: no Token header in the answer", request=r.request)
+        self._use(token)
+
+    async def _login_unless_replaced(self, sent: str) -> None:
+        """A login, unless another call already replaced the token ``sent`` was made with."""
+        async with self._login_lock:
+            if self._token == sent:
+                if sent:
+                    logger.warning("%s: the session token was refused; logging in again", self.username)
+                await self.login()
+
     async def _json(self, method: str, path: str, **kw) -> Any:
+        if self._credential.password and not self._token:
+            await self._login_unless_replaced("")
+        sent = self._token
         r = await self._client.request(method, path, **kw)
+        if r.status_code == 401 and self._credential.password:
+            await self._login_unless_replaced(sent)
+            r = await self._client.request(method, path, **kw)
         r.raise_for_status()
         try:
             return r.json() if r.content else {}

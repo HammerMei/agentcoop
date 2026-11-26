@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is the same command.
 
 ### Added
+- **`servers.<name>.verify_tls: false`** skips the chat server's certificate check
+  (a lab's self-signed certificate), for the REST calls and the websocket alike;
+  `coop start` and `coop status` say it is off.
+- **`servers.<name>.bots.<agent>.password_file`**, in place of `token_file`: the
+  Mattermost connector logs the account in and renews the session token when a call
+  is refused. `coop config add agent --bot-password-file` writes it.
+- **Trace events in `coop.log`**: every event of the room core (`turn_start`,
+  `rule`, `refused`, `slow_post`, `done_stale`, …) is one `coop.trace` line, so
+  measure mode's outcomes are readable from the log; `sweep` is at DEBUG.
 - **coop-keeper**, the built-in admin agent (`agents/coop-keeper/`, installed
   to `~/.agentcoop/agents/builtin/coop-keeper/`). Run it from that directory
   with your own `opencode` or `claude` CLI to create, change and remove bots in

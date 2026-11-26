@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
@@ -21,7 +22,7 @@ from ...config import Server
 from ...room.model import Position, Post, Upload
 from ...room.platform import PlatformError, RefusedAttachment, RefusedPost
 from ...room.roster import Roster
-from ..base import MemberInfo, Membership, OnEvent, Posted, RoomInfo
+from ..base import Credential, MemberInfo, Membership, OnEvent, Posted, RoomInfo
 from .normalize import display_name, normalize
 from .rest import MattermostREST
 from .websocket import MattermostWebSocket
@@ -36,6 +37,15 @@ class _Bot:
     ws: MattermostWebSocket | None = None
     user_id: str = ""
     rooms: set[str] = field(default_factory=set)  # channel ids the account is a member of
+
+
+def insecure_context() -> ssl.SSLContext:
+    """``verify_tls: false``: a TLS context that checks neither the certificate nor the
+    hostname, for a lab's self-signed one."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 class MattermostConnector:
@@ -68,8 +78,9 @@ class MattermostConnector:
 
     # ── bots ────────────────────────────────────────────────────────────────
 
-    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
-        rest = MattermostREST(self.server.url, token, transport=self._transport)
+    async def add_bot(self, username: str, credential: Credential) -> list[RoomInfo]:
+        verify = self.server.verify_tls
+        rest = MattermostREST(self.server.url, username, credential, transport=self._transport, verify=verify)
         bot = _Bot(username, rest)
         try:
             me = await rest.me()
@@ -81,7 +92,10 @@ class MattermostConnector:
             bot.rooms = {c["id"] for c in listed if c.get("id")}
             channels = [c for c in listed if c.get("type") in ("D", "G") or c.get("team_id") == team_id]
             rooms = [await self._room_info(rest, c, bot.user_id) for c in channels]
-            bot.ws = self._websocket(self.server.url, token, self._frame_handler(bot), self._resync_handler(bot))
+            # the token is read at each (re)connect: a session token a login replaced is picked up
+            context = insecure_context() if self.server.url.startswith("https") and not verify else None
+            bot.ws = self._websocket(self.server.url, lambda: rest.token, self._frame_handler(bot),
+                                     self._resync_handler(bot), tls=context)
             await bot.ws.start()
         except Exception:
             await rest.close()

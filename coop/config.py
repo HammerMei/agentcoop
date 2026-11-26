@@ -2,9 +2,12 @@
 
 Four sections. ``servers`` are the chat servers and, under each, the ``bots``: the
 accounts the gateway posts as, keyed by agent name, each with its own ``owners``
-(the server's ``owners`` by default). A bot without a ``token_file`` is roster
-only (another gateway's, or nobody's, §3.1): the gateway knows it is a bot and
-never speaks for it. ``agents`` are the remote agents, each with the bearer token
+(the server's ``owners`` by default). A bot's ``token_file`` holds a bearer token;
+``password_file`` the account's password instead, for a server that gives out no
+tokens (the connector logs in with it). A bot with neither is roster only (another
+gateway's, or nobody's, §3.1): the gateway knows it is a bot and never speaks for
+it. A server's ``verify_tls: false`` turns certificate checking off for a lab's
+self-signed certificate; the daemon says so at start. ``agents`` are the remote agents, each with the bearer token
 the doorbell authenticates. ``rooms`` are patterns over the room's handle
 (:func:`~coop.connectors.base.handle_for`: ``<server>:<channel>``, ``<server>:dm:<bot
 username>:<person>``, ``<server>:gdm:<digest>``), first match wins, each naming the
@@ -22,9 +25,10 @@ servers:
     team: lab
     owners: [glin]
     guests: [pat]
+    verify_tls: false                                     # a self-signed certificate
     bots:
       laomei:  {username: laomei_bot, token_file: servers/lab-mm/laomei.token}
-      wavebro: {username: wavebro_bot, token_file: servers/lab-mm/wavebro.token, owners: [wave]}
+      wavebro: {username: wavebro_bot, password_file: servers/lab-mm/wavebro.password, owners: [wave]}
       muse:    {username: muse_bot}                      # roster only
 agents:
   laomei:  {type: remote, token_file: agents/laomei/token}
@@ -80,16 +84,19 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Bot:
-    """One agent's account on one server. ``token_file`` ``None`` is a roster-only bot."""
+    """One agent's account on one server. ``token_file`` holds a bearer token (a bot
+    access token or a personal access token), ``password_file`` the account's password
+    for the platform's login call; one of the two, or neither for a roster-only bot."""
 
     agent: str
     username: str
     token_file: Path | None
     owners: frozenset[str]
+    password_file: Path | None = None
 
     @property
     def hosted(self) -> bool:
-        return self.token_file is not None
+        return self.token_file is not None or self.password_file is not None
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,7 @@ class Server:
     owners: frozenset[str]
     guests: frozenset[str]
     bots: dict[str, Bot]  # by agent name
+    verify_tls: bool = True  # ``False``: the server's certificate is not checked (a lab's self-signed one)
 
     def bot_by_username(self, username: str) -> Bot | None:
         for bot in self.bots.values():
@@ -201,7 +209,7 @@ def parse(raw: dict, base: Path = RUNTIME_DIR) -> Config:
 def _server(name: str, entry: Any, base: Path) -> Server:
     where = f"servers.{name}"
     entry = _is_mapping(entry, where)
-    _only_keys(entry, ("type", "url", "team", "owners", "guests", "bots"), where)
+    _only_keys(entry, ("type", "url", "team", "owners", "guests", "bots", "verify_tls"), where)
     kind = _string(entry, "type", where)
     if kind not in SERVER_TYPES:
         raise ConfigError(f"{where}.type: {kind!r} is not one of {SERVER_TYPES}")
@@ -216,18 +224,26 @@ def _server(name: str, entry: Any, base: Path) -> Server:
         if bot.username in seen:
             raise ConfigError(f"{where}.bots: {seen[bot.username]!r} and {bot.agent!r} share username {bot.username!r}")
         seen[bot.username] = bot.agent
+    verify = entry.get("verify_tls", True)
+    if not isinstance(verify, bool):
+        raise ConfigError(f"{where}.verify_tls: {verify!r} is not a boolean")
     return Server(name, kind, _string(entry, "url", where), team, owners,
-                  _names(entry.get("guests", []), f"{where}.guests"), bots)
+                  _names(entry.get("guests", []), f"{where}.guests"), bots, verify)
 
 
 def _bot(agent: str, entry: Any, default_owners: frozenset[str], base: Path, where: str) -> Bot:
     entry = _is_mapping(entry, where)
-    _only_keys(entry, ("username", "token_file", "owners"), where)
-    token = entry.get("token_file")
-    if token is not None and not isinstance(token, str):
-        raise ConfigError(f"{where}.token_file: not a string")
+    _only_keys(entry, ("username", "token_file", "password_file", "owners"), where)
+    files: dict[str, Path | None] = {}
+    for key in ("token_file", "password_file"):
+        value = entry.get(key)
+        if value is not None and not isinstance(value, str):
+            raise ConfigError(f"{where}.{key}: not a string")
+        files[key] = None if value is None else _path(value, base)
+    if files["token_file"] is not None and files["password_file"] is not None:
+        raise ConfigError(f"{where}: token_file or password_file, not both")
     owners = _names(entry["owners"], f"{where}.owners") if "owners" in entry else default_owners
-    return Bot(agent, _string(entry, "username", where), None if token is None else _path(token, base), owners)
+    return Bot(agent, _string(entry, "username", where), files["token_file"], owners, files["password_file"])
 
 
 def _agent(name: str, entry: Any, base: Path) -> Agent:
@@ -339,11 +355,11 @@ def _cross_check(config: Config) -> None:
     for server in config.servers.values():
         for bot in server.bots.values():
             if bot.hosted and bot.agent not in config.agents:
-                raise ConfigError(f"servers.{server.name}.bots.{bot.agent}: has a token_file but no agents.{bot.agent} "
+                raise ConfigError(f"servers.{server.name}.bots.{bot.agent}: has credentials but no agents.{bot.agent} "
                                   "entry; a bot the gateway posts as belongs to an agent it wakes")
             if not bot.hosted and bot.agent in config.agents:
-                raise ConfigError(f"servers.{server.name}.bots.{bot.agent}: no token_file, yet agents.{bot.agent} exists; "
-                                  "the gateway cannot post as a bot it has no token for")
+                raise ConfigError(f"servers.{server.name}.bots.{bot.agent}: no token_file or password_file, yet "
+                                  f"agents.{bot.agent} exists; the gateway cannot post as a bot it cannot log in as")
     known = set(config.agents) | {a for s in config.servers.values() for a in s.bots}
     for rule in config.rooms:
         unknown = [a for a in rule.agents if a not in known]

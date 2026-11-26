@@ -36,6 +36,7 @@ Kinds and their fields:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,22 +57,33 @@ class TraceEvent:
     def matches(self, **wanted: Any) -> bool:
         return all(self.fields.get(k) == v for k, v in wanted.items())
 
-    def __str__(self) -> str:
+    def describe(self) -> str:
+        """The kind and the fields, without the time: a log line's text."""
         inner = " ".join(f"{k}={v!r}" for k, v in self.fields.items())
-        return f"[{self.time:8.1f}] {self.kind} {inner}"
+        return f"{self.kind} {inner}"
+
+    def __str__(self) -> str:
+        return f"[{self.time:8.1f}] {self.describe()}"
 
 
 class Trace:
-    """An append-only list of events with the queries the tests use."""
+    """An append-only list of events with the queries the tests use. ``sink`` sees
+    every event as it is added; ``keep=False`` stores none, for the daemon, which
+    logs them and runs for months."""
 
-    def __init__(self) -> None:
+    def __init__(self, sink: Callable[[TraceEvent], None] | None = None, keep: bool = True) -> None:
         self.events: list[TraceEvent] = []
         self._next = 0
+        self._sink = sink
+        self._keep = keep
 
     def add(self, time: float, kind: str, **fields: Any) -> TraceEvent:
         event = TraceEvent(time, self._next, kind, fields)
         self._next += 1
-        self.events.append(event)
+        if self._keep:
+            self.events.append(event)
+        if self._sink is not None:
+            self._sink(event)
         return event
 
     def of(self, kind: str, **wanted: Any) -> list[TraceEvent]:

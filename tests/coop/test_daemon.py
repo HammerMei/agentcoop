@@ -4,6 +4,7 @@ through the control socket, and the pid lock."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 
@@ -28,7 +29,7 @@ def fake_mattermost(monkeypatch):
     return fc
 
 
-async def test_run_reports_ok_on_the_pipe_serves_the_socket_and_stops_on_command(tmp_path, fake_mattermost):
+async def test_run_reports_ok_on_the_pipe_serves_the_socket_and_stops_on_command(tmp_path, fake_mattermost, caplog):
     config(tmp_path)
     (tmp_path / "config.yaml").write_text(CONFIG + "gateway:\n  listen: 127.0.0.1:0\n")
     sock = short_socket()
@@ -40,6 +41,11 @@ async def test_run_reports_ok_on_the_pipe_serves_the_socket_and_stops_on_command
     assert report.decode().splitlines()[-1] == "ok"
     status = await send_command(sock, {"cmd": "status"})
     assert status["ok"] and status["data"]["listening"].startswith("127.0.0.1:")
+    with caplog.at_level(logging.INFO, logger="coop.trace"):
+        await fake_mattermost.human("c1", "H", "@a_bot hello")
+        for _ in range(20):  # the room's worker takes the post on its own task
+            await asyncio.sleep(0)
+    assert any(r.name == "coop.trace" and r.getMessage().startswith("turn_start ") for r in caplog.records)
     assert (await send_command(sock, {"cmd": "stop"}))["ok"]
     assert await asyncio.wait_for(task, 10) == 0
     assert not sock.exists()
@@ -88,3 +94,15 @@ def test_the_pid_file_is_taken_once_and_released_only_by_its_holder(tmp_path):
     pid_file.write_text(str(os.getpid()))
     daemon.release_lock(pid_file)
     assert not pid_file.exists()
+
+
+def test_the_daemons_trace_logs_every_event_sweeps_at_debug_and_keeps_none(caplog):
+    trace = daemon.daemon_trace()
+    with caplog.at_level(logging.DEBUG, logger="coop.trace"):
+        trace.add(1.0, "rule", gateway="lab:team", bot="a_bot", thread="t1", mechanism="rate", outcome="violated")
+        trace.add(2.0, "sweep", gateway="lab:team", bot="a_bot", reason="timer", candidates=[])
+    assert trace.events == []
+    assert [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "coop.trace"] == [
+        (logging.INFO, "rule gateway='lab:team' bot='a_bot' thread='t1' mechanism='rate' outcome='violated'"),
+        (logging.DEBUG, "sweep gateway='lab:team' bot='a_bot' reason='timer' candidates=[]"),
+    ]

@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from coop.config import ConfigError, parse
-from coop.connectors.base import MemberInfo, Membership, RoomInfo, handle_for
+from coop.connectors.base import Credential, MemberInfo, Membership, RoomInfo, handle_for
 from coop.room.model import Reply
 from coop.room.platform import PlatformError
 from coop.service import Service
@@ -371,7 +371,7 @@ async def test_a_reload_that_changes_a_connected_bots_credentials_says_a_restart
     (tmp_path / "b2.bot").write_text("rotated\n")
     notes = await svc.reload(config(tmp_path, CONFIG.replace("token_file: b.bot", "token_file: b2.bot")))
     assert any("'b' has new credentials" in n and "restart" in n for n in notes)
-    assert fc.bots["b_bot"] == "bot-token-b"  # the connection kept the old one, as the note says
+    assert fc.bots["b_bot"].token == "bot-token-b"  # the connection kept the old one, as the note says
     # a username is the bot's name in every room it is in: changing it is refused, not warned
     with pytest.raises(ConfigError, match="changing a connected bot's username needs a restart"):
         await svc.reload(config(tmp_path, CONFIG.replace("username: b_bot", "username: b2_bot")))
@@ -840,3 +840,17 @@ async def test_a_reload_renaming_a_roster_only_bot_refreshes_the_members(running
     await svc.reload(config(tmp_path, CONFIG.replace("x: {username: x_bot}", "x: {username: x2_bot}")))
     core = svc.rooms["fake:team"].core
     assert "x2_bot" in core._bots_in_room() and "x_bot" not in svc.rooms["fake:team"].log.members()
+
+
+async def test_a_password_bot_connects_with_its_password_and_an_unverified_server_is_said(tmp_path):
+    text = (CONFIG.replace("a: {username: a_bot, token_file: a.bot}", "a: {username: a_bot, password_file: a.pw}")
+            .replace("    owners: [H]\n", "    owners: [H]\n    verify_tls: false\n"))
+    (tmp_path / "a.pw").write_text("pw-a\n")
+    fc = connector()
+    svc = service(tmp_path, fc, text)
+    await svc.start(listen=False)
+    try:
+        assert fc.bots["a_bot"] == Credential(password="pw-a") and fc.bots["b_bot"] == Credential(token="bot-token-b")
+        assert any(n.startswith("[WARNING] fake: TLS certificate verification is off") for n in svc.notes)
+    finally:
+        await svc.stop()

@@ -18,6 +18,7 @@ from . import paths
 from .config import ConfigError, Server, load
 from .connectors.base import Connector, OnEvent
 from .control import ControlServer
+from .room.trace import Trace, TraceEvent
 from .service import Service
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,21 @@ def is_running(pid_file: Path = paths.PID_FILE) -> tuple[bool, int | None]:
 # ── the connectors ──────────────────────────────────────────────────────────
 
 
+# What the room core does, one log line per event (``coop/room/trace.py`` lists the
+# kinds); measure mode's outcomes are its ``rule`` events (design §1.1).
+trace_logger = logging.getLogger("coop.trace")
+TRACE_LEVELS = {"sweep": logging.DEBUG}  # a timer's tick per bot and room: noise at INFO
+
+
+def log_trace(event: TraceEvent) -> None:
+    trace_logger.log(TRACE_LEVELS.get(event.kind, logging.INFO), "%s", event.describe())
+
+
+def daemon_trace() -> Trace:
+    """The daemon's trace: every event is logged and none is kept in memory."""
+    return Trace(sink=log_trace, keep=False)
+
+
 def make_connector(server: Server, on_event: OnEvent) -> Connector:
     if server.type == "mattermost":
         from .connectors.mattermost.connector import MattermostConnector
@@ -112,7 +128,7 @@ async def run(config_path: Path, startup_fd: int = -1, pid_file: Path = paths.PI
     control: ControlServer | None = None
     try:
         config = load(config_path)
-        service = Service(config, state_dir, make_connector)
+        service = Service(config, state_dir, make_connector, trace=daemon_trace())
         await service.start()
         control = ControlServer(service, socket_path, config_path, stopping.set, lambda: locked_pid(pid_file))
         await control.start()
