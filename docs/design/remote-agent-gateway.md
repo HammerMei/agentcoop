@@ -594,10 +594,11 @@ servers:
     team: lab
     owners: [glin]               # the default owners of every bot on this server
     guests: [pat]                # listed people are human whatever the platform says
+    verify_tls: false            # optional: the server's certificate is not checked (a lab's self-signed one)
     bots:                        # the gateway's accounts here, keyed by agent name
       a: {username: a_bot, token_file: servers/mm-lab/a.token}
-      b: {username: b_bot, token_file: servers/mm-lab/b.token, owners: [wave]}   # its own owners
-      c: {username: c_bot}       # no token: roster only, another gateway's or nobody's (§3.1)
+      b: {username: b_bot, password_file: servers/mm-lab/b.password, owners: [wave]}   # a login instead; its own owners
+      c: {username: c_bot}       # no credentials: roster only, another gateway's or nobody's (§3.1)
 agents:
   a:
     type: remote                 # new; claude / opencode entries become remote + utility
@@ -621,6 +622,14 @@ rooms:                           # keys are patterns over the room's handle (bel
     catch_up_idle_seconds: 1800
     classifier_enabled: true
 ```
+
+A bot's `token_file` holds a bearer token (a bot access token or a personal access
+token); `password_file` holds the account's password instead, for a server that
+gives out no tokens: the connector logs in with it and logs in again when the
+session's token is refused. A server's `verify_tls: false` turns certificate checking
+off, for a lab behind a self-signed certificate; `coop start` and `coop status` say
+so. The daemon writes every trace event of the room core (`coop/room/trace.py`) to
+its log, one line each, so measure mode's `rule` events are read from `coop.log`.
 
 Who is a bot is decided from this file first and from the platform last: a bot's
 `username` under `bots` is a bot, a person under `owners` or `guests` is human, and

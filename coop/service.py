@@ -33,8 +33,17 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .config import Config, ConfigError, RoomRule, Server
-from .connectors.base import Connector, Event, Membership, OnEvent, Posted, RoomInfo, handle_for
+from .config import Bot, Config, ConfigError, RoomRule, Server
+from .connectors.base import (
+    Connector,
+    Credential,
+    Event,
+    Membership,
+    OnEvent,
+    Posted,
+    RoomInfo,
+    handle_for,
+)
 from .connectors.roomlog import RoomLog
 from .doorbell.api import build_app
 from .doorbell.tls import server_context
@@ -58,11 +67,19 @@ ClassifierFactory = Callable[[Config, str], Classifier | None]
 MAX_BACKFILL_PAGES = 40
 
 
-def read_token(path: Path) -> str:
-    token = path.read_text(encoding="utf-8").strip()
-    if not token:
-        raise ConfigError(f"{path}: the token file is empty")
-    return token
+def read_secret(path: Path) -> str:
+    """A token or a password: the file's text, stripped."""
+    secret = path.read_text(encoding="utf-8").strip()
+    if not secret:
+        raise ConfigError(f"{path}: the file is empty")
+    return secret
+
+
+def credential_of(bot: Bot) -> Credential:
+    if bot.token_file is not None:
+        return Credential(token=read_secret(bot.token_file))
+    assert bot.password_file is not None  # ``hosted``: one of the two
+    return Credential(password=read_secret(bot.password_file))
 
 
 def default_classifier(config: Config, room: str) -> Classifier:
@@ -128,6 +145,7 @@ class Service:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._load_agents()
         self._set_tokens(self.config)
+        self._note_unverified(self.config)
         for server in self.config.servers.values():
             connector = self._connector_factory(server, self._event_handler(server.name))
             connector.transfer_timeout = self.config.gateway.attachments.transfer_timeout_seconds
@@ -174,7 +192,7 @@ class Service:
     def _set_tokens(self, config: Config) -> None:
         fresh: dict[str, str] = {}
         for name, agent in config.agents.items():
-            token = read_token(agent.token_file)
+            token = read_secret(agent.token_file)
             if token in fresh:
                 raise ConfigError(f"agents.{name} and agents.{fresh[token]} hold the same token; "
                                   "one agent's client would act as the other")
@@ -185,7 +203,7 @@ class Service:
     async def _connect_bot(self, server: Server, agent: str) -> bool:
         bot = server.bots[agent]
         try:
-            rooms = await self.connectors[server.name].add_bot(bot.username, read_token(bot.token_file))
+            rooms = await self.connectors[server.name].add_bot(bot.username, credential_of(bot))
         except Exception as exc:  # noqa: BLE001 - one bot's failure degrades, never stops, the daemon
             self._note(f"[ERROR] {server.name}: bot {agent!r} not connected: {exc}")
             logger.exception("%s: bot %r not connected", server.name, agent)
@@ -443,6 +461,7 @@ class Service:
         self._set_tokens(config)  # read before the switch: a missing token file refuses the whole reload
         notes: list[str] = []
         self.notes = notes
+        self._note_unverified(config)
         self._note_listener_changes(config, notes)
         self.gateway.limits = config.gateway.attachments  # applied: the next transfer runs under them
         for connector in self.connectors.values():
@@ -460,6 +479,12 @@ class Service:
             await self._ensure_started(run)
         return notes
 
+    def _note_unverified(self, config: Config) -> None:
+        """Said at every start and reload, so ``coop status`` always shows it."""
+        for server in config.servers.values():
+            if not server.verify_tls:
+                self._note(f"[WARNING] {server.name}: TLS certificate verification is off (verify_tls: false)")
+
     def _note_listener_changes(self, config: Config, notes: list[str]) -> None:
         """The listener is bound once: a changed address or certificate is said, not applied."""
         if (config.gateway.address, config.gateway.tls) != (self.config.gateway.address, self.config.gateway.tls):
@@ -474,7 +499,8 @@ class Service:
     def _refuse_server_changes(self, config: Config) -> None:
         for name, server in config.servers.items():
             before = self.config.servers.get(name)
-            if before is None or (before.type, before.url, before.team) != (server.type, server.url, server.team):
+            if before is None or ((before.type, before.url, before.team, before.verify_tls)
+                                  != (server.type, server.url, server.team, server.verify_tls)):
                 raise ConfigError(f"servers.{name}: a new or changed server needs a restart")
         for name in self.config.servers:
             if name not in config.servers:
@@ -497,7 +523,7 @@ class Service:
                 notes.append(f"{server.name}: bot {agent!r} connected")
         for agent in sorted(hosted_now & set(self._connected[server.name])):
             was, now = before.bots.get(agent), server.bots[agent]
-            if was is not None and was.token_file != now.token_file:
+            if was is not None and (was.token_file, was.password_file) != (now.token_file, now.password_file):
                 # the connection keeps the credentials it was opened with: said, not silently kept
                 self._note(f"[WARNING] {server.name}: bot {agent!r} has new credentials in the configuration; "
                            "the connection keeps the old ones until a restart")

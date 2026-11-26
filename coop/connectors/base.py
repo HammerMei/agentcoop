@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from ..config import Server
@@ -26,6 +26,17 @@ from ..room.model import Position, Post, Upload
 from ..room.roster import Roster
 
 RoomKind = Literal["channel", "dm", "group"]
+
+
+@dataclass(frozen=True)
+class Credential:
+    """How a bot account authenticates: a bearer ``token`` (a bot access token or a
+    personal access token), or the account's ``password`` for the platform's login
+    call. One of the two is set. Neither is in the repr: the value travels through
+    ``add_bot`` and would otherwise land in a traceback's locals."""
+
+    token: str = field(default="", repr=False)
+    password: str = field(default="", repr=False)
 
 # the length of a group message's handle digest; the legacy gateway's choice, kept so a
 # room's handle reads the same under both
@@ -132,9 +143,9 @@ class Connector(Protocol):
         before any bot the new configuration adds is connected."""
         ...
 
-    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
-        """Connect the bot account ``username`` with ``token`` and return the rooms it
-        is a member of. Opening a connection at runtime is the same call as at start.
+    async def add_bot(self, username: str, credential: Credential) -> list[RoomInfo]:
+        """Connect the bot account ``username`` with ``credential`` and return the rooms
+        it is a member of. Opening a connection at runtime is the same call as at start.
         A connector knows bots by their usernames; the agent an account belongs to is
         the gateway's binding (design §2)."""
         ...

@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator, Callable
 from aiohttp.test_utils import TestServer
 
 from coop.client import InProcessDoorbell
-from coop.connectors.base import MemberInfo, Membership, Posted, RoomInfo, RoomKind
+from coop.connectors.base import Credential, MemberInfo, Membership, Posted, RoomInfo, RoomKind
 from coop.connectors.normalize import mentions_in
 from coop.doorbell.api import build_app
 from coop.room.clock import Clock
@@ -319,8 +319,8 @@ class FakeConnector:
     def configure(self, server) -> None:
         self.server = server
 
-    async def add_bot(self, username: str, token: str) -> list[RoomInfo]:
-        self.bots[username] = token
+    async def add_bot(self, username: str, credential: Credential) -> list[RoomInfo]:
+        self.bots[username] = credential
         return [info for rid, info in self.rooms.items() if any(m.username == username for m in self.membership[rid])]
 
     async def remove_bot(self, username: str) -> None:

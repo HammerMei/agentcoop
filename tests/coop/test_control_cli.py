@@ -168,3 +168,17 @@ def test_config_add_agent_leaves_no_token_behind_when_the_configuration_is_refus
             "--bot-token-file", "t"]
     assert cli.main(argv) == 1 and "already exists" in capsys.readouterr().err
     assert not (tmp_path / "agents").exists()
+
+
+def test_config_add_agent_takes_a_password_file_in_place_of_a_token(tmp_path, capsys):
+    config = tmp_path / "config.yaml"
+    config.write_text("servers:\n  lab:\n    type: mattermost\n    url: https://mm\n    team: t\n    owners: [glin]\n")
+    (tmp_path / "lab-bot.password").write_text("hunter2\n")
+    head = ["config", "--config", str(config), "add", "agent", "laomei", "--server", "lab", "--username", "laomei_bot"]
+    assert cli.main(head + ["--bot-password-file", str(tmp_path / "lab-bot.password")]) == 0
+    bot = load(config, tmp_path).servers["lab"].bots["laomei"]
+    assert bot.password_file == tmp_path / "lab-bot.password" and bot.token_file is None and bot.hosted
+    assert "COOP_TOKEN=" in capsys.readouterr().out
+    for argv in (head, head + ["--bot-token-file", "t", "--bot-password-file", "p"]):  # neither, both: usage errors
+        with pytest.raises(SystemExit):
+            cli.main(argv)

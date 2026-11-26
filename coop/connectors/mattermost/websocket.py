@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -27,11 +28,16 @@ OnReconnect = Callable[[], Awaitable[None]]
 
 
 class MattermostWebSocket:
-    def __init__(self, url: str, token: str, on_frame: OnFrame, on_reconnect: OnReconnect | None = None,
-                 max_backoff: float = 60.0) -> None:
+    def __init__(self, url: str, token: Callable[[], str], on_frame: OnFrame, on_reconnect: OnReconnect | None = None,
+                 max_backoff: float = 60.0, tls: ssl.SSLContext | None = None) -> None:
+        """``token`` is read at every (re)connect, so a session token the REST client
+        replaced after a login is the one the next connection authenticates with.
+        ``tls`` is the context a ``wss`` connection uses (``None``: the library's default,
+        which verifies); it is passed only then, as the library refuses one for ``ws``."""
         scheme = "wss" if url.startswith("https") else "ws"
         self.ws_url = scheme + "://" + url.split("://", 1)[-1].rstrip("/") + "/api/v4/websocket"
         self._token = token
+        self._tls = tls if scheme == "wss" else None
         self._on_frame = on_frame
         self._on_reconnect = on_reconnect
         self._max_backoff = max_backoff
@@ -67,9 +73,9 @@ class MattermostWebSocket:
     # ── the connection ──────────────────────────────────────────────────────
 
     async def _connect(self) -> None:
-        self._ws = await websockets.connect(self.ws_url)
+        self._ws = await websockets.connect(self.ws_url, **({} if self._tls is None else {"ssl": self._tls}))
         try:
-            await self._send({"action": "authentication_challenge", "data": {"token": self._token}})
+            await self._send({"action": "authentication_challenge", "data": {"token": self._token()}})
         except Exception:
             await self._close()
             raise

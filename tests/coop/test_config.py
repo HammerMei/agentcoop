@@ -110,9 +110,13 @@ def test_load_reads_yaml_and_an_empty_file_is_an_empty_config(tmp_path):
     ("agents: {a: {type: remote, token_file: t, permissions: {}}}", "not gateway settings any more"),
     ("agents: {a: {type: remote, token_file: t, heartbeat: agent}}", "only `gateway` is defined"),
     ("agents: {a: {type: remote}}", "token_file: a non-empty string"),
+    ("servers: {x: {type: rocketchat, url: u, bots: {a: {username: n, token_file: t, password_file: p}}}}",
+     "token_file or password_file, not both"),
+    ("servers: {x: {type: rocketchat, url: u, bots: {a: {username: n, password_file: 1}}}}", "password_file: not a string"),
+    ("servers: {x: {type: rocketchat, url: u, verify_tls: 1}}", "verify_tls: 1 is not a boolean"),
     ("servers: {x: {type: rocketchat, url: u, bots: {a: {username: n, token_file: t}}}}", "no agents.a entry"),
     ("servers: {x: {type: rocketchat, url: u, bots: {a: {username: n}}}}\nagents: {a: {type: remote, token_file: t}}",
-     "cannot post as a bot it has no token for"),
+     "cannot post as a bot it cannot log in as"),
     ("rooms: {'x:*': {agents: [ghost]}}", "neither agents nor bots"),
     ("rooms: {'x:*': {agents: []}}", "non-empty list"),
     ("rooms: {'x:*': {agents: [a, a]}}", "names repeat"),
@@ -177,3 +181,20 @@ def test_bad_ports_and_falsy_sections_are_refused(text, message):
 def test_port_zero_and_null_sections_are_fine():
     config = parse(yaml.safe_load("gateway: {listen: '127.0.0.1:0'}\nrooms:\nagents: null"), BASE)
     assert config.gateway.address == "127.0.0.1:0" and config.rooms == () and config.agents == {}
+
+
+def test_a_password_file_hosts_the_bot_and_verify_tls_is_the_servers():
+    doc = yaml.safe_load("""
+servers:
+  lab: {type: mattermost, url: https://mm, team: t, verify_tls: false,
+        bots: {a: {username: a_bot, password_file: a.pw}, c: {username: c_bot}}}
+agents:
+  a: {type: remote, token_file: a.agent}
+""")
+    config = parse(doc, BASE)
+    lab = config.servers["lab"]
+    assert lab.verify_tls is False
+    assert lab.bots["a"].hosted and lab.bots["a"].password_file == BASE / "a.pw" and lab.bots["a"].token_file is None
+    assert not lab.bots["c"].hosted and lab.bots["c"].password_file is None
+    doc["servers"]["lab"].pop("verify_tls")
+    assert parse(doc, BASE).servers["lab"].verify_tls is True

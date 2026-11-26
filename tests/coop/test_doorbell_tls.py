@@ -21,17 +21,6 @@ TOKENS = {"tok-a": "a"}
 pytestmark = pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl generates the test certificate")
 
 
-@pytest.fixture(scope="module")
-def cert(tmp_path_factory):
-    """A self-signed certificate made by openssl, so the fingerprint test compares
-    against openssl's own output rather than a value this code produced."""
-    where = tmp_path_factory.mktemp("tls")
-    cert, key = where / "cert.pem", where / "key.pem"
-    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=coop-test",
-                    "-keyout", str(key), "-out", str(cert)], check=True, capture_output=True)
-    return cert, key
-
-
 @pytest.fixture
 async def tls_doorbell(cert):
     sb = Sandbox(clock=AsyncioClock(), attach_agent=False, params=FAST)

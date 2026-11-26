@@ -68,7 +68,11 @@ def parser() -> argparse.ArgumentParser:
     agent.add_argument("name")
     agent.add_argument("--server", required=True)
     agent.add_argument("--username", required=True, help="the bot's username on the server")
-    agent.add_argument("--bot-token-file", required=True, type=Path, help="the bot's platform token")
+    secret = agent.add_mutually_exclusive_group(required=True)
+    secret.add_argument("--bot-token-file", type=Path,
+                        help="the bot's platform token (a bot access token or a personal access token)")
+    secret.add_argument("--bot-password-file", type=Path,
+                        help="the bot account's password instead, for a server that gives out no tokens")
     agent.add_argument("--owner", action="append", default=[], help="an owner of this bot (default: the server's)")
     agent.set_defaults(run=cmd_config_add_agent)
     tls = csub.add_parser("tls", help="a self-signed certificate and key for the doorbell")
@@ -180,7 +184,11 @@ def cmd_config_add_agent(args) -> int:
     base = args.config.parent
     token_file = base / "agents" / args.name / "token"
     agents[args.name] = {"type": "remote", "token_file": str(token_file.relative_to(base))}
-    bot: dict = {"username": args.username, "token_file": str(_relative(args.bot_token_file, base))}
+    bot: dict = {"username": args.username}
+    if args.bot_token_file is not None:
+        bot["token_file"] = str(_relative(args.bot_token_file, base))
+    else:
+        bot["password_file"] = str(_relative(args.bot_password_file, base))
     if args.owner:
         bot["owners"] = list(args.owner)
     server = servers[args.server] or {}
