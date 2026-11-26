@@ -93,7 +93,9 @@ def is_running(pid_file: Path = paths.PID_FILE) -> tuple[bool, int | None]:
 # What the room core does, one log line per event (``coop/room/trace.py`` lists the
 # kinds); measure mode's outcomes are its ``rule`` events (design §1.1).
 trace_logger = logging.getLogger("coop.trace")
-TRACE_LEVELS = {"sweep": logging.DEBUG}  # a timer's tick per bot and room: noise at INFO
+# below the daemon's INFO level: ``sweep`` is a timer's tick per bot and room, and a
+# ``turn_held`` repeats on every tick while a gate (paused, backoff, mute) holds a candidate
+TRACE_LEVELS = {"sweep": logging.DEBUG, "turn_held": logging.DEBUG}
 
 
 def log_trace(event: TraceEvent) -> None:

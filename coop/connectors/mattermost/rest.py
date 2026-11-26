@@ -4,11 +4,12 @@ the frozen gateway's client and cut to what the room core needs. Errors are http
 Auth is the credential's. A bearer token (a bot access token or a personal access
 token) is used as it is: no login call. A password is exchanged for a session token
 by ``POST /users/login`` (the token comes back in the ``Token`` response header, a
-Mattermost quirk) before the first call, and again when a call answers 401, since a
-session expires; that call is then made once more. A file call (:meth:`upload`,
-:meth:`stream_file`) is not retried: it fails once in that window, and the next JSON
-call logs in. ``verify=False`` skips the certificate check (``verify_tls`` in the
-configuration), for a lab's self-signed certificate.
+Mattermost quirk) before the first JSON call, and again when a call answers 401, since
+a session expires; that call is then made once more. A file upload answered 401
+renews the session too but is not repeated: its chunks cannot be sent again, so that
+call fails and the next one works. A download's 401 is left to the next JSON call.
+``verify=False`` skips the certificate check (``verify_tls`` in the configuration),
+for a lab's self-signed certificate.
 """
 
 from __future__ import annotations
@@ -59,7 +60,9 @@ class MattermostREST:
         header becomes the bearer."""
         r = await self._client.post("/users/login", json={"login_id": self.username,
                                                           "password": self._credential.password})
-        r.raise_for_status()
+        if r.status_code >= 400:  # the body says whether the password is wrong or the account locked
+            raise httpx.HTTPStatusError(f"POST /users/login: {r.status_code}: {r.text[:200]}", request=r.request,
+                                        response=r)
         token = r.headers.get("Token", "")
         if not token:
             raise httpx.DecodingError("POST /users/login: no Token header in the answer", request=r.request)
@@ -70,7 +73,8 @@ class MattermostREST:
         async with self._login_lock:
             if self._token == sent:
                 if sent:
-                    logger.warning("%s: the session token was refused; logging in again", self.username)
+                    logger.warning("%s: the session token was refused; logging in again (the websocket keeps the "
+                                   "old session until it next reconnects)", self.username)
                 await self.login()
 
     async def _json(self, method: str, path: str, **kw) -> Any:
@@ -164,8 +168,11 @@ class MattermostREST:
         long to wait for the server between two chunks and for its answer after the
         last; the client's default otherwise."""
         headers = {"Content-Type": content_type or "application/octet-stream", "Content-Length": str(size)}
+        sent = self._token
         r = await self._client.post("/files", params={"channel_id": channel_id, "filename": name},
                                     content=chunks, headers=headers, timeout=self._transfer(timeout))
+        if r.status_code == 401 and self._credential.password:
+            await self._login_unless_replaced(sent)  # for the next call: these chunks are spent
         r.raise_for_status()
         try:
             infos = r.json().get("file_infos") or []

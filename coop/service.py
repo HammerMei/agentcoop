@@ -145,13 +145,12 @@ class Service:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._load_agents()
         self._set_tokens(self.config)
+        self._note_unverified(self.config)
         for server in self.config.servers.values():
             connector = self._connector_factory(server, self._event_handler(server.name))
             connector.transfer_timeout = self.config.gateway.attachments.transfer_timeout_seconds
             self.connectors[server.name] = connector
             self._connected[server.name] = {}
-            if not server.verify_tls:
-                self._note(f"[WARNING] {server.name}: TLS certificate verification is off (verify_tls: false)")
             await connector.start()
             for bot in server.bots.values():
                 if bot.hosted:
@@ -462,6 +461,7 @@ class Service:
         self._set_tokens(config)  # read before the switch: a missing token file refuses the whole reload
         notes: list[str] = []
         self.notes = notes
+        self._note_unverified(config)
         self._note_listener_changes(config, notes)
         self.gateway.limits = config.gateway.attachments  # applied: the next transfer runs under them
         for connector in self.connectors.values():
@@ -479,6 +479,12 @@ class Service:
             await self._ensure_started(run)
         return notes
 
+    def _note_unverified(self, config: Config) -> None:
+        """Said at every start and reload, so ``coop status`` always shows it."""
+        for server in config.servers.values():
+            if not server.verify_tls:
+                self._note(f"[WARNING] {server.name}: TLS certificate verification is off (verify_tls: false)")
+
     def _note_listener_changes(self, config: Config, notes: list[str]) -> None:
         """The listener is bound once: a changed address or certificate is said, not applied."""
         if (config.gateway.address, config.gateway.tls) != (self.config.gateway.address, self.config.gateway.tls):
@@ -493,7 +499,8 @@ class Service:
     def _refuse_server_changes(self, config: Config) -> None:
         for name, server in config.servers.items():
             before = self.config.servers.get(name)
-            if before is None or (before.type, before.url, before.team) != (server.type, server.url, server.team):
+            if before is None or ((before.type, before.url, before.team, before.verify_tls)
+                                  != (server.type, server.url, server.team, server.verify_tls)):
                 raise ConfigError(f"servers.{name}: a new or changed server needs a restart")
         for name in self.config.servers:
             if name not in config.servers:

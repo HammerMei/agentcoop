@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from ..config import Server
@@ -32,10 +32,11 @@ RoomKind = Literal["channel", "dm", "group"]
 class Credential:
     """How a bot account authenticates: a bearer ``token`` (a bot access token or a
     personal access token), or the account's ``password`` for the platform's login
-    call. One of the two is set."""
+    call. One of the two is set. Neither is in the repr: the value travels through
+    ``add_bot`` and would otherwise land in a traceback's locals."""
 
-    token: str = ""
-    password: str = ""
+    token: str = field(default="", repr=False)
+    password: str = field(default="", repr=False)
 
 # the length of a group message's handle digest; the legacy gateway's choice, kept so a
 # room's handle reads the same under both

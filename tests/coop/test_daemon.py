@@ -101,8 +101,10 @@ def test_the_daemons_trace_logs_every_event_sweeps_at_debug_and_keeps_none(caplo
     with caplog.at_level(logging.DEBUG, logger="coop.trace"):
         trace.add(1.0, "rule", gateway="lab:team", bot="a_bot", thread="t1", mechanism="rate", outcome="violated")
         trace.add(2.0, "sweep", gateway="lab:team", bot="a_bot", reason="timer", candidates=[])
+        trace.add(3.0, "turn_held", gateway="lab:team", bot="a_bot", source="addressed", thread="t1", gate="paused")
     assert trace.events == []
     assert [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "coop.trace"] == [
         (logging.INFO, "rule gateway='lab:team' bot='a_bot' thread='t1' mechanism='rate' outcome='violated'"),
         (logging.DEBUG, "sweep gateway='lab:team' bot='a_bot' reason='timer' candidates=[]"),
+        (logging.DEBUG, "turn_held gateway='lab:team' bot='a_bot' source='addressed' thread='t1' gate='paused'"),
     ]

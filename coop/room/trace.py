@@ -32,6 +32,8 @@ Kinds and their fields:
 - ``slow_post``       — gateway, bot, thread, seconds (a platform post held the room past ``SLOW_POST_SECONDS``)
 - ``attachment_refused`` — gateway, bot, thread, name (the platform or the gateway's limits refused a file a send carried; nothing posted)
 - ``paused`` / ``resumed`` — gateway, bot
+- ``hosted_added`` / ``hosted_removed`` — gateway, bot (a bot joins or leaves the room's hosted set)
+- ``reset_requested`` — gateway, bot (the operator's ``reset``: the next wake starts the agent's session afresh)
 """
 
 from __future__ import annotations

@@ -58,7 +58,8 @@ class FakeMattermost:
         self.tokens: dict[str, str] = {}  # token -> user id
         self.passwords: dict[str, str] = {}  # username -> password, for ``POST /users/login``
         self.sessions: list[str] = []  # the session tokens logins handed out
-        self.logins = 0
+        self.logins = 0  # successful
+        self.login_attempts = 0
         self.channels: dict[str, dict] = {}
         self.members: dict[str, list[str]] = {}
         self.posts: dict[str, list[dict]] = {}
@@ -126,6 +127,7 @@ class FakeMattermost:
         return None
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0)  # concurrent requests interleave, as on a network
         canned = self._canned()
         if canned is not None:
             return canned
@@ -151,6 +153,7 @@ class FakeMattermost:
 
     def _login(self, request: httpx.Request) -> httpx.Response:
         """The session token comes back in the ``Token`` header, as Mattermost's does."""
+        self.login_attempts += 1
         body = json.loads(request.content)
         uid = next((u for u, d in self.users.items() if d["username"] == body.get("login_id")), None)
         if uid is None or self.passwords.get(body["login_id"]) != body.get("password"):
@@ -618,8 +621,19 @@ async def test_a_refused_bearer_token_is_not_retried(mm):
     del mm.tokens["tok-laomei"]  # revoked
     with pytest.raises(Exception, match="401"):
         await connector.members("c01")
-    assert mm.logins == 0
+    assert mm.login_attempts == 0
     await connector.stop()
+
+
+async def test_concurrent_calls_on_an_expired_session_log_in_once(mm):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, _ = _connector(mm)
+    await connector.add_bot("laomei_bot", Credential(password="hunter2"))
+    connector.watch("c01", ROSTER)
+    mm.expire_sessions()
+    first, second = await asyncio.gather(connector.members("c01"), connector.members("c01"))
+    assert {m.username for m in first} == {m.username for m in second} >= {"glin"}
+    assert mm.login_attempts == 2  # the first login, then one renewal shared by both calls
 
 
 def test_the_socket_gets_an_unverifying_context_only_for_an_unverified_https_server(mm):
@@ -688,3 +702,29 @@ async def test_the_websocket_refuses_a_self_signed_certificate_unless_given_the_
         await unverifying.start()
         await unverifying.stop()
     assert challenges == [{"seq": 1, "action": "authentication_challenge", "data": {"token": "t"}}]
+
+
+async def test_an_upload_on_an_expired_session_fails_once_and_renews_the_session_for_the_next(mm):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, _ = _connector(mm)
+    await connector.add_bot("laomei_bot", Credential(password="hunter2"))
+    connector.watch("c01", ROSTER)
+    mm.expire_sessions()
+
+    def chunks():
+        async def gen():
+            yield b"hello"
+        return gen()
+
+    with pytest.raises(RefusedAttachment, match="401"):  # these chunks are spent: said as the platform's refusal
+        await connector.post("laomei_bot", "c01", "the file", None, files=(Upload("a.txt", "text/plain", 5, chunks()),))
+    assert mm.login_attempts == 2
+    post = await connector.post("laomei_bot", "c01", "the file", None, files=(Upload("a.txt", "text/plain", 5, chunks()),))
+    assert post.attachments and mm.login_attempts == 2
+
+
+async def test_a_refused_login_says_what_the_server_said(mm):
+    mm.passwords["laomei_bot"] = "hunter2"
+    connector, _ = _connector(mm)
+    with pytest.raises(httpx.HTTPStatusError, match="POST /users/login: 401: .*Enter a valid email"):
+        await connector.add_bot("laomei_bot", Credential(password="nope"))

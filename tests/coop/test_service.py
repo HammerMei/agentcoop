@@ -851,6 +851,12 @@ async def test_a_password_bot_connects_with_its_password_and_an_unverified_serve
     await svc.start(listen=False)
     try:
         assert fc.bots["a_bot"] == Credential(password="pw-a") and fc.bots["b_bot"] == Credential(token="bot-token-b")
-        assert any(n.startswith("[WARNING] fake: TLS certificate verification is off") for n in svc.notes)
+        off = "[WARNING] fake: TLS certificate verification is off (verify_tls: false)"
+        assert off in svc.notes
+        await svc.reload(parse(yaml.safe_load(text), tmp_path))
+        assert off in svc.notes  # said again: ``status`` shows the reload's notes
+        with pytest.raises(ConfigError, match="servers.fake: a new or changed server needs a restart"):
+            await svc.reload(parse(yaml.safe_load(text.replace("verify_tls: false", "verify_tls: true")), tmp_path))
+        assert fc.bots["a_bot"] == Credential(password="pw-a")  # the refused reload touched nothing
     finally:
         await svc.stop()

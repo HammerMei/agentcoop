@@ -31,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is refused. `coop config add agent --bot-password-file` writes it.
 - **Trace events in `coop.log`**: every event of the room core (`turn_start`,
   `rule`, `refused`, `slow_post`, `done_stale`, …) is one `coop.trace` line, so
-  measure mode's outcomes are readable from the log; `sweep` is at DEBUG.
+  measure mode's outcomes are readable from the log. `sweep` (every timer tick) and
+  `turn_held` (repeated on every tick while a gate holds) are at DEBUG, below the
+  daemon's INFO level, so a quiet room writes nothing.
 - **coop-keeper**, the built-in admin agent (`agents/coop-keeper/`, installed
   to `~/.agentcoop/agents/builtin/coop-keeper/`). Run it from that directory
   with your own `opencode` or `claude` CLI to create, change and remove bots in
